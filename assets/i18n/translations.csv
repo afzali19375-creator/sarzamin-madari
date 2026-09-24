@@ -1,0 +1,10 @@
+keys,en,fa
+app_title,"Motherland","سرزمین مادری"
+app_subtitle,"Achaemenid island defense — Bad North style","دفاع از جزیره در روزگار هخامنشیان — به سبک Bad North"
+menu_start,"Pathfinding Test — 10 Soldiers","آزمون مسیریابی — ۱۰ سرباز"
+menu_quit,"Quit","خروج"
+hint_move,"Right mouse: move the goal flag","کلیک راست: جابه‌جایی پرچم هدف"
+hint_slow,"Space: slow motion","کلید Space: حرکت آهسته"
+hint_arrived,"Orange units have arrived","واحدهای نارنجی به هدف رسیده‌اند"
+debug_worker,"Worker compute","محاسبه‌ی نخ کارگر"
+debug_main_read,"Main-thread read","خواندن در نخ اصلی"
