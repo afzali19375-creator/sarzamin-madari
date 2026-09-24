@@ -15,6 +15,10 @@ var _nock: MeshInstance3D       # تیرِ روی کمان هنگام هدف‌�
 var shots_fired := 0            # برای تست خودکار
 
 
+func _default_hp() -> int:
+        return GameConstants.PLAYER_HP_ARCHER
+
+
 func _build_gear() -> void:
         # کمان — حلقه‌ی باریک عمودی در دست چپ
         _bow = MeshInstance3D.new()

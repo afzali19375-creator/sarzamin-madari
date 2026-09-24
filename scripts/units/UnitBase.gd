@@ -59,6 +59,15 @@ var _scan_accum := 0.0
 var _combat_target: Node3D = null
 var _in_combat := false      # فلگ صریح — freed == null در Godot 4 گول نمی‌زند
 var _shoot_cooldown := 0.0
+var _strike_cd := 0.0
+
+# ---------------- سلامت و مرگ (گام ۶ — قانون آهنین §۷: مرگ دائمی) ----------------
+## صفر عدد و نوار سلامت روی صفحه (§۱۰) — فقط فلش سفیدِ ضربه و افتادن هنگام مرگ
+var hp := 3
+var dead := false
+var _flash_t := 10.0
+var _flashing := false
+var _flash_restore := Color.WHITE
 
 # ---------------- بصری ----------------
 var _spawn_color: Color
@@ -69,6 +78,7 @@ var _ring: MeshInstance3D
 
 func _ready() -> void:
         add_to_group("units")
+        hp = _default_hp()
         _bob_t = randf() * TAU
         _y_smooth = global_position.y
         _heading = rotation.y
@@ -134,6 +144,73 @@ func _build_gear() -> void:
         pass
 
 
+# ---------------- سلامت، ضربه و مرگ دائمی (گام ۶) ----------------
+
+## جان پایه — زیرکلاس‌ها override می‌کنند
+func _default_hp() -> int:
+        return 3
+
+
+func is_dead() -> bool:
+        return dead
+
+
+## ضربه (تیر/نیزه/پرتاب) — فلش سفید کوتاه؛ مرگ فقط با رسیدن صفر
+func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO) -> void:
+        if dead:
+                return
+        hp -= dmg
+        _flash_hit()
+        if hp <= 0:
+                die()
+
+
+func _flash_hit() -> void:
+        _flash_restore = _mat.albedo_color
+        _mat.albedo_color = Color(1, 1, 1, 1)
+        _flash_t = 0.0
+        _flashing = true
+
+
+func die() -> void:
+        if dead:
+                return
+        dead = true
+        _in_combat = false
+        _combat_target = null
+        _combat_end()
+        remove_from_group("units")
+        set_selected_ring(false)
+        # قانون آهنین سند طراحی §۷: مرگ دائمی است — هرگز برنمی‌گردد
+        GameEvents.unit_permanently_died.emit(self)
+        set_process(false)
+        # انیمیشن مرگ: افتادن + محو (بدون عدد §۱۰؛ لکه‌ی خون در گام ۷)
+        var y0 := position.y
+        var tw := create_tween()
+        tw.set_parallel(true)
+        tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
+        tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
+        _mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+        tw.tween_property(_mat, "albedo_color:a", 0.0, GameConstants.DEATH_FADE_SECONDS) \
+                        .set_delay(0.35)
+        tw.chain().tween_callback(queue_free)
+
+
+## ضربه‌ی تن‌به‌تن — true = ضربه زده شد (خنک‌شدن تمام). جهتِ ضربه به هدف می‌رود
+func _try_strike(delta: float, cooldown: float, hostile: Node3D, dmg: int = 1) -> bool:
+        _strike_cd = maxf(0.0, _strike_cd - delta)
+        if _strike_cd > 0.0:
+                return false
+        if not hostile.has_method("take_hit") or (hostile.has_method("is_dead") \
+                        and hostile.is_dead()):
+                return false
+        _strike_cd = cooldown
+        var dir := hostile.global_position - global_position
+        dir.y = 0.0
+        hostile.take_hit(dmg, dir.normalized() if dir.length() > 0.001 else Vector3.ZERO)
+        return true
+
+
 ## هوک لایه ۳ زیرکلاس‌ها — آیا این واحد می‌خواهد با هدف بجنگد؟
 ## (قوانین کلاس: نیزه‌دار فقط ایست، کماندار ایست + مسیر باز، جاویدان همیشه)
 func _combat_wants(_hostile: Node3D) -> bool:
@@ -156,6 +233,9 @@ func _combat_end() -> void:
 func set_slot(world_xz: Vector2) -> void:
         _slot = world_xz
         _has_slot = true
+        # فرمان تازه: وول‌خوردنِ در جریان باطل — وگرنه فیدجتِ باقی‌مانده با اسلاتِ
+        # کهنه ادامه می‌یافت و واحد به موقعیت قدیم «تله‌پورت» می‌شد
+        _fidget_state = 0
         if _arrived:
                 _arrived = false
                 _set_color(_spawn_color)
@@ -187,6 +267,14 @@ func _effective_arrive_radius() -> float:
 
 func _process(delta: float) -> void:
         _bob_t += delta
+
+        # فلش سفید ضربه (§۱۰ — بدون عدد)
+        if _flashing:
+                _flash_t += delta
+                if _flash_t >= 0.12:
+                        _flashing = false
+                        _mat.albedo_color = GameConstants.COL_ARRIVED \
+                                        if _arrived else _flash_restore
 
         # ---- لایه ۳: واکنش نبرد (بالاترین اولویت) ----
         _scan_accum += delta
@@ -453,12 +541,21 @@ func _tick_fidget_timer(delta: float) -> void:
         var dist := _rng.randf_range(GameConstants.FIDGET_DIST_MIN, GameConstants.FIDGET_DIST_MAX)
         _fidget_from = _slot
         _fidget_to = _slot + Vector2(cos(ang), sin(ang)) * dist
+        # گارد: مقصد وول‌خوردن باید قابل‌عبور بماند (خانه/صخره/آب) — وگرنه این نوبت را رد کن
+        var nav := PathService.nav
+        if nav != null and not nav.is_walkable(nav.world_to_cell(_fidget_to)):
+                return
         _fidget_t = 0.0
         _fidget_dur = _rng.randf_range(GameConstants.FIDGET_DUR_MIN, GameConstants.FIDGET_DUR_MAX)
         _fidget_state = 1
 
 
 func _process_fidget(delta: float) -> void:
+        # گارد دفاعی: مبدأ/مقصد فیدجت باید نزدیک اسلاتِ فعلی باشند — با اسلاتِ
+        # عوض‌شده، فیدجتِ کهنه اعتبار ندارد (همان ریشه‌ی «تله‌پورت»)
+        if _fidget_from.distance_to(_slot) > 1.5 or _fidget_to.distance_to(_slot) > 1.5:
+                _fidget_state = 0
+                return
         _fidget_t += delta
         var k := clampf(_fidget_t / _fidget_dur, 0.0, 1.0)
         var target := (_fidget_to if _fidget_state == 1 else _fidget_from)

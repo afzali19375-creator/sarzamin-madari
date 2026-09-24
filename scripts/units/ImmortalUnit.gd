@@ -12,6 +12,7 @@ var _shield: MeshInstance3D
 var _crest: MeshInstance3D
 var shield_up := false          # برای تست خودکار و HUD
 var _face_dir := 0.0            # جهت فعلیِ روکردن به دشمن
+var strikes_done := 0           # برای تست خودکار (گام ۶)
 
 
 func _build_gear() -> void:
@@ -51,6 +52,10 @@ func _combat_wants(hostile: Node3D) -> bool:
         return true
 
 
+func _default_hp() -> int:
+        return GameConstants.PLAYER_HP_IMMORTAL
+
+
 func _combat_tick(delta: float, hostile: Node3D) -> void:
         # رو به دشمن بایست (چرخش قانون‌مند ۳۶۰°/s)
         var d := hostile.global_position - global_position
@@ -64,9 +69,21 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
                 # سپر به سمت جلو بالا می‌آید + نشستنِ کوتاه زانو
                 _shield.position = Vector3(-0.05, 0.32, 0.3)
                 _body.scale = Vector3(1.0, 0.92, 1.0)
+        # گام ۶ — ضربه‌ی تن‌به‌تن در فاصله‌ی نبرد نزدیک
+        if _dist_xz_to(hostile) <= GameConstants.IMMORTAL_ENGAGE_RANGE:
+                if _try_strike(delta, GameConstants.IMMORTAL_STRIKE_COOLDOWN, hostile):
+                        strikes_done += 1
+                        _lunge()
 
 
 func _combat_end() -> void:
         shield_up = false
         _shield.position = Vector3(-0.16, 0.3, 0.2)
         _body.scale = Vector3.ONE
+
+
+## یورش کوتاه به جلو هنگام ضربه (حسِ نبرد بدون انیمیشن اسکلتی)
+func _lunge() -> void:
+        var tw := create_tween()
+        tw.tween_property(_body, "position:z", 0.14, 0.08).set_ease(Tween.EASE_OUT)
+        tw.tween_property(_body, "position:z", 0.0, 0.14)

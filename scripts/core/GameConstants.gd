@@ -5,7 +5,7 @@ class_name GameConstants
 
 # ---------- هویت بیلد ----------
 ## روی صفحه‌ی تست و منو نمایش داده می‌شود تا همیشه مشخص باشد کاربر کدام نسخه را اجرا می‌کند
-const BUILD_ID := "2026-09-24-r6"
+const BUILD_ID := "2026-09-24-r7"
 
 # ---------- زمان‌بندی و اسلوموشن (§۶ پرامت) ----------
 const SLOWMO_SCALE := 0.5                 # قانون: انتخاب جوخه یا نگه‌داشتن Space → 0.5
@@ -66,6 +66,48 @@ const IMMORTAL_REACT_RANGE := 4.0        # برد روکردن/سپرگیری ج
 const IMMORTAL_ENGAGE_RANGE := 1.6       # فاصله‌ی نبرد نزدیک جاویدان (m)
 const IMMORTAL_SHIELD_CONE_DEG := 70.0   # مخروط سپر از پیش رو (درجه)
 const FRIENDLY_CORRIDOR_HALF_W := 0.8    # نیم‌پهنای کریدور «بدون آسیب دوستانه» کماندار (m)
+
+# ---------- گام ۶ — دشمنان و موج هجوم (§۶ سند طراحی) ----------
+## ⚠️ اعداد این بخش «پیش‌فرض موقتِ گام ۶»‌اند (پرامت فاز اول اعداد نبرد نداشت)؛
+## بالانس نهایی با تأیید کاربر قطعی می‌شود.
+const ENEMY_CHANNEL_BASE := 4            # کانال FlowField گروه‌های هجوم (۴..۷) — ۰..۳ مال دسته‌های بازیکن
+const ENEMY_AGGRO_UNITS := 3.4           # سربازِ در این شعاع، هدف درگیری دشمن می‌شود (m)
+const ENEMY_ENGAGE_RANGE := 1.4          # برد تماس نزدیک دشمن (m)
+const ENEMY_RAID_REACH := 1.7            # فاصله‌ی «رسیدن به خانه» برای غارت نمایشی (m)
+const ENEMY_SCAN_INTERVAL := 0.3         # فاصله‌ی جست‌وجوی سرباز (s)
+
+const HOPLITE_LIGHT_HP := 2              # سبک: سریع، کم‌جان
+const HOPLITE_LIGHT_SPEED := 2.7
+const HOPLITE_LIGHT_DMG := 1
+const HOPLITE_LIGHT_COOLDOWN := 1.2
+
+const HOPLITE_HEAVY_HP := 5              # سنگین: کند، جانِ زیاد، سپرِ پیش‌رو تیر را خنثی می‌کند
+const HOPLITE_HEAVY_SPEED := 1.9
+const HOPLITE_HEAVY_DMG := 1
+const HOPLITE_HEAVY_COOLDOWN := 1.6
+const HOPLITE_HEAVY_SHIELD_CONE_DEG := 100.0  # مخروط سپر از پیش رو (تیر/پرتاب از پهلو-پشت رد می‌شود)
+
+const PELTAST_HP := 2                    # پرتاب‌گر: قبل از تماس می‌زند، اگر نزدیک شد عقب می‌رود
+const PELTAST_SPEED := 2.4
+const PELTAST_RANGE := 5.5
+const PELTAST_COOLDOWN := 2.8
+const PELTAST_MIN_DIST := 3.0            # کمتر از این فاصله → عقب‌نشینی کوتاه
+const JAVELIN_SPEED := 12.0
+
+# --- جان سربازان بازیکن (صفر عدد روی صفحه §۱۰ — فقط فلش دیداری) ---
+const PLAYER_HP_IMMORTAL := 4
+const PLAYER_HP_SPEARMAN := 3
+const PLAYER_HP_ARCHER := 2
+const IMMORTAL_STRIKE_COOLDOWN := 1.1    # ضربه‌ی تن‌به‌تن جاویدان (s)
+const SPEARMAN_STRIKE_COOLDOWN := 1.4    # ضربه‌ی نیزه (فقط آماده‌باش) (s)
+
+# --- موج هجوم (§۶: گروه‌های ۵ تا ۱۵ نفره با قایق بادبانی) ---
+const WAVE_INTERVAL := 45.0              # فاصله‌ی موج‌های خودکار (s)
+const WAVE_SIZE_MIN := 5
+const WAVE_SIZE_MAX := 9
+const WAVE_MAX_CONCURRENT := 3           # حداکثر قایق هم‌زمان در صحنه
+const BOAT_SPEED := 2.2                  # m/s
+const DEATH_FADE_SECONDS := 1.6          # محو جسد (لکه‌ی خون در گام ۷ می‌آید)
 
 # ---------- قوانین آهنین بعدی (برای گام‌های آینده) ----------
 const FIRE_DESTROY_SECONDS := 10.0        # خانه در آتش پس از 10 ثانیه نابود می‌شود

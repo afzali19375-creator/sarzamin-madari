@@ -74,8 +74,8 @@ func is_alive() -> bool:
         return alive
 
 
-func take_hit() -> void:
-        hits += 1
+func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO) -> void:
+        hits += dmg
         _wobble_t = 0.0
 
 

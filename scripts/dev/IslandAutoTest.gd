@@ -1,7 +1,7 @@
 class_name IslandAutoTest
 extends Node
-## تست خودکار گام ۵ — «سه دسته و فرمان کامل» (روی پایه‌ی گام ۴ R2)
-## معیارهای پذیرش (پرامت فاز اول + سند طراحی §۴/§۵):
+## تست خودکار گام ۶ — «قایق‌ها، Hoplite/Peltast و موج هجوم» (روی پایه‌ی گام ۵)
+## معیارهای پذیرش (سند طراحی §۶/§۷):
 ##   ۰) جزیره سالم + سه دسته: جاویدان×۴ / نیزه‌دار×۴ / کماندار×۳ — کلاس‌ها درست
 ##   ۱) قطعیت WFC (همان seed → همان جزیره) + فشار ۸ seed
 ##   ۲) هزینه‌ی زمین (§۳.۲): شن 1.2 | چمن 1.0 + وضعیت اولیه‌ی تمیز
@@ -16,6 +16,12 @@ extends Node
 ##  ۱۱) لایه ۳ روی کوله‌ی تمرین: جاویدان سپر، کماندار تیر (بدون آسیب دوستانه)،
 ##      نیزه‌دار فقط در ایست آماده‌باش؛ پاک‌کردن کوله = پایان نبرد
 ##  ۱۲) لایه ۴: واحدِ جابه‌جاشده خودش به پست بازمی‌گردد + سلامت نهایی
+##  --- گام ۶ ---
+##  ۱۳) موج هجوم: قایق پهلو می‌گیرد، ۶ مهاجم پیاده می‌شود، کانال دشمن در میدان،
+##      هدف رژه = خانه، مهاجمان به داخل جزیره رژه می‌روند
+##  ۱۴) نبرد تن‌به‌تن: مهاجم به سرباز درگیری؛ جاویدان سپر؛ تبادل ضربه دو طرفه
+##  ۱۵) سپر سنگین (مخروط پیش‌رو) + کماندار با دشمن واقعی + پلتاست پرتاب می‌کند
+##  ۱۶) مرگ دائمی سرباز (حذف از دسته‌ها) + پاکسازی موج (سیگنال، قایق بازمی‌گردد)
 ## اجرا:
 ##   godot --headless --path . res://scenes/dev/IslandTest.tscn -- --autotest
 ## کد خروج: 0 = همه PASS، 1 = حداقل یک FAIL
@@ -49,9 +55,27 @@ var _dummy1: TrainingDummy
 var _dummy2: TrainingDummy
 var _slot_before := Vector2.ZERO
 
+# --- گام ۶ ---
+var _group0 := -1
+var _landing := Vector2.ZERO
+var _wave_cleared_fired := false
+var _units_before := 0
+var _killed_unit: UnitBase = null
+var _heavy_test: HopliteHeavy = null
+var _peltast_test: PeltastUnit = null
+var _arrow_baseline := 0
+var _max_deflects := 0
+var _heavy_hurt_seen := false
+var _max_thrown := 0
+var _squad_alive_before := 0
+var _contact_forced := false
+
 
 func _ready() -> void:
-        print("[AUTOTEST] island harness attached — 12 phases (3 squads + 4-layer behavior)")
+        print("[AUTOTEST] island harness attached — 16 phases (squads + invasion)")
+        if target_scene.director != null:
+                target_scene.director.wave_cleared.connect(
+                                func(_g: int): _wave_cleared_fired = true)
 
 
 func _check(name: String, ok: bool, detail: String = "") -> void:
@@ -115,6 +139,14 @@ func _process(delta: float) -> void:
                 11:
                         _phase11_layer4_guard()
                 12:
+                        _phase12_invasion_landing()
+                13:
+                        _phase13_melee_engagement()
+                14:
+                        _phase14_shield_and_peltast()
+                15:
+                        _phase15_permanence_and_clear()
+                16:
                         _finish()
 
 
@@ -987,6 +1019,363 @@ func _phase11_layer4_guard() -> void:
                                 _check("time_back_to_normal", absf(Engine.time_scale - 1.0) < 0.06,
                                                 "time=%.2f" % Engine.time_scale)
                                 _phase = 12
+                                _sub = 0   # فاز بعدی (فرود موج) از زیرفاز صفر شروع شود
+
+
+# ---------------- فاز ۱۲: موج هجوم — فرود قایق و پیاده‌شدن مهاجمان ----------------
+
+func _far_shore_hint() -> Vector2:
+        var nav: NavGrid = PathService.nav
+        var o := nav.origin
+        var s := nav.size_world()
+        var cands := [o + Vector2(2.0, 2.0), o + Vector2(s.x - 2.0, 2.0),
+                        o + Vector2(2.0, s.y - 2.0), o + Vector2(s.x - 2.0, s.y - 2.0)]
+        var best: Vector2 = cands[0]
+        var best_d := -1.0
+        for p in target_scene._squad_posts:
+                for c in cands:
+                        var d: float = p.distance_to(c)
+                        if d > best_d:
+                                best_d = d
+                                best = c
+        return best
+
+
+func _phase12_invasion_landing() -> void:
+        match _sub:
+                0:
+                        # موج کنترل‌شده با فرود قطعی (تست = بدون موج خودکار)
+                        target_scene.director.auto_waves = false
+                        _group0 = target_scene.director.spawn_wave(
+                                        {"size": 6, "near": _far_shore_hint(), "force": true})
+                        _check("wave_spawned", _group0 >= 0, "group=%d" % _group0)
+                        _check("waves_spawned_counted",
+                                        target_scene.director.waves_spawned == 1,
+                                        "%d" % target_scene.director.waves_spawned)
+                        _check("boat_sailing", target_scene.director.boat_state(_group0) == 0,
+                                        "state=%d" % target_scene.director.boat_state(_group0))
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        # قایق باید پهلو بگیرد و ۶ مهاجم پیاده شود (۳۹s مهلت)
+                        var n: int = target_scene.director.raiders_alive(_group0)
+                        if n >= 6 or (_t - _sub_t) > 39.0:
+                                _check("boat_landed_six_raiders", n == 6,
+                                                "%d raiders (t=%.1f)" % [n, _t - _sub_t])
+                                _check("boat_anchored",
+                                                target_scene.director.boat_state(_group0) == 1,
+                                                "state=%d" % target_scene.director.boat_state(_group0))
+                                var ch := int((PathService.debug_info()["channels"] as Array).size())
+                                _check("enemy_channel_registered", ch >= 4,
+                                                "channels=%d" % ch)
+                                _landing = target_scene.director.group_landing(_group0)
+                                _check("landing_on_shore", _landing != Vector2.ZERO)
+                                var rt: Vector2 = target_scene.director.group_raid_target(_group0)
+                                var is_house := false
+                                for hp3 in target_scene.props.house_positions:
+                                        if Vector2(hp3.x, hp3.z).distance_to(rt) < 2.0:
+                                                is_house = true
+                                _check("raid_target_is_house", is_house, str(rt))
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        # رژه به داخل جزیره: حداقل یک مهاجم از ساحل دور شده باشد
+                        if _t - _sub_t >= 4.0:
+                                var moved := false
+                                for e in target_scene.director.raiders_of(_group0):
+                                        if is_instance_valid(e) and not e.is_dead():
+                                                var ep := Vector2(e.global_position.x,
+                                                                e.global_position.z)
+                                                if ep.distance_to(_landing) > 2.5:
+                                                        moved = true
+                                _check("raiders_march_inland", moved)
+                                _phase = 13
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- فاز ۱۳: درگیری تن‌به‌تن ----------------
+
+func _phase13_melee_engagement() -> void:
+        match _sub:
+                0:
+                        # جاویدان‌ها را به خانه‌ی هدف رژه فرا می‌خوانیم
+                        _squad_alive_before = target_scene.squad.size()
+                        var rt: Vector2 = target_scene.director.group_raid_target(_group0)
+                        var nav: NavGrid = PathService.nav
+                        var dest: Vector2 = target_scene._nearest_walkable_point(
+                                        nav, rt + Vector2(1.8, 1.8), 2.6)
+                        if dest == Vector2.INF:
+                                dest = target_scene._nearest_walkable_point(nav, rt, 3.5)
+                        _check("summon_destination_found", dest != Vector2.INF, str(dest))
+                        target_scene._issue_move_to(dest, 0, true)
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        # درگیری: مهاجم یا سرباز هدف نبرد پیدا کند (۳۰s مهلت)
+                        var engaged := false
+                        for e in target_scene.director.raiders_of(_group0):
+                                if is_instance_valid(e) and not e.is_dead() \
+                                                and e.engaged_unit != null:
+                                        engaged = true
+                        var pc := false
+                        for u in target_scene.squad:
+                                if is_instance_valid(u) and not u.is_dead() \
+                                                and u.combat_target() != null:
+                                        pc = true
+                        if engaged or pc or (_t - _sub_t) > 30.0:
+                                _check("combat_engaged", engaged or pc,
+                                                "raider=%s player=%s (t=%.1f)" % [
+                                                        engaged, pc, _t - _sub_t])
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        if _t - _sub_t >= 8.0:
+                                var raiders_dead := 0
+                                var raiders_hurt := false
+                                for e in target_scene.director.raiders_of(_group0):
+                                        if not is_instance_valid(e):
+                                                continue
+                                        if e.is_dead():
+                                                raiders_dead += 1
+                                        elif e.hp < e._default_hp():
+                                                raiders_hurt = true
+                                var players_hurt := false
+                                for u in target_scene.squad:
+                                        if is_instance_valid(u) and not u.is_dead() \
+                                                        and u.hp < u._default_hp():
+                                                players_hurt = true
+                                _check("raiders_took_damage",
+                                                raiders_dead >= 1 or raiders_hurt,
+                                                "dead=%d hurt=%s" % [raiders_dead, raiders_hurt])
+                                var players_lost: bool = target_scene.squad.size() \
+                                                < _squad_alive_before
+                                _check("battle_was_two_sided",
+                                                players_lost or players_hurt
+                                                or raiders_dead >= 2,
+                                                "lost=%d hurt=%s dead=%d" % [
+                                                        _squad_alive_before
+                                                        - target_scene.squad.size(),
+                                                        players_hurt, raiders_dead])
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        # سپر جاویدان در نبرد واقعی — اول فرصت طبیعی، بعد تماسِ قطعی
+                        var shielded := 0
+                        for u in target_scene.squads[0]:
+                                if u is ImmortalUnit and u.shield_up:
+                                        shielded += 1
+                        if int((_t - _sub_t) * 2.0) != int((maxf(_t - _sub_t - 0.016, 0.0)) * 2.0):
+                                for u in target_scene.squads[0]:
+                                        var nh := 1e9
+                                        for e2 in target_scene.director.raiders_of(_group0):
+                                                if is_instance_valid(e2) and not e2.is_dead():
+                                                        nh = minf(nh, _xz(u).distance_to(_xz(e2)))
+                                        print("[AUTOTEST] DBG13 t=%.1f imm (%.1f,%.1f) %s slot=%s ct=%s hp=%d nh=%.2f"
+                                                        % [_t - _sub_t, u.global_position.x,
+                                                        u.global_position.z, u.brain_state(),
+                                                        str(u.has_slot()),
+                                                        str(u.combat_target() != null),
+                                                        u.hp, nh])
+                        if shielded >= 1:
+                                _check("immortals_shield_vs_raiders", true,
+                                                "%d/4 (t=%.1f)" % [shielded, _t - _sub_t])
+                                _phase = 14
+                                _sub = 0
+                                _sub_t = _t
+                        elif not _contact_forced and (_t - _sub_t) > 1.5:
+                                # تماس قطعی: جاویدان‌های زنده را کنار یک مهاجم زنده می‌گذاریم
+                                # (بدون اسلات → واکنش فوری لایه ۳)
+                                _contact_forced = true
+                                var target_e: EnemyBase = null
+                                for e in target_scene.director.raiders_of(_group0):
+                                        if is_instance_valid(e) and not e.is_dead():
+                                                target_e = e
+                                                break
+                                if target_e != null:
+                                        var nav13: NavGrid = PathService.nav
+                                        var base := Vector2(target_e.global_position.x,
+                                                        target_e.global_position.z)
+                                        var k13 := 0
+                                        for u in target_scene.squads[0]:
+                                                if is_instance_valid(u) and not u.is_dead():
+                                                        var off := Vector2(cos(0.9 * k13),
+                                                                        sin(0.9 * k13)) * 1.2
+                                                        var w: Vector2 = target_scene._nearest_walkable_point(
+                                                                        nav13, base + off, 1.5)
+                                                        if w == Vector2.INF:
+                                                                w = base
+                                                        u.global_position = Vector3(w.x,
+                                                                        u.global_position.y, w.y)
+                                                        u.clear_slot()
+                                                        k13 += 1
+                        elif (_t - _sub_t) > 18.0:
+                                var any_raider := false
+                                for e in target_scene.director.raiders_of(_group0):
+                                        if is_instance_valid(e) and not e.is_dead():
+                                                any_raider = true
+                                _check("immortals_shield_vs_raiders", not any_raider,
+                                                "0/4 raiders_left=%s" % any_raider)
+                                _phase = 14
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- فاز ۱۴: سپر سنگین + پلتاست ----------------
+
+## نقطه‌ی قابل‌عبور که فاصله‌اش تا نزدیک‌ترین سربازِ زنده ≈ want_dist باشد
+## (پلتاست باید درون برد پرتاب باشد؛ سنگین بیرون شعاع توجه)
+func _point_near_units(center: Vector2, want_dist: float, lo: float, hi: float,
+                nav: NavGrid) -> Vector2:
+        var alive: Array = []
+        for u in target_scene.squad:
+                if is_instance_valid(u) and not u.is_dead():
+                        alive.append(u)
+        var best := Vector2.INF
+        var best_err := 1e9
+        for k in 12:
+                var ang := TAU * float(k) / 12.0
+                var cand := center + Vector2(cos(ang), sin(ang)) * want_dist
+                var w: Vector2 = target_scene._nearest_walkable_point(nav, cand, 1.2)
+                if w == Vector2.INF:
+                        continue
+                var min_u := 1e9
+                for u in alive:
+                        min_u = minf(min_u, w.distance_to(_xz(u)))
+                if min_u < lo or min_u > hi:
+                        continue
+                if absf(min_u - want_dist) < best_err:
+                        best_err = absf(min_u - want_dist)
+                        best = w
+        if best == Vector2.INF:
+                best = target_scene._nearest_walkable_point(nav,
+                                center + Vector2(want_dist, 0.0), 3.0)
+        return best
+
+
+func _phase14_shield_and_peltast() -> void:
+        match _sub:
+                0:
+                        var c2: Vector2 = target_scene.squad_center(2)
+                        var nav: NavGrid = PathService.nav
+                        # سنگین: بیرون از شعاع توجه (۳m) ولی در برد کمان (۸.۵m)
+                        var ph: Vector2 = _point_near_units(c2, 6.2, 4.6, 7.8, nav)
+                        _heavy_test = target_scene.director.spawn_enemy("heavy", ph, -1)
+                        # پلتاست: نزدیک دسته‌ی «غیرکماندارِ» زنده می‌نشینیم تا تیرهای
+                        # خودی پیش از اولین پرتاب آن را نکشند (دیباگ: مرگ در t<1s)
+                        var host_si := -1
+                        var best_n := 0
+                        for si in [0, 1]:
+                                var n := 0
+                                for u in target_scene.squads[si]:
+                                        if is_instance_valid(u) and not u.is_dead():
+                                                n += 1
+                                if n > best_n:
+                                        best_n = n
+                                        host_si = si
+                        if host_si < 0:
+                                host_si = 2  # فقط کماندارها زنده‌اند — با ریسک تیر
+                        var chost: Vector2 = target_scene.squad_center(host_si)
+                        # پلتاست: درون برد پرتاب (۵.۵m) و بیرون برد عقب‌نشینی (۳m)
+                        var pp: Vector2 = _point_near_units(chost, 4.3, 3.4, 5.2, nav)
+                        _peltast_test = target_scene.director.spawn_enemy("peltast", pp, -1)
+                        _check("test_heavy_spawned", _heavy_test != null)
+                        _check("test_peltast_spawned", _peltast_test != null)
+                        _arrow_baseline = target_scene.arrows_fired_total()
+                        # مخروط سپر — بررسی قطعی API (پیش از رسیدن تیرها)
+                        if _heavy_test != null:
+                                var fwd := Vector3(sin(_heavy_test._heading), 0.0,
+                                                cos(_heavy_test._heading))
+                                _check("heavy_shield_blocks_front",
+                                                _heavy_test.projectile_deflected(-fwd))
+                                _check("heavy_shield_open_behind",
+                                                not _heavy_test.projectile_deflected(fwd))
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        # نمونه‌برداری زنده (مهاجم ممکن است کشته شود و شمارنده‌اش آزاد شود)
+                        if is_instance_valid(_heavy_test):
+                                _max_deflects = maxi(_max_deflects, _heavy_test.deflects)
+                                if _heavy_test.hp < _heavy_test._default_hp():
+                                        _heavy_hurt_seen = true
+                        if is_instance_valid(_peltast_test):
+                                _max_thrown = maxi(_max_thrown, _peltast_test.javelins_thrown)
+                        if _t - _sub_t >= 9.0:
+                                _check("heavy_deflect_or_take_hits",
+                                                _max_deflects >= 1 or _heavy_hurt_seen,
+                                                "deflects=%d hurt=%s" % [
+                                                        _max_deflects, _heavy_hurt_seen])
+                                _check("arrows_flew_at_enemies",
+                                                target_scene.arrows_fired_total()
+                                                > _arrow_baseline,
+                                                "%d→%d" % [_arrow_baseline,
+                                                target_scene.arrows_fired_total()])
+                                _check("peltast_throws_javelins", _max_thrown >= 1,
+                                                "%d throws" % _max_thrown)
+                                _phase = 15
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- فاز ۱۵: مرگ دائمی + پاکسازی موج ----------------
+
+func _phase15_permanence_and_clear() -> void:
+        match _sub:
+                0:
+                        _units_before = target_scene.squad.size()
+                        for u in target_scene.squad:
+                                if is_instance_valid(u) and not u.is_dead():
+                                        _killed_unit = u
+                                        u.take_hit(99)
+                                        break
+                        _check("killed_unit_chosen", _killed_unit != null)
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        if _t - _sub_t >= 2.5:
+                                _check("dead_unit_removed_from_squads",
+                                                not target_scene.squad.has(_killed_unit))
+                                _check("death_permanent_unit_count",
+                                                target_scene.squad.size() == _units_before - 1,
+                                                "%d→%d" % [_units_before,
+                                                target_scene.squad.size()])
+                                _check("dead_unit_freed_after_anim",
+                                                not is_instance_valid(_killed_unit))
+                                # پاکسازی موج: همه‌ی مهاجمان کشته می‌شوند
+                                target_scene.director.kill_all_raiders()
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        if _t - _sub_t >= 1.5:
+                                _check("wave_cleared_signal", _wave_cleared_fired)
+                                _check("all_raiders_dead",
+                                                target_scene.director.alive_raiders_total() == 0)
+                                _check("boat_leaving",
+                                                target_scene.director.boat_state(_group0) == 2,
+                                                "state=%d" % target_scene.director.boat_state(_group0))
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        if _t - _sub_t >= 10.0:
+                                _check("boat_departed_and_freed",
+                                                target_scene.director.boat_state(_group0) == -1,
+                                                "state=%d" % target_scene.director.boat_state(_group0))
+                                _check("no_boats_active",
+                                                target_scene.director.boats_active() == 0)
+                                # سلامت نهایی: زنده‌ها روی سلول قابل‌عبور + زمان نرمال
+                                var all_ok := true
+                                var nav: NavGrid = PathService.nav
+                                for u in target_scene.squad:
+                                        if not is_instance_valid(u) or u.is_dead():
+                                                continue
+                                        if not nav.is_walkable(
+                                                        nav.world_to_cell(_xz(u))):
+                                                all_ok = false
+                                _check("alive_units_on_walkable_at_end", all_ok)
+                                _check("time_back_to_normal_after_invasion",
+                                                absf(Engine.time_scale - 1.0) < 0.06,
+                                                "time=%.2f" % Engine.time_scale)
+                                _phase = 16
 
 
 # ---------------- پایان ----------------

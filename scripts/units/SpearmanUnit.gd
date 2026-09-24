@@ -14,6 +14,7 @@ var _spear: MeshInstance3D
 var _spear_pivot: Node3D
 var brace_active := false       # برای تست خودکار و HUD
 var _brace_k := 0.0             # 0=نیزه بالا (مسیر) → 1=افقی (آماده‌باش)
+var strikes_done := 0           # برای تست خودکار (گام ۶)
 
 const SPEAR_UP_DEG := 55.0
 const SPEAR_BRACE_DEG := 6.0
@@ -47,6 +48,10 @@ func _combat_wants(_hostile: Node3D) -> bool:
         return _arrived
 
 
+func _default_hp() -> int:
+        return GameConstants.PLAYER_HP_SPEARMAN
+
+
 func _combat_tick(delta: float, hostile: Node3D) -> void:
         # آماده‌باش: رو به دشمن + نیزه به‌تدریج افقی می‌شود
         brace_active = true
@@ -58,12 +63,25 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
         rotation.y = _heading
         _brace_k = move_toward(_brace_k, 1.0, 3.0 * delta)
         _spear_pivot.rotation_degrees.x = lerpf(-SPEAR_UP_DEG, -SPEAR_BRACE_DEG, _brace_k)
+        # گام ۶ — ضربه‌ی نیزه، فقط در آماده‌باش و در برد نیزه (قانون آهنین کلاس)
+        if _brace_k > 0.85 and _dist_xz_to(hostile) <= GameConstants.SPEARMAN_REACH:
+                if _try_strike(delta, GameConstants.SPEARMAN_STRIKE_COOLDOWN, hostile):
+                        strikes_done += 1
+                        _thrust()
 
 
 func _combat_end() -> void:
         brace_active = false
         _brace_k = 0.0
         _spear_pivot.rotation_degrees.x = -SPEAR_UP_DEG
+
+
+## یورش نیزه به جلو هنگام ضربه
+func _thrust() -> void:
+        var z0 := SPEAR_LEN * 0.5 - 0.3
+        var tw := create_tween()
+        tw.tween_property(_spear, "position:z", z0 + 0.55, 0.09).set_ease(Tween.EASE_OUT)
+        tw.tween_property(_spear, "position:z", z0, 0.16)
 
 
 ## هنگام شروع حرکت نیزه باید بالا برگردد (لایه ۱ آماده‌ی سفر)

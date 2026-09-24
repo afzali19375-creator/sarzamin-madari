@@ -49,6 +49,9 @@ var squad: Array = []
 var selected := -1
 var squad_selected_fired := false   # برای تست خودکار
 
+## کارگردان موج هجوم (گام ۶ — قایق‌ها + Hoplite/Peltast)
+var director: InvasionDirector
+
 ## صف Waypoint هر دسته؛ «waypoints» آینه‌ی دسته‌ی انتخابی است (سازگاری تست)
 var squad_waypoints: Array = []
 var waypoints: Array[Vector2] = []
@@ -95,6 +98,7 @@ func _ready() -> void:
         PathService.auto_recompute = true
         _regenerate(_island_seed, false)
         _build_ui()
+        GameEvents.unit_permanently_died.connect(_on_unit_died)   # §۷: مرگ دائمی
         if OS.get_cmdline_user_args().has("--autotest"):
                 var runner := IslandAutoTest.new()
                 runner.target_scene = self
@@ -146,6 +150,13 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         _clear_units()
         # سه پست دور از هم برای سه دسته + فرمان اولیه‌ی هر دسته به پست خودش
         _spawn_squads()
+        # کارگردان موج هجوم (گام ۶) — در تست خودکار، موج‌ها دستی می‌آیند
+        if director == null:
+                director = InvasionDirector.new()
+                add_child(director)
+        director.auto_waves = not OS.get_cmdline_user_args().has("--autotest")
+        director.setup(ground, props, _squad_posts)
+        director.clear_all()
         if announce:
                 _toast_msg("جزیره‌ی جدید — بذر %d (تلاش %d، %.0f ms)\nNew island — seed %d (attempt %d, %.0f ms)" % [
                         island["seed_used"], island["attempts"], island["gen_ms"],
@@ -394,8 +405,9 @@ func _build_ui() -> void:
         hint.add_theme_color_override("font_color", GameConstants.COL_IVORY)
         if ResourceLoader.exists(FONT_FA):
                 hint.add_theme_font_override("font", load(FONT_FA))
-        hint.text = "%s  |  %s  |  %s  |  %s" % [
-                tr("hint_select"), tr("hint_island_move"), tr("hint_regen"), tr("hint_slow")]
+        hint.text = "%s  |  %s  |  %s  |  %s  |  N: %s" % [
+                tr("hint_select"), tr("hint_island_move"), tr("hint_regen"), tr("hint_slow"),
+                tr("hint_wave")]
         vb.add_child(hint)
 
         _toast = Label.new()
@@ -460,16 +472,18 @@ func _refresh_stats() -> void:
                         if u.is_arrived():
                                 a += 1
                 sq += "%s(%d/%d) " % [_squad_label(si), a, squads[si].size()]
-        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nisland seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d  |  houses %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f" % [
+        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f" % [
                 GameConstants.BUILD_ID, Engine.get_frames_per_second(), field_state, mode_str,
                 sel_str, ("ON" if Engine.time_scale < 0.99 else "off"),
                 sq,
                 squad.size(), arrived, slots_assigned(), selected_waypoints().size(),
                 _dummies.size(), _last_input_msg,
+                director.alive_raiders_total() if director != null else 0,
+                director.boats_active() if director != null else 0,
+                director.waves_spawned if director != null else 0,
                 island.get("seed_used", -1), island.get("attempts", -1), island.get("gen_ms", 0.0),
                 int(round(100.0 * float(island.get("land_count", 0)) / float(GRID * GRID))),
                 cmd_grid.cell_count if cmd_grid != null else 0,
-                props.house_positions.size() if props != null else 0,
                 computes, str(info["channels"]), Engine.time_scale,
                 _target_height, _yaw,
         ]
@@ -601,6 +615,8 @@ func _input(event: InputEvent) -> void:
                                         _spawn_training_dummy()
                                 KEY_D:
                                         _clear_dummies()
+                                KEY_N:
+                                        _spawn_wave_manual()   # گام ۶ — موج هجوم دستی
                                 KEY_ESCAPE:
                                         _deselect()
                 elif not event.pressed:
@@ -950,6 +966,39 @@ func dummy_hits_total() -> int:
         for d in _dummies:
                 if is_instance_valid(d):
                         n += d.hits
+        return n
+
+
+# ---------------- موج هجوم (گام ۶ — N) ----------------
+
+func _spawn_wave_manual() -> void:
+        if director == null:
+                return
+        var gid := director.spawn_wave()
+        if gid < 0:
+                _toast_msg("قایق دیگری جا نمی‌شود — اول موج قبلی را پاک کن\nNo room for another boat — clear the current wave first")
+                _last_input_msg = "wave rejected (max concurrent)"
+        else:
+                _toast_msg("بادبان از دریا پیدا شد! مهاجمان یونانی می‌آیند\nSails on the horizon! Greek raiders incoming")
+                _last_input_msg = "wave %d spawned (manual)" % gid
+
+
+## §۷ — مرگ سرباز دائمی است: از دسته‌ها حذف می‌شود و هرگز برنمی‌گردد
+func _on_unit_died(u: Node) -> void:
+        for si in squads.size():
+                squads[si].erase(u)
+        squad.erase(u)
+        if selected >= 0 and (selected >= squads.size() or squads[selected].is_empty()):
+                _deselect()
+        _toast_msg("یک سرباز از دست رفت — مرگ دائمی است\nA soldier has fallen — death is permanent")
+        _last_input_msg = "unit died — alive %d" % alive_units_total()
+
+
+func alive_units_total() -> int:
+        var n := 0
+        for u in squad:
+                if is_instance_valid(u) and not u.is_dead():
+                        n += 1
         return n
 
 

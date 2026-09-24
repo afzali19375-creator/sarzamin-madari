@@ -1,8 +1,10 @@
 class_name ArrowProjectile
 extends Node3D
-## تیر بالستیک — گام ۵ (نمایش لایه ۳ روی کوله‌ی تمرین) و زیربنای گام ۶.
+## تیر بالستیک — گام ۵ (لایه ۳) + گام ۶ (سپر سنگین، امضای آسیب جهت‌دار).
 ## پرتاب با حل معکوس ساده: زمان از فاصله‌ی افقی و سرعت، سرعت عمودی از جاذبه.
 ## برخورد با دشمن (گروه «hostiles») → ثبت ضربه + ناپدیدی؛ برخورد با زمین → ناپدیدی.
+## گام ۶: اگر هدف projectile_deflected(dir) را داشته باشد و سپرش رو به تیر باشد،
+## تیر خنثی می‌شود (جرقه‌ی کوچک، بدون آسیب — Hoplite سنگین §۶).
 ## زمین (IslandGround) از صحنه تزریق می‌شود — هیچ وابستگی به صحنه‌ی خاص.
 
 const MAX_LIFE := 4.0
@@ -60,10 +62,18 @@ func _physics_process(delta: float) -> void:
                         continue
                 if h.has_method("is_alive") and not h.is_alive():
                         continue
+                if h.has_method("is_dead") and h.is_dead():
+                        continue
                 if global_position.distance_to(h.global_position + Vector3(0, 0.4, 0)) \
                                 <= HIT_RADIUS:
+                        var v_norm := _vel.normalized()
+                        if h.has_method("projectile_deflected") \
+                                        and h.projectile_deflected(v_norm):
+                                _spawn_deflect_ping(h.global_position + Vector3(0, 0.45, 0))
+                                queue_free()
+                                return
                         if h.has_method("take_hit"):
-                                h.take_hit()
+                                h.take_hit(1, v_norm)
                         queue_free()
                         return
 
@@ -72,3 +82,25 @@ func _physics_process(delta: float) -> void:
                 var xz := Vector2(global_position.x, global_position.z)
                 if global_position.y <= float(ground_provider.call(xz)) + 0.02:
                         queue_free()
+
+
+## جرقه‌ی کوچکِ خنثی‌شدن تیر روی سپر (§۱۰ — حالت دیداری، بدون عدد)
+func _spawn_deflect_ping(at: Vector3) -> void:
+        var ping := MeshInstance3D.new()
+        var sm := SphereMesh.new()
+        sm.radius = 0.07
+        sm.height = 0.14
+        ping.mesh = sm
+        var m := StandardMaterial3D.new()
+        m.albedo_color = Color(1, 1, 1, 0.9)
+        m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+        m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+        ping.material_override = m
+        var parent := get_parent()
+        if parent == null:
+                return
+        parent.add_child(ping)
+        ping.global_position = at
+        var tw := ping.create_tween()
+        tw.tween_property(m, "albedo_color:a", 0.0, 0.25)
+        tw.tween_callback(ping.queue_free)
