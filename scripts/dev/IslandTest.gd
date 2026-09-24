@@ -9,11 +9,12 @@ extends Node3D
 ##     آماده‌باش می‌شود، کماندار تیر می‌اندازد (بدون آسیب دوستانه، مسیر باز)
 ##   * لایه ۴: واحدِ جابه‌جاشده خودش به پست بازمی‌گردد
 ##
-## تعامل (§۲ پرامت + گام ۵):
+## تعامل (§۲ پرامت + گام ۵ + گام ۶R):
 ##   کلیک چپ روی سرباز → انتخاب دسته‌اش: اسلوموشن (۰.۱۵s) + هاله‌ی سفید (§۲.۳)
 ##   کلیک چپ روی سلول سفید → فرمان به دسته‌ی انتخابی (§۲.۴) | Shift+کلیک → Waypoint
+##   فرمان روی خانه‌ی زنده → اشغال خانه: دسته داخل می‌رود و پس از ۲۰ ثانیه کامل می‌شود (گام ۶R)
 ##   کلیک روی جای خالی / سربازِ انتخابی / Esc → لغو انتخاب (بازگشت ۰.۲s)
-##   Space (نگه‌داشتن) → اسلوموشن  |  Q/E چرخش دوربین ۳۶۰°  |  Wheel زوم
+##   Space (نگه‌داشتن) → اسلوموشن  |  Q/E یا جهت‌نما: چرخش دور به دور جزیره  |  Wheel زوم
 ##   R جزیره‌ی جدید  |  G همان seed  |  T کوله‌ی تمرین  |  D پاک‌کردن کوله‌ها
 
 enum Mode { IDLE, COMMAND }
@@ -61,6 +62,12 @@ var _units_root: Node3D
 var _arrows_root: Node3D
 var _dummies: Array[TrainingDummy] = []
 var _squad_posts: Array[Vector2] = []   # مرکز پست هر دسته (برای تست لایه ۳/۴)
+
+# گام ۶R — گاریسون خانه (بازخورد کاربر: ورود به خانه → تکمیل دسته در ۲۰ ثانیه)
+## در تست خودکار کوتاه‌تر می‌شود؛ پیش‌فرض = عدد کاربر
+var garrison_duration := GameConstants.LOOT_DURATION_SECONDS
+## si -> {} یا {"house": BuildingBase, "t": float, "phase": "walk"/"inside", "orig": int}
+var squad_garrison: Array = []
 
 # دوربین (§۷ پرامت)
 var _cam_pivot: Node3D
@@ -132,11 +139,16 @@ func _regenerate(seed_value: int, announce: bool) -> void:
                 add_child(props)
         props.build(ground, nav, island, int(island["seed_used"]))
         blocked_by_houses = props.blocked_cells.duplicate()
+        # گام ۶R — تُست آتش/نابودی خانه‌ها
+        for b in props.buildings:
+                b.ignited.connect(_on_house_ignited)
+                b.burned_down.connect(_on_house_burned)
         if cmd_grid == null:
                 cmd_grid = CommandGrid.new()
                 add_child(cmd_grid)
         cmd_grid.rebuild(ground, nav)
-        # ریست وضعیت فرمان
+        # ریست وضعیت فرمان و گاریسون (خانه‌های تازه = بناهای تازه)
+        squad_garrison.clear()
         for wq in squad_waypoints:
                 wq.clear()
         waypoints.clear()
@@ -188,6 +200,7 @@ func _clear_units() -> void:
         squads.clear()
         squad.clear()
         squad_waypoints.clear()
+        squad_garrison.clear()
         _squad_posts.clear()
         if _units_root == null:
                 _units_root = Node3D.new()
@@ -205,7 +218,10 @@ func _pick_cluster_cells() -> Array[Vector2]:
         var nav := PathService.nav
         var pts: Array[Vector2] = []
         for i in cmd_grid.cell_count:
-                pts.append(cmd_grid.cell_info(i)["center"])
+                var p: Vector2 = cmd_grid.cell_info(i)["center"]
+                # گام ۶R — پست اولیه روی/کنار خانه نیفتد (وگرنه گاریسون خودبه‌خودی می‌شود)
+                if _alive_house_near(p) == null:
+                        pts.append(p)
         if pts.is_empty():
                 return [nav.cell_center(Vector2i(GRID / 2, GRID / 2))]
         var acc := Vector2.ZERO
@@ -235,7 +251,6 @@ func _pick_cluster_cells() -> Array[Vector2]:
 
 
 func _spawn_squads() -> void:
-        var nav := PathService.nav
         var rng := RandomNumberGenerator.new()
         rng.seed = int(island["seed_used"]) * 31 + int(island["attempts"])
         var clusters := _pick_cluster_cells()
@@ -246,31 +261,49 @@ func _spawn_squads() -> void:
                 var units: Array = []
                 var wq: Array[Vector2] = []
                 squad_waypoints.append(wq)
+                squad_garrison.append(null)
                 # سلول‌های اسپاون: قابل‌عبور در شعاع ۲.۵ متری پست (پشتیبان: ۵ متری)
                 var spawn_cells := _walkable_cells_near(post, 2.5, def["count"])
                 if spawn_cells.size() < int(def["count"]):
                         spawn_cells = _walkable_cells_near(post, 5.0, def["count"])
-                var uscript := load(def["script"])
                 for k in int(def["count"]):
                         var center: Vector2
                         if k < spawn_cells.size():
                                 center = spawn_cells[k]
                         else:
                                 center = post
-                        var u: UnitBase = uscript.new()
-                        u.squad_id = si
-                        u.squad_color = GameConstants.UNIT_PALETTE[int(def["color"])]
-                        u.speed_mult = 1.0 - GameConstants.SPEED_VARIATION \
-                                        + rng.randf() * 2.0 * GameConstants.SPEED_VARIATION
-                        u.fidget_enabled = true
-                        u.position = Vector3(center.x, ground.height_at_world(center), center.y)
-                        u.ground_provider = Callable(ground, "height_at_world")
-                        _units_root.add_child(u)
+                        var u := _make_unit(def, si, center, rng)
+                        if k == 0:
+                                _make_commander(u, GameConstants.UNIT_PALETTE[int(def["color"])])
                         units.append(u)
                         squad.append(u)
                 squads.append(units)
                 # فرمان اولیه: هر دسته روی پست خودش آرایش می‌گیرد (میدانِ کانال خودش)
                 _issue_move_to(post, si, true)
+
+
+## ساخت یک عضو تازه‌ی دسته — هم اسپاون اولیه، هم تکمیل پس از گاریسون (گام ۶R)
+func _make_unit(def: Dictionary, si: int, center: Vector2,
+                rng: RandomNumberGenerator) -> UnitBase:
+        var uscript: GDScript = load(def["script"])
+        var u: UnitBase = uscript.new()
+        u.squad_id = si
+        u.squad_color = GameConstants.UNIT_PALETTE[int(def["color"])]
+        u.speed_mult = 1.0 - GameConstants.SPEED_VARIATION \
+                        + rng.randf() * 2.0 * GameConstants.SPEED_VARIATION
+        u.fidget_enabled = true
+        u.position = Vector3(center.x, ground.height_at_world(center), center.y)
+        u.ground_provider = Callable(ground, "height_at_world")
+        _units_root.add_child(u)
+        return u
+
+
+## فرمانده دسته: سربند طلایی + پرچم رنگِ دسته (گام ۶R — هر دسته پرچم خاص خودش)
+func _make_commander(u: UnitBase, squad_col: Color) -> void:
+        u.is_commander = true
+        var flag := SquadFlag.new()
+        u.add_child(flag)
+        flag.set_color(squad_col)   # بعد از add_child — ماتریال در _ready ساخته می‌شود
 
 
 func _walkable_cells_near(center: Vector2, radius: float, want: int) -> Array[Vector2]:
@@ -292,6 +325,22 @@ func _walkable_cells_near(center: Vector2, radius: float, want: int) -> Array[Ve
                 if out.size() >= want:
                         break
         return out
+
+
+## گام ۶R — آیا پاره‌خط مستقیم a→b از سلول بلاک رد نمی‌شود؟
+## (نمونه‌برداری هر ۰.۳۵m — برای تخصیص اسلاتِ گاریسون با مسیر باز)
+func _straight_path_clear(a: Vector2, b: Vector2) -> bool:
+        var nav := PathService.nav
+        var dist := a.distance_to(b)
+        if dist < 0.3:
+                return true
+        var steps := maxi(int(dist / 0.35), 2)
+        for i in range(1, steps + 1):
+                var k := float(i) / float(steps)
+                var p := a.lerp(b, k)
+                if not nav.is_walkable(nav.world_to_cell(p)):
+                        return false
+        return true
 
 
 func regenerate(seed_value: int) -> void:
@@ -405,9 +454,9 @@ func _build_ui() -> void:
         hint.add_theme_color_override("font_color", GameConstants.COL_IVORY)
         if ResourceLoader.exists(FONT_FA):
                 hint.add_theme_font_override("font", load(FONT_FA))
-        hint.text = "%s  |  %s  |  %s  |  %s  |  N: %s" % [
-                tr("hint_select"), tr("hint_island_move"), tr("hint_regen"), tr("hint_slow"),
-                tr("hint_wave")]
+        hint.text = "%s  |  %s  |  %s  |  %s  |  %s  |  N: %s" % [
+                tr("hint_select"), tr("hint_island_move"), tr("hint_camera"),
+                tr("hint_regen"), tr("hint_slow"), tr("hint_wave")]
         vb.add_child(hint)
 
         _toast = Label.new()
@@ -465,6 +514,16 @@ func _refresh_stats() -> void:
         var goal: Vector2 = info["goal"]
         var mode_str := "COMMAND" if mode == Mode.COMMAND else "IDLE"
         var sel_str := "-" if selected < 0 else str(selected + 1)
+        # گام ۶R — وضعیت گاریسون دسته‌ی انتخابی
+        var gar := ""
+        if selected >= 0:
+                var gs := garrison_state(selected)
+                if not gs.is_empty():
+                        if gs["phase"] == "inside":
+                                gar = " | garrison: inside, %ds to refill" % \
+                                                int(ceil(maxf(0.0, garrison_duration - gs["t"])))
+                        else:
+                                gar = " | garrison: moving in"
         var sq := "squads: "
         for si in squads.size():
                 var a := 0
@@ -472,7 +531,7 @@ func _refresh_stats() -> void:
                         if u.is_arrived():
                                 a += 1
                 sq += "%s(%d/%d) " % [_squad_label(si), a, squads[si].size()]
-        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f" % [
+        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f%s" % [
                 GameConstants.BUILD_ID, Engine.get_frames_per_second(), field_state, mode_str,
                 sel_str, ("ON" if Engine.time_scale < 0.99 else "off"),
                 sq,
@@ -485,7 +544,7 @@ func _refresh_stats() -> void:
                 int(round(100.0 * float(island.get("land_count", 0)) / float(GRID * GRID))),
                 cmd_grid.cell_count if cmd_grid != null else 0,
                 computes, str(info["channels"]), Engine.time_scale,
-                _target_height, _yaw,
+                _target_height, _yaw, gar,
         ]
 
 
@@ -501,14 +560,17 @@ func _process(delta: float) -> void:
                         else GameConstants.SLOWMO_OUT_SECONDS
         Engine.time_scale = move_toward(Engine.time_scale, target, raw / dur)
 
-        # §۷ — چرخش دوربین Q/E (نگه‌داشتن) + زوم نرم
-        if _keys_held.get(KEY_Q, false):
+        # §۷ — چرخش دوربین Q/E/جهت‌نما (نگه‌داشتن) + زوم نرم — دور به دور جزیره
+        if _keys_held.get(KEY_Q, false) or _keys_held.get(KEY_LEFT, false):
                 _yaw -= GameConstants.CAM_ROTATE_SPEED * raw
-        if _keys_held.get(KEY_E, false):
+        if _keys_held.get(KEY_E, false) or _keys_held.get(KEY_RIGHT, false):
                 _yaw += GameConstants.CAM_ROTATE_SPEED * raw
         _cam_pivot.rotation.y = deg_to_rad(_yaw)
         _cam.position.z = move_toward(_cam.position.z, _target_height,
                         GameConstants.CAM_ZOOM_SPEED * raw)
+
+        # گام ۶R — تیک گاریسون خانه‌ها (ورود/تکمیل/خروج اضطراری)
+        _tick_garrisons(delta)
 
         _ui_accum += delta
         if _ui_accum >= 0.25:
@@ -736,6 +798,13 @@ func selected_waypoints() -> Array[Vector2]:
 func _issue_move_to(center: Vector2, idx: int, silent: bool) -> void:
         if idx < 0 or idx >= squads.size():
                 return
+        # گام ۶R — فرمان روی خانه‌ی زنده = اشغال خانه (بازخورد کاربر)
+        var house := _alive_house_near(center)
+        if house != null:
+                _garrison_squad(idx, house, silent)
+                return
+        # اگر دسته در/راهِ خانه‌ی دیگری است → خروج فوری بدون تکمیل
+        _cancel_garrison(idx, false)
         if not silent:
                 # فرمان ساده صف Waypoint را پاک می‌کند (رفتار گام ۴)
                 squad_waypoints[idx].clear()
@@ -761,12 +830,199 @@ func _add_waypoint(center: Vector2, idx: int) -> void:
                 _toast_msg("حداکثر نقاط مسیر: %d\nMax waypoints: %d" % [
                         GameConstants.WAYPOINT_MAX, GameConstants.WAYPOINT_MAX])
                 return
+        _cancel_garrison(idx, false)   # waypoint جدید = انصراف از اشغال خانه
         if wq.is_empty():
                 _issue_move_to(center, idx, true)  # اولین waypoint بلافاصله فعال می‌شود
         wq.append(center)
         waypoints = wq.duplicate()
         _rebuild_waypoint_line()
         _last_input_msg = "squad %d waypoint %d added" % [idx + 1, wq.size()]
+
+
+# ---------------- گام ۶R — اشغال خانه و تکمیل دسته (بازخورد کاربر) ----------------
+## «سربازهای خودی وارد خانه شوند و بعد از ۲۰ ثانیه دسته‌شان تکمیل شود»:
+##   فرمان روی خانه‌ی زنده → دسته تا درِ خانه می‌رود → داخل پنهان می‌شود
+##   (مهاجمان نمی‌بینندشان) → پس از garrison_duration دسته کامل بیرون می‌آید:
+##   جای سربازهای ازدست‌رفته سرباز تازه می‌آید (تکمیل تا ظرفیت اصلی دسته).
+##   اگر خانه در این میان آتش بگیرد/بسوزد → دسته بدون تکمیل بیرون می‌پرد.
+
+## خانه‌ی زنده‌ی نزدیک نقطه (فرمان روی/کنار خانه = اشغال)
+func _alive_house_near(center: Vector2) -> BuildingBase:
+        if props == null:
+                return null
+        var best: BuildingBase = null
+        var best_d := GameConstants.GARRISON_SNAP
+        for b in props.buildings:
+                if not is_instance_valid(b) or b.burned or b.burning:
+                        continue
+                var bxz := Vector2(b.global_position.x, b.global_position.z)
+                var d := bxz.distance_to(center)
+                if d < best_d:
+                        best_d = d
+                        best = b
+        return best
+
+
+func garrison_state(si: int) -> Dictionary:
+        if si < 0 or si >= squad_garrison.size():
+                return {}
+        var g = squad_garrison[si]
+        return g if g is Dictionary else {}
+
+
+## اعضای زنده‌ی یک دسته
+func _alive_members(idx: int) -> Array:
+        var out: Array = []
+        if idx < 0 or idx >= squads.size():
+                return out
+        for u in squads[idx]:
+                if is_instance_valid(u) and not u.is_dead():
+                        out.append(u)
+        return out
+
+
+## شروع اشغال خانه‌ی زنده توسط دسته
+func _garrison_squad(idx: int, house: BuildingBase, silent: bool) -> void:
+        var alive := _alive_members(idx)
+        if alive.is_empty():
+                return
+        squad_garrison[idx] = null   # اگر در خانه‌ی دیگری بود → خروج فوری
+        squad_waypoints[idx].clear()
+        waypoints.clear()
+        var hxz := Vector2(house.global_position.x, house.global_position.z)
+        # اسلات‌ها فقط روی حلقه‌ی «قابل‌عبور» دور خانه — مرکز خانه بلاک است و
+        # رسیدن به آن ناممکن (رفع تایم‌اوتِ ورود)
+        var spots := _walkable_cells_near(hxz, 2.3, alive.size() + 3)
+        if spots.is_empty():
+                var w := _nearest_walkable_point(PathService.nav, hxz, 3.2)
+                spots = [w if w != Vector2.INF else hxz]
+        # گام ۶R — تخصیص حریصانه با «مسیر مستقیم باز»: هر سرباز نزدیک‌ترین جای
+        # آزادی را برمی‌دارد که مسیرِ مستقیم تا خودش بدون سلول بلاک باشد؛
+        # اگر هیچ‌کدام باز نبود، نزدیک‌ترین مطلق (شبکه‌ی پرهیز جبران می‌کند).
+        # رفع یخ‌زدگیِ «اسلات آن‌طرفِ خانه/صخره» (دیباگ DBG18 — گام ۶R)
+        var claimed: Array[Vector2] = []
+        for u0 in alive:
+                var up0: Vector2 = Vector2(u0.global_position.x, u0.global_position.z)
+                var best_j := -1
+                var best_d := 1e9
+                var best_any_j := -1
+                var best_any_d := 1e9
+                for j in spots.size():
+                        if claimed.has(spots[j]):
+                                continue
+                        var d0 := up0.distance_to(spots[j])
+                        if d0 < best_any_d:
+                                best_any_d = d0
+                                best_any_j = j
+                        if d0 < best_d and _straight_path_clear(up0, spots[j]):
+                                best_d = d0
+                                best_j = j
+                if best_j < 0:
+                        best_j = best_any_j if best_any_j >= 0 else 0
+                claimed.append(spots[best_j])
+                u0.set_slot(spots[best_j])
+        PathService.set_goal_for(idx, hxz)
+        squad_garrison[idx] = {"house": house, "t": 0.0, "phase": "walk",
+                        "orig": int(SQUAD_DEFS[idx]["count"])}
+        _last_input_msg = "squad %d garrison -> house (%.1f, %.1f)" % [
+                        idx + 1, hxz.x, hxz.y]
+        if not silent:
+                _flash_ping(house.global_position + Vector3(0, 0.08, 0))
+                _toast_msg("دسته به خانه می‌رود — پس از %d ثانیه دسته تکمیل می‌شود\n%s squad is moving in — replenished after %d s" % [
+                        int(garrison_duration), SQUAD_DEFS[idx]["en"],
+                        int(garrison_duration)])
+                _deselect()
+
+
+## لغو اشغال — refill=true فقط وقتی ۲۰ ثانیه کامل شده است
+func _cancel_garrison(idx: int, refill: bool) -> void:
+        var g := garrison_state(idx)
+        if g.is_empty():
+                return
+        squad_garrison[idx] = null
+        _emerge_from_house(idx, g, refill)
+
+
+## بیرون‌آمدن دسته از خانه + در صورت refill، جای جاافتادگان پر می‌شود
+func _emerge_from_house(idx: int, g: Dictionary, refill: bool) -> void:
+        var alive := _alive_members(idx)
+        if alive.is_empty():
+                return
+        var house: BuildingBase = g["house"]
+        var hxz := Vector2(house.global_position.x, house.global_position.z)
+        var spots := _walkable_cells_near(hxz, GameConstants.GARRISON_EMERGE_RING,
+                        alive.size() + 4)
+        if spots.is_empty():
+                spots = [hxz]
+        var k := 0
+        for u in alive:
+                var at: Vector2 = spots[mini(k, spots.size() - 1)]
+                k += 1
+                u.exit_house(Vector3(at.x, ground.height_at_world(at), at.y))
+                u.set_slot(at)
+        if not refill:
+                return
+        # تکمیل دسته: سرباز تازه از خانه بیرون می‌آید تا ظرفیت اصلی
+        var def: Dictionary = SQUAD_DEFS[idx]
+        var rng := RandomNumberGenerator.new()
+        rng.randomize()
+        var added := 0
+        while alive.size() + added < int(def["count"]):
+                var at: Vector2 = spots[mini(k, spots.size() - 1)]
+                k += 1
+                var nu := _make_unit(def, idx, at, rng)
+                nu.set_slot(at)
+                squads[idx].append(nu)
+                squad.append(nu)
+                added += 1
+        if added > 0:
+                _toast_msg("دسته‌ی %s تکمیل شد — %d سرباز تازه از خانه بیرون آمد\n%s squad replenished — %d fresh soldier(s) out of the house" % [
+                        SQUAD_DEFS[idx]["fa"], added, SQUAD_DEFS[idx]["en"], added])
+
+
+## تیک گاریسون در حلقه‌ی صحنه — ورود، شمارش، خروج اضطراری از خانه‌ی در آتش
+func _tick_garrisons(delta: float) -> void:
+        for si in squads.size():
+                var g := garrison_state(si)
+                if g.is_empty():
+                        continue
+                var alive := _alive_members(si)
+                if alive.is_empty():
+                        squad_garrison[si] = null
+                        continue
+                if g["phase"] == "walk":
+                        var in_count := 0
+                        for u in alive:
+                                if u.is_arrived():
+                                        in_count += 1
+                        if in_count >= alive.size():
+                                g["phase"] = "inside"
+                                g["t"] = 0.0
+                                for u in alive:
+                                        u.enter_house()
+                else:
+                        var house: BuildingBase = g["house"]
+                        if house.burning or house.burned:
+                                squad_garrison[si] = null
+                                _emerge_from_house(si, g, false)
+                                _toast_msg("خانه در آتش است! دسته بیرون پرید\nThe house is on fire! The squad rushed out")
+                                continue
+                        g["t"] += delta
+                        if g["t"] >= garrison_duration:
+                                squad_garrison[si] = null
+                                _emerge_from_house(si, g, true)
+
+
+# ---------------- تُست آتش خانه‌ها (گام ۶R) ----------------
+
+func _on_house_ignited(_b: BuildingBase) -> void:
+        _toast_msg("خانه‌ای آتش گرفت!\nA house is on fire!")
+        _last_input_msg = "house ignited"
+
+
+func _on_house_burned(_b: BuildingBase) -> void:
+        _toast_msg("خانه‌ای نابود شد\nA house has burned down")
+        _last_input_msg = "house burned down"
 
 
 ## اسلات‌های آرایش ۱.۲ متری دور مرکز سلول (§۵.۲) — فقط روی سلول‌های قابل‌عبور
@@ -859,6 +1115,8 @@ func _unit_at_screen(screen: Vector2) -> UnitBase:
         var best: UnitBase = null
         var best_px := SELECT_PICK_PX
         for u in squad:
+                if not u.visible:
+                        continue   # گام ۶R — داخل خانه‌ها قابل‌کلیک نیستند
                 var wp: Vector3 = u.global_position + Vector3(0, 0.35, 0)
                 if cam.is_position_behind(wp):
                         continue
@@ -988,10 +1246,38 @@ func _on_unit_died(u: Node) -> void:
         for si in squads.size():
                 squads[si].erase(u)
         squad.erase(u)
+        if u is UnitBase:
+                _transfer_flag_if_commander(u)   # گام ۶R — پرچم به عضو زنده‌ی بعدی
         if selected >= 0 and (selected >= squads.size() or squads[selected].is_empty()):
                 _deselect()
         _toast_msg("یک سرباز از دست رفت — مرگ دائمی است\nA soldier has fallen — death is permanent")
         _last_input_msg = "unit died — alive %d" % alive_units_total()
+
+
+## مرگ فرمانده → پرچم به اولین عضو زنده‌ی همان دسته منتقل می‌شود (گام ۶R)
+func _transfer_flag_if_commander(dead_u: UnitBase) -> void:
+        if not dead_u.is_commander:
+                return
+        dead_u.is_commander = false
+        var flag: SquadFlag = null
+        for c in dead_u.get_children():
+                if c is SquadFlag:
+                        flag = c
+                        break
+        if flag == null:
+                return
+        var si := dead_u.squad_id
+        if si < 0 or si >= squads.size():
+                flag.queue_free()
+                return
+        for u in squads[si]:
+                if is_instance_valid(u) and not u.is_dead() and u != dead_u:
+                        dead_u.remove_child(flag)
+                        u.add_child(flag)
+                        u.is_commander = true
+                        return
+        # هیچ عضو زنده‌ای نیست — پرچم با فرمانده می‌افتد
+        flag.queue_free()
 
 
 func alive_units_total() -> int:

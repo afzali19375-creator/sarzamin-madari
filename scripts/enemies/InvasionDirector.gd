@@ -2,10 +2,13 @@ class_name InvasionDirector
 extends Node
 ## کارگردان موج هجوم — گام ۶ (§۶ سند طراحی)
 ##
-##   * ساحل فرود: سلول ساحلیِ قابل‌عبور؛ پیش‌فرض = دورترین به پست دسته‌ها
-##     (از کاندیداهای برتر انتخاب قطعی با rng) — برای تست، نقطه‌ی hint دستی
-##   * قایق از دل دریا پهلو می‌گیرد و لنگر می‌ماند؛ مهاجمان روی ساحل پیاده می‌شوند
-##   * هر گروه کانال FlowField خودش را دارد (۴..۷)؛ هدف = نزدیک‌ترین خانه به فرود
+##   * ساحل فرود: سلول ساحلیِ «همسایه‌ی آبِ واقعی» — باگ قبلی همین‌جا بود:
+##     هر سلولِ با همسایه‌ی غیرقابل‌عبور (حتی صخره/خانه در دل جزیره) ساحل شمرده
+##     می‌شد و قایق وسط جزیره ظاهر می‌شد (بازخورد کاربر گام ۶R)
+##   * قایق از دل دریا پهلو می‌گیرد، کنار ساحل روی آب لنگر می‌ماند و جایی نمی‌رود؛
+##     مهاجمان روی ساحل پیاده می‌شوند
+##   * هر گروه کانال FlowField خودش را دارد (۴..۷)؛ هدف = نزدیک‌ترین خانه‌ی زنده به فرود
+##   * اگر خانه‌ی هدف بسوزد → گروه به نزدیک‌ترین خانه‌ی زنده بازهدف‌گیری می‌کند
 ##   * ترکیب پیش‌فرض: Peltast ≈ ۱/۳ + Hoplite سنگین در گروه‌های ≥ ۶ نفر، بقیه سبک
 ##   * پاکسازی موج: همه‌ی مهاجمان مرده → قایق برمی‌گردد (§۶: لنگر برای بازگشت)
 ##   * مرگ سرباز پارسی با GameEvents.unit_permanently_died — اینجا فقط دشمنان
@@ -25,7 +28,8 @@ var boats_root: Node3D
 var raiders_root: Node3D
 
 # group_id -> {"boat": EnemyBoat, "raiders": Array, "channel": int,
-#              "landing": Vector2, "raid_target": Vector2, "cleared": bool}
+#              "landing": Vector2, "anchor": Vector2, "raid_target": Vector2,
+#              "target_building": BuildingBase, "cleared": bool}
 var _groups: Dictionary = {}
 var _next_group := 0
 var _rng := RandomNumberGenerator.new()
@@ -80,21 +84,32 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                         _rng.randi_range(GameConstants.WAVE_SIZE_MIN,
                         GameConstants.WAVE_SIZE_MAX))
         var hint: Vector2 = opts.get("near", Vector2.INF)
-        var landing := _pick_landing(hint)
+        var shore := _pick_shore(hint)
+        var landing: Vector2 = shore["landing"]
+        var water_xz: Vector2 = shore["water"]
         var channel := GameConstants.ENEMY_CHANNEL_BASE + (_next_group % 4)
-        var raid_target := _nearest_house_xz(landing)
+        var target_building := _nearest_alive_building(landing)
+        var raid_target := landing
+        if target_building != null:
+                raid_target = Vector2(target_building.global_position.x,
+                                target_building.global_position.z)
 
-        # قایق: از دل دریا (امتداد جهت مرکز→ساحل) پهلو می‌گیرد
+        # ---- قایق: همیشه از دل دریا می‌آید و کنار ساحل پارک می‌شود (گام ۶R) ----
+        # لنگر = مرکز سلول آبِ همسایه‌ی ساحل + کمی به بیرون؛ مسیر مستقیم دریایی
         var nav := PathService.nav
         var center := nav.origin + nav.size_world() * 0.5
-        var outward := (landing - center).normalized()
+        var outward := (water_xz - center).normalized()
+        if outward == Vector2.ZERO:
+                outward = Vector2.RIGHT
+        var anchor := water_xz + outward * 0.9      # روی آب، کنارِ ساحل
         var boat := EnemyBoat.new()
-        boat.anchor_point = Vector3(landing.x, 0, landing.y) \
-                        - Vector3(outward.x, 0, outward.y) * 1.1
-        boat.retreat_point = Vector3(landing.x, 0, landing.y) \
-                        - Vector3(outward.x, 0, outward.y) * 16.0
-        boat.global_position = Vector3(landing.x, 0, landing.y) \
-                        - Vector3(outward.x, 0, outward.y) * 13.0
+        boat.anchor_point = Vector3(anchor.x, 0, anchor.y)
+        # ۱۳ متر آن‌طرف‌تر در دریا ظاهر می‌شود، تا لنگر کنار ساحل می‌آید؛
+        # نقطه‌ی عقب‌نشینی هم ۱۶ متر در همان دریاست (بازگشت از همان دهانه)
+        boat.retreat_point = Vector3(anchor.x + outward.x * 16.0, 0,
+                        anchor.y + outward.y * 16.0)
+        boat.global_position = Vector3(anchor.x + outward.x * 13.0, 0,
+                        anchor.y + outward.y * 13.0)
         boats_root.add_child(boat)
 
         var comp: Dictionary = opts.get("comp", _default_comp(size))
@@ -105,7 +120,9 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                 "raiders": [],
                 "channel": channel,
                 "landing": landing,
+                "anchor": anchor,
                 "raid_target": raid_target,
+                "target_building": target_building,
                 "comp_wanted": comp,
                 "cleared": false,
         }
@@ -169,6 +186,7 @@ func spawn_enemy(kind: String, at: Vector2, group: int = -1) -> EnemyBase:
         var raid := Vector2.ZERO
         if group >= 0 and _groups.has(group):
                 raid = _groups[group]["raid_target"]
+                e.target_house = _groups[group]["target_building"]   # گام ۶R — هدف مشعل
         else:
                 raid = pos  # گروه آزمایشی: همان‌جا می‌ماند و واکنش می‌دهد
         e.raid_target = raid
@@ -185,59 +203,73 @@ func spawn_enemy(kind: String, at: Vector2, group: int = -1) -> EnemyBase:
 
 # ---------------- انتخاب ساحل و خانه ----------------
 
-## سلول ساحلی: قابل‌عبور با همسایه‌ی غیرقابل‌عبور (آب). دورترین به پست‌ها یا نزدیک‌ترین به hint
-func _pick_landing(hint: Vector2 = Vector2.INF) -> Vector2:
+## سلول ساحلیِ واقعی: قابل‌عبور با همسایه‌ی «آب» (نه صخره/خانه!).
+## خروجی: {"landing": مرکز سلول ساحلی, "water": مرکز سلول آبِ همسایه}
+## دورترین به پست‌ها یا نزدیک‌ترین به hint
+func _pick_shore(hint: Vector2 = Vector2.INF) -> Dictionary:
         var nav := PathService.nav
-        var shores: Array[Vector2i] = []
+        var shores: Array = []   # [Vector2i landing_cell, Vector2i water_cell]
         for cy in nav.height:
                 for cx in nav.width:
                         var c := Vector2i(cx, cy)
                         if not nav.is_walkable(c):
                                 continue
-                        for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1),
-                                        Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, -1),
-                                        Vector2i(1, -1), Vector2i(-1, 1)]:
-                                if not nav.is_walkable(c + d):
-                                        shores.append(c)
-                                        break
+                        var w := _water_neighbor(c)
+                        if w != Vector2i(-1, -1):
+                                shores.append([c, w])
         if shores.is_empty():
-                return nav.cell_center(Vector2i(nav.width / 2, nav.height / 2))
-        var best_c: Vector2i = shores[0]
+                # جزیره‌ی بدون ساحل آب (عملاً غیرممکن) — رفتار قدیمی به‌عنوان پشتیبان
+                var mid := Vector2i(nav.width / 2, nav.height / 2)
+                return {"landing": nav.cell_center(mid), "water": nav.cell_center(mid)}
+        var best: Array = shores[0]
         if hint != Vector2.INF:
                 var best_d := 1e9
-                for c in shores:
-                        var d: float = nav.cell_center(c).distance_to(hint)
+                for s in shores:
+                        var d: float = nav.cell_center(s[0]).distance_to(hint)
                         if d < best_d:
                                 best_d = d
-                                best_c = c
-                return nav.cell_center(best_c)
+                                best = s
+                return {"landing": nav.cell_center(best[0]),
+                                "water": nav.cell_center(best[1])}
         # کاندیداهای دورتر از همه‌ی پست‌ها → ۶ تای برتر → انتخاب rng
         var scored: Array = []
-        for c in shores:
-                var cc := nav.cell_center(c)
+        for s in shores:
+                var cc := nav.cell_center(s[0])
                 var min_d := 1e9
                 for p in posts:
                         min_d = minf(min_d, cc.distance_to(p))
-                scored.append([min_d, c])
+                scored.append([min_d, s])
         scored.sort_custom(func(a, b): return a[0] > b[0])
         var top := scored.slice(0, mini(6, scored.size()))
-        var pick: Array = top[_rng.randi_range(0, top.size() - 1)]
-        return nav.cell_center(pick[1])
+        var pick: Array = top[_rng.randi_range(0, top.size() - 1)][1]
+        return {"landing": nav.cell_center(pick[0]),
+                        "water": nav.cell_center(pick[1])}
 
 
-func _nearest_house_xz(from: Vector2) -> Vector2:
-        var best := from
+## همسایه‌ی آبِ واقعی سلول (با نام ماژول آب — نه هر غیرقابل‌عبوری)
+func _water_neighbor(c: Vector2i) -> Vector2i:
+        for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+                        Vector2i(1, 1), Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1)]:
+                var n2: Vector2i = c + d
+                if String(ground.module_name_at(n2)).begins_with("water"):
+                        return n2
+        return Vector2i(-1, -1)
+
+
+## نزدیک‌ترین بنای زنده (نسوخته) — هدف مشعل مهاجمان
+func _nearest_alive_building(from: Vector2) -> BuildingBase:
+        if props == null:
+                return null
+        var best: BuildingBase = null
         var best_d := 1e9
-        for hp in props.house_positions:
-                var hxz := Vector2(hp.x, hp.z)
-                var d := hxz.distance_to(from)
+        for b in props.buildings:
+                if not is_instance_valid(b) or b.burned:
+                        continue
+                var bxz := Vector2(b.global_position.x, b.global_position.z)
+                var d := bxz.distance_to(from)
                 if d < best_d:
                         best_d = d
-                        best = hxz
-        if best_d >= 1e9:
-                # جزیره‌ی بی‌خانه — مرکز خشکی
-                var nav := PathService.nav
-                best = nav.origin + nav.size_world() * 0.5
+                        best = b
         return best
 
 
@@ -297,6 +329,7 @@ func _check_groups() -> void:
                         continue
                 if g["cleared"]:
                         continue
+                _retarget_if_burned(gid, g)
                 if raiders_alive(gid) == 0 \
                                 and boat.state == EnemyBoat.BoatState.ANCHORED:
                         g["cleared"] = true
@@ -304,6 +337,34 @@ func _check_groups() -> void:
                         wave_cleared.emit(gid)
         for gid in dead_ids:
                 _groups.erase(gid)
+
+
+## اگر خانه‌ی هدف گروه سوخت → نزدیک‌ترین خانه‌ی زنده؛ میدان و مهاجمان به‌روز می‌شوند
+func _retarget_if_burned(gid: int, g: Dictionary) -> void:
+        if raiders_alive(gid) == 0:
+                return
+        var tb = g.get("target_building")
+        if tb != null and is_instance_valid(tb) and not tb.burned:
+                return
+        var centroid := Vector2.ZERO
+        var n := 0
+        for e in g["raiders"]:
+                if is_instance_valid(e) and not e.is_dead():
+                        centroid += Vector2(e.global_position.x, e.global_position.z)
+                        n += 1
+        if n == 0:
+                return
+        var nb := _nearest_alive_building(centroid / float(n))
+        g["target_building"] = nb
+        var raid: Vector2 = g["raid_target"]
+        if nb != null:
+                raid = Vector2(nb.global_position.x, nb.global_position.z)
+        g["raid_target"] = raid
+        PathService.set_goal_for(g["channel"], raid)
+        for e in g["raiders"]:
+                if is_instance_valid(e) and not e.is_dead():
+                        e.raid_target = raid
+                        e.target_house = nb
 
 
 ## مهاجمانِ زنده‌ی یک گروه
@@ -327,6 +388,11 @@ func group_raid_target(gid: int) -> Vector2:
 
 func group_landing(gid: int) -> Vector2:
         return _groups.get(gid, {}).get("landing", Vector2.ZERO)
+
+
+## نقطه‌ی لنگر گروه (روی آب کنار ساحل) — گام ۶R
+func group_anchor(gid: int) -> Vector2:
+        return _groups.get(gid, {}).get("anchor", Vector2.ZERO)
 
 
 func boat_state(gid: int) -> int:

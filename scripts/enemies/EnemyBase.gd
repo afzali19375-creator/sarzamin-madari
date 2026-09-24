@@ -8,7 +8,10 @@ extends Node3D
 ##   ۲) — (مهاجمان Fidget ندارند؛ هجومی‌اند)
 ##   ۳) نبرد: سربازِ پارسی در شعاع توجه → درگیری تن‌به‌تن (زیرکلاس می‌تواند
 ##      رفتار پرتابی Peltast را جایگزین کند)
-##   ۴) غارت نمایشی خانه در ENEMY_RAID_REACH — سرقت سکه در گام ۷ (§۸)
+##   ۴) هدف خانه: هیچ اشغالی در کار نیست (بازخورد کاربر گام ۶R: «نیازی نیست
+##      خانه را اشغال کنند؛ فقط آتش بزنند») — همه‌ی مهاجمان تا فاصله‌ی ایست
+##      نزدیک می‌شوند و از آن‌جا مشعل پرتاب می‌کنند؛ نزدیک‌تر از حدِ ایمن عقب
+##      می‌روند. غارت نمایشیِ گام ۶ حذف شد.
 ##
 ## رنگ‌ها فقط از پالت هخامنشی (برنز COL_ROCK، سرخ COL_CRIMSON، شن).
 ## صفر عدد و نوار سلامت روی صفحه (§۱۰) — فلش سفید ضربه + افتادن هنگام مرگ.
@@ -30,13 +33,17 @@ var engage_range := GameConstants.ENEMY_ENGAGE_RANGE
 # ---------------- گروه هجوم ----------------
 ## کانال جریان = ENEMY_CHANNEL_BASE + raid_group (۰..۳) — هر گروه میدان خودش
 var raid_group := 0
-## خانه‌ی هدف رژه (XZ جهانی) — کارگردان ست می‌کند
+## خانه‌ی هدف مشعل (XZ جهانی) — کارگردان ست می‌کند
 var raid_target := Vector2.ZERO
 var ground_provider: Callable = Callable()
 
 var dead := false
 var engaged_unit: Node3D = null     # سربازِ درگیر (برای تست/کارگردان)
-var raiding := false                # در حال غارت نمایشی خانه
+## بنای هدف برای مشعل — کارگردان ست می‌کند (گام ۶R)
+var target_house: BuildingBase = null
+## شمارنده‌ی مشعل‌های پرتاب‌شده — برای تست خودکار (گام ۶R)
+var torches_thrown := 0
+var _torch_cd := 1.2                # تاخیر اول کوتاه تا مشعل اول زود برسد
 
 var _channel := 4
 var _scan_accum := 0.0
@@ -125,14 +132,11 @@ func _process(delta: float) -> void:
                 return
         engaged_unit = null
 
-        # ---- لایه ۱/۴: رژه به خانه / غارت نمایشی ----
-        var pos := Vector2(global_position.x, global_position.z)
-        if pos.distance_to(raid_target) <= GameConstants.ENEMY_RAID_REACH:
-                if not raiding:
-                        raiding = true
-                _raid_tick(delta)
+        # ---- لایه ۱/۴: نزدیک‌شدن به خانه و پرتاب مشعل از فاصله (گام ۶R) ----
+        ## بازخورد کاربر: «نیازی نیست خانه را اشغال کنند؛ فقط آتش بزنند» —
+        ## همه‌ی مهاجمان تا فاصله‌ی ایست جلو می‌روند و از آن‌جا مشعل می‌زنند.
+        if _house_tick(Vector2(global_position.x, global_position.z), delta):
                 return
-        raiding = false
         _march_tick(delta)
 
 
@@ -144,7 +148,6 @@ func _combat_tick(delta: float) -> void:
         var pos := Vector2(global_position.x, global_position.z)
         var d := pos.distance_to(up)
         if d > engage_range:
-                raiding = false
                 _move_with((up - pos).normalized(), delta, move_speed)
                 return
         _face_toward(up, delta)
@@ -184,13 +187,43 @@ func _unit_dead(u: Node) -> bool:
         return u.has_method("is_dead") and u.is_dead()
 
 
-## غارت نمایشی خانه — سرقت سکه در گام ۷ (§۸: ۲۰ ثانیه)
-func _raid_tick(delta: float) -> void:
-        _face_toward(raid_target, delta)
+# ---------------- گام ۶R — آتش‌زنه‌ی خانه (بدون اشغال — بازخورد کاربر) ----------------
+
+## خانه‌ی زنده‌ی هدف در برد مشعل → ایست، رو به خانه، پرتاب مشعل.
+## نزدیک‌تر از حدِ ایمن → یک قدم عقب. خروجی true = این فریم مشغول خانه است
+## (رژه/حرکت متوقف). خانه در حال سوختن مشعل نمی‌خواهد — فقط مواظبت می‌کند.
+func _house_tick(pos: Vector2, delta: float) -> bool:
+        var h := target_house
+        if h == null or not is_instance_valid(h) or h.burned:
+                return false
+        var hxz := Vector2(h.global_position.x, h.global_position.z)
+        var d := pos.distance_to(hxz)
+        # زیاده‌روی نزدیک خانه → عقب (هیچ‌کس جلوی خانه ازدحام نمی‌کند)
+        if d < GameConstants.ENEMY_RAID_STANDOFF - 0.5:
+                _move_with((pos - hxz).normalized(), delta, move_speed)
+                return true
+        # خارج از برد مشعل → هنوز نزدیک می‌شود
+        if d > GameConstants.TORCH_RANGE:
+                return false
+        _face_toward(hxz, delta)
         _bob_visual(false)
-        if _atk_cd <= 0.0:
-                _atk_cd = attack_cooldown
-                _strike_anim()
+        if h.burning:
+                return true
+        _torch_cd -= delta
+        if _torch_cd <= 0.0:
+                _torch_cd = GameConstants.TORCH_COOLDOWN
+                torches_thrown += 1
+                _torch_throw_anim()
+                TorchProjectile.fire(get_parent(),
+                                global_position + Vector3(0, 0.62, 0),
+                                h.global_position + Vector3(0, 0.75, 0),
+                                ground_provider)
+        return true
+
+
+## ژست پرتاب مشعل — پیش‌فرض: یورش کوتاه؛ پلتاست ژست مشعلِ دستی دارد
+func _torch_throw_anim() -> void:
+        _strike_anim()
 
 
 # ---------------- حرکت (لایه ۱) ----------------
@@ -271,7 +304,7 @@ func _bob_visual(moving: bool) -> void:
         _body.position.y = lerpf(_body.position.y, target, k)
 
 
-## یورش کوتاه به جلو هنگام ضربه/غارت
+## یورش کوتاه به جلو هنگام ضربه/پرتاب
 func _strike_anim() -> void:
         var tw := create_tween()
         tw.tween_property(_body, "position:z", 0.14, 0.08).set_ease(Tween.EASE_OUT)
@@ -314,7 +347,6 @@ func die() -> void:
                 return
         dead = true
         engaged_unit = null
-        raiding = false
         remove_from_group("hostiles")
         died.emit(self)
         set_process(false)

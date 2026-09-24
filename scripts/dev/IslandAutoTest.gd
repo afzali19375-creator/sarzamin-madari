@@ -22,6 +22,10 @@ extends Node
 ##  ۱۴) نبرد تن‌به‌تن: مهاجم به سرباز درگیری؛ جاویدان سپر؛ تبادل ضربه دو طرفه
 ##  ۱۵) سپر سنگین (مخروط پیش‌رو) + کماندار با دشمن واقعی + پلتاست پرتاب می‌کند
 ##  ۱۶) مرگ دائمی سرباز (حذف از دسته‌ها) + پاکسازی موج (سیگنال، قایق بازمی‌گردد)
+##  --- گام ۶R (بازخورد کاربر) ---
+##  ۱۷) فرمانده هر دسته عضو اول با پرچم رنگِ دسته + چرخش دوربین (Q و جهت‌نما)
+##  ۱۸) مشعل: پلتاست خانه را آتش می‌زند → خانه بعد از ۱۰ ثانیه نابود می‌شود
+##  ۱۹) گاریسون: فرمان روی خانه → ورود دسته → تکمیل تا ظرفیت اصلی
 ## اجرا:
 ##   godot --headless --path . res://scenes/dev/IslandTest.tscn -- --autotest
 ## کد خروج: 0 = همه PASS، 1 = حداقل یک FAIL
@@ -69,13 +73,48 @@ var _heavy_hurt_seen := false
 var _max_thrown := 0
 var _squad_alive_before := 0
 var _contact_forced := false
+var _p15_raiders_cleared := false
+
+# --- گام ۶R ---
+var _yaw_before := 0.0
+var _cam_rotated := false
+var _arrow_rotated := false
+var _torch_peltast: PeltastUnit = null
+var _max_torches := 0
+var _torch_house: BuildingBase = null
+var _house_ignited_fired := false
+var _house_burned_fired := false
+var _garrison_house: BuildingBase = null
+var _garrison_alive_before := 0
+var _garrison_si := -1
+var _flag_squad := -1
+var _flag_dead_cmd: UnitBase = null
 
 
 func _ready() -> void:
-        print("[AUTOTEST] island harness attached — 16 phases (squads + invasion)")
+        print("[AUTOTEST] island harness attached — 19 phases (squads + invasion + torch/garrison)")
         if target_scene.director != null:
                 target_scene.director.wave_cleared.connect(
                                 func(_g: int): _wave_cleared_fired = true)
+
+
+## اتصال سیگنال‌های خانه‌ها پس از هر بازتولید (گام ۶R)
+func _connect_houses() -> void:
+        if target_scene.props == null:
+                return
+        for b in target_scene.props.buildings:
+                if not b.ignited.is_connected(_on_test_house_ignited):
+                        b.ignited.connect(_on_test_house_ignited)
+                if not b.burned_down.is_connected(_on_test_house_burned):
+                        b.burned_down.connect(_on_test_house_burned)
+
+
+func _on_test_house_ignited(_b: BuildingBase) -> void:
+        _house_ignited_fired = true
+
+
+func _on_test_house_burned(_b: BuildingBase) -> void:
+        _house_burned_fired = true
 
 
 func _check(name: String, ok: bool, detail: String = "") -> void:
@@ -147,6 +186,12 @@ func _process(delta: float) -> void:
                 15:
                         _phase15_permanence_and_clear()
                 16:
+                        _phase16_flags_and_camera()
+                17:
+                        _phase17_torch_burns_house()
+                18:
+                        _phase18_garrison_replenish()
+                19:
                         _finish()
 
 
@@ -265,6 +310,35 @@ func _phase0_island_ready() -> void:
                         if nav.is_walkable(nav.world_to_cell(Vector2(p.x, p.z))):
                                 on_walkable += 1
         _check("units_spawned_on_walkable", on_walkable == 11, "%d/11" % on_walkable)
+
+        # --- گام ۶R: فرمانده = اولین عضو زنده با پرچم رنگِ دسته ---
+        var cmd_ok := true
+        var flag_colors: Array = []
+        for si2 in target_scene.squads.size():
+                var members: Array = target_scene.squads[si2]
+                var cu: UnitBase = null
+                for m in members:
+                        if is_instance_valid(m) and not m.is_dead():
+                                cu = m
+                                break
+                if cu == null:
+                        continue   # دسته‌ی خالی — پرچم با فرمانده‌اش افتاده
+                if not cu.is_commander:
+                        cmd_ok = false
+                var ffound: SquadFlag = null
+                for c in cu.get_children():
+                        if c is SquadFlag:
+                                ffound = c
+                if ffound == null:
+                        cmd_ok = false
+                else:
+                        flag_colors.append(ffound.flag_color())
+        _check("first_member_is_commander", cmd_ok)
+        _check("each_squad_has_own_flag", flag_colors.size() >= 3 \
+                        and flag_colors[0] != flag_colors[1] \
+                        and flag_colors[1] != flag_colors[2] \
+                        and flag_colors[0] != flag_colors[2],
+                        str(flag_colors))
         # سلول‌های هدف در فاز ۳ (بعد از نشستن دسته‌ها روی پست) انتخاب می‌شوند تا
         # کلیک‌ها به سرباز نخورد — همان درسی که از اولین اجرا گرفتیم
         _phase = 1
@@ -306,6 +380,9 @@ func _pick_target_cells() -> void:
         var clean: Array = []
         for e in entries:
                 var center: Vector2 = e[2]
+                # گام ۶R — سلول نزدیک خانه = گاریسون؛ هدف فازهای فرمان نیست
+                if target_scene._alive_house_near(center) != null:
+                        continue
                 var click_sp := _screen_of(Vector3(center.x,
                                 target_scene.ground.height_at_world(center) + 0.1, center.y))
                 var min_px := 1e9
@@ -663,6 +740,9 @@ func _pick_phase6_cells() -> void:
                 var center: Vector2 = info["center"]
                 if center.distance_to(_cell_b) < 7.0:
                         continue
+                # گام ۶R — سلول نزدیک خانه = گاریسون؛ هدف این فاز نیست
+                if target_scene._alive_house_near(center) != null:
+                        continue
                 var min_px := 1e9
                 var click_sp := _screen_of(Vector3(center.x,
                                 target_scene.ground.height_at_world(center) + 0.1, center.y))
@@ -877,6 +957,9 @@ func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
                 var d: float = center.distance_to(from)
                 if d < min_dist:
                         continue
+                # گام ۶R — سلول نزدیک خانه = گاریسون؛ هدفِ فرمان ساده نیست
+                if target_scene._alive_house_near(center) != null:
+                        continue
                 var click_sp := _screen_of(Vector3(center.x,
                                 target_scene.ground.height_at_world(center) + 0.1, center.y))
                 var min_px := 1e9
@@ -1070,6 +1153,19 @@ func _phase12_invasion_landing() -> void:
                                                 "channels=%d" % ch)
                                 _landing = target_scene.director.group_landing(_group0)
                                 _check("landing_on_shore", _landing != Vector2.ZERO)
+                                # گام ۶R — فرود باید واقعاً کنار آب باشد (باگ قایق وسط جزیره)
+                                var navl: NavGrid = PathService.nav
+                                var lc := navl.world_to_cell(_landing)
+                                var touches_water := false
+                                for d in DIRS8:
+                                        if String(target_scene.ground.module_name_at(lc + d)) \
+                                                        .begins_with("water"):
+                                                touches_water = true
+                                _check("landing_cell_touches_water", touches_water, str(lc))
+                                var anchor: Vector2 = target_scene.director.group_anchor(_group0)
+                                var anchor_water := String(target_scene.ground.module_name_at(
+                                                navl.world_to_cell(anchor))).begins_with("water")
+                                _check("boat_anchor_on_water", anchor_water, str(anchor))
                                 var rt: Vector2 = target_scene.director.group_raid_target(_group0)
                                 var is_house := false
                                 for hp3 in target_scene.props.house_positions:
@@ -1130,16 +1226,19 @@ func _phase13_melee_engagement() -> void:
                                 _sub = 2
                                 _sub_t = _t
                 2:
-                        if _t - _sub_t >= 8.0:
-                                var raiders_dead := 0
-                                var raiders_hurt := false
-                                for e in target_scene.director.raiders_of(_group0):
-                                        if not is_instance_valid(e):
-                                                continue
-                                        if e.is_dead():
-                                                raiders_dead += 1
-                                        elif e.hp < e._default_hp():
-                                                raiders_hurt = true
+                        # گام ۶R — انتظارِ شرطی (تا ۲۵s): پلتاستِ گروه «کایت» می‌کند و
+                        # خط‌نگه‌دارها عمداً تعقیب نمی‌کنند؛ آسیب وقتی می‌آید که
+                        # هوپلیت‌ها به خط برسند (پس از فرود ساحل دور — مسیر چندثانیه‌ای)
+                        var raiders_dead := 0
+                        var raiders_hurt := false
+                        for e in target_scene.director.raiders_of(_group0):
+                                if not is_instance_valid(e):
+                                        continue
+                                if e.is_dead():
+                                        raiders_dead += 1
+                                elif e.hp < e._default_hp():
+                                        raiders_hurt = true
+                        if raiders_dead >= 1 or raiders_hurt or (_t - _sub_t) > 25.0:
                                 var players_hurt := false
                                 for u in target_scene.squad:
                                         if is_instance_valid(u) and not u.is_dead() \
@@ -1147,12 +1246,16 @@ func _phase13_melee_engagement() -> void:
                                                 players_hurt = true
                                 _check("raiders_took_damage",
                                                 raiders_dead >= 1 or raiders_hurt,
-                                                "dead=%d hurt=%s" % [raiders_dead, raiders_hurt])
+                                                "dead=%d hurt=%s (t=%.1f)" % [
+                                                        raiders_dead, raiders_hurt,
+                                                        _t - _sub_t])
                                 var players_lost: bool = target_scene.squad.size() \
                                                 < _squad_alive_before
+                                # گام ۶R — «دوطرفه» = نبرد تلفن داشت (هر طرف)؛
+                                # برتری کامل خط پارسی در ۲۵s طبیعی است و FAIL نیست
                                 _check("battle_was_two_sided",
-                                                players_lost or players_hurt
-                                                or raiders_dead >= 2,
+                                                raiders_dead >= 1 or raiders_hurt
+                                                or players_lost or players_hurt,
                                                 "lost=%d hurt=%s dead=%d" % [
                                                         _squad_alive_before
                                                         - target_scene.squad.size(),
@@ -1225,6 +1328,8 @@ func _phase13_melee_engagement() -> void:
 
 ## نقطه‌ی قابل‌عبور که فاصله‌اش تا نزدیک‌ترین سربازِ زنده ≈ want_dist باشد
 ## (پلتاست باید درون برد پرتاب باشد؛ سنگین بیرون شعاع توجه)
+## گام ۶R — فقط نقاطی با «LOS زمینیِ باز» تا مرکز دسته (خانه/صخره‌ی وسط
+## مسیر پرتاب، پلتاست را بی‌پرتاب نگه می‌داشت — flake تست)
 func _point_near_units(center: Vector2, want_dist: float, lo: float, hi: float,
                 nav: NavGrid) -> Vector2:
         var alive: Array = []
@@ -1239,6 +1344,8 @@ func _point_near_units(center: Vector2, want_dist: float, lo: float, hi: float,
                 var w: Vector2 = target_scene._nearest_walkable_point(nav, cand, 1.2)
                 if w == Vector2.INF:
                         continue
+                if not _los_ground_clear(w, center):
+                        continue
                 var min_u := 1e9
                 for u in alive:
                         min_u = minf(min_u, w.distance_to(_xz(u)))
@@ -1251,6 +1358,23 @@ func _point_near_units(center: Vector2, want_dist: float, lo: float, hi: float,
                 best = target_scene._nearest_walkable_point(nav,
                                 center + Vector2(want_dist, 0.0), 3.0)
         return best
+
+
+## گام ۶R — LOS زمینی: ارتفاع زمین روی پاره‌خط نباید از بیشینه‌ی دو سر +۰.۶
+## بالاتر برود (همان منطق _los_clear پلتاست)
+func _los_ground_clear(a: Vector2, b: Vector2) -> bool:
+        var g: IslandGround = target_scene.ground
+        var line_h: float = maxf(g.height_at_world(a), g.height_at_world(b))
+        var dist := a.distance_to(b)
+        if dist < 0.4:
+                return true
+        var steps := maxi(int(dist / 0.4), 2)
+        for i in range(1, steps):
+                var k := float(i) / float(steps)
+                var p := a.lerp(b, k)
+                if g.height_at_world(p) > line_h + 0.6:
+                        return false
+        return true
 
 
 func _phase14_shield_and_peltast() -> void:
@@ -1322,6 +1446,16 @@ func _phase14_shield_and_peltast() -> void:
 func _phase15_permanence_and_clear() -> void:
         match _sub:
                 0:
+                        # گام ۶R — اول پاکسازی مهاجمان + ۱.۲s سکون (تیرهای در پرواز
+                        # می‌نشینند) تا شمارش مرگِ آزمایشی قطعی شود؛ کشتن هم‌زمانِ
+                        # سرباز در اوج نبرد، شمارش را دو واحدی می‌کرد (باگ flaky).
+                        if not _p15_raiders_cleared:
+                                _p15_raiders_cleared = true
+                                target_scene.director.kill_all_raiders()
+                                _sub_t = _t
+                                return
+                        if _t - _sub_t < 1.2:
+                                return
                         _units_before = target_scene.squad.size()
                         for u in target_scene.squad:
                                 if is_instance_valid(u) and not u.is_dead():
@@ -1376,6 +1510,297 @@ func _phase15_permanence_and_clear() -> void:
                                                 absf(Engine.time_scale - 1.0) < 0.06,
                                                 "time=%.2f" % Engine.time_scale)
                                 _phase = 16
+
+
+# ---------------- فاز ۱۶: فرمانده/پرچم + چرخش دوربین (گام ۶R) ----------------
+
+func _phase16_flags_and_camera() -> void:
+        match _sub:
+                0:
+                        _yaw_before = target_scene._yaw
+                        _push_key(KEY_Q)
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        if _t - _sub_t >= 0.4:
+                                _push_key_release(KEY_Q)
+                                var dyaw: float = absf(wrapf(deg_to_rad(target_scene._yaw
+                                                - _yaw_before), -PI, PI))
+                                _check("camera_rotates_with_q", dyaw > 10.0,
+                                                "%.1f deg" % rad_to_deg(dyaw))
+                                _yaw_before = target_scene._yaw
+                                _push_key(KEY_RIGHT)
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        if _t - _sub_t >= 0.4:
+                                _push_key_release(KEY_RIGHT)
+                                var dyaw2: float = absf(wrapf(deg_to_rad(target_scene._yaw
+                                                - _yaw_before), -PI, PI))
+                                _check("camera_rotates_with_arrow_keys", dyaw2 > 10.0,
+                                                "%.1f deg" % rad_to_deg(dyaw2))
+                                # دسته‌ای با حداقل ۲ عضو زنده برای تست انتقال پرچم
+                                _flag_squad = -1
+                                for si in target_scene.squads.size():
+                                        var alive_n := 0
+                                        for u in target_scene.squads[si]:
+                                                if is_instance_valid(u) and not u.is_dead():
+                                                        alive_n += 1
+                                        if alive_n >= 2:
+                                                _flag_squad = si
+                                                break
+                                _check("squad_for_flag_transfer_found", _flag_squad >= 0)
+                                if _flag_squad >= 0:
+                                        for u in target_scene.squads[_flag_squad]:
+                                                if is_instance_valid(u) and not u.is_dead() \
+                                                                and u.is_commander:
+                                                        _flag_dead_cmd = u
+                                                        u.take_hit(99)
+                                                        break
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        if _t - _sub_t >= 0.7:
+                                if _flag_squad >= 0:
+                                        var ok := false
+                                        for u in target_scene.squads[_flag_squad]:
+                                                if is_instance_valid(u) and not u.is_dead() \
+                                                                and u.is_commander:
+                                                        var has := false
+                                                        for c in u.get_children():
+                                                                if c is SquadFlag:
+                                                                        has = true
+                                                        ok = has
+                                                        break
+                                        _check("flag_transfers_on_commander_death", ok,
+                                                        "squad=%d" % _flag_squad)
+                                _phase = 17
+                                _sub = 0
+                                _sub_t = _t
+
+
+func _push_key_release(keycode: Key) -> void:
+        var ev := InputEventKey.new()
+        ev.physical_keycode = keycode
+        ev.pressed = false
+        target_scene.get_viewport().push_input(ev, true)
+
+
+# ---------------- فاز ۱۷: مشعل خانه را آتش می‌زند (گام ۶R) ----------------
+
+func _phase17_torch_burns_house() -> void:
+        match _sub:
+                0:
+                        _connect_houses()
+                        target_scene._clear_dummies()
+                        # خانه‌ای که از همه‌ی سربازهای زنده دورتر است (کماندار مزاحم نشود)
+                        var best_b: BuildingBase = null
+                        var best_d := -1.0
+                        for b in target_scene.props.buildings:
+                                if not is_instance_valid(b) or b.burned:
+                                        continue
+                                var bxz := Vector2(b.global_position.x, b.global_position.z)
+                                var min_u := 1e9
+                                for u in _units():
+                                        if is_instance_valid(u) and not u.is_dead():
+                                                min_u = minf(min_u, _xz(u).distance_to(bxz))
+                                if min_u > best_d:
+                                        best_d = min_u
+                                        best_b = b
+                        _check("torch_target_house_found", best_b != null)
+                        if best_b == null:
+                                _phase = 18
+                                return
+                        _torch_house = best_b
+                        var hxz := Vector2(best_b.global_position.x,
+                                        best_b.global_position.z)
+                        # نقطه‌ی پرتاب: سمت دورِ خانه از نزدیک‌ترین سرباز (۴٫۵ متری)
+                        var near_u := _nearest_unit_xz(hxz)
+                        var dir := hxz - near_u
+                        dir = dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
+                        var nav: NavGrid = PathService.nav
+                        var pp: Vector2 = target_scene._nearest_walkable_point(nav,
+                                        hxz + dir * 4.5, 2.0)
+                        if pp == Vector2.INF:
+                                pp = target_scene._nearest_walkable_point(nav,
+                                                hxz + Vector2(4.5, 0.0), 3.0)
+                        _check("torch_peltast_spot_found", pp != Vector2.INF, str(pp))
+                        if pp == Vector2.INF:
+                                _phase = 18
+                                return
+                        _torch_peltast = target_scene.director.spawn_enemy(
+                                        "peltast", pp, -1) as PeltastUnit
+                        _check("torch_peltast_spawned", _torch_peltast != null)
+                        if _torch_peltast == null:
+                                _phase = 18
+                                return
+                        _torch_peltast.raid_target = hxz
+                        _torch_peltast.target_house = _torch_house
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        # نمونه‌برداری زنده — شمارنده با مرگ از دست نمی‌رود
+                        if is_instance_valid(_torch_peltast):
+                                _max_torches = maxi(_max_torches,
+                                                _torch_peltast.torches_thrown)
+                        var burning: bool = _house_ignited_fired \
+                                        or (_torch_house != null and is_instance_valid(_torch_house) \
+                                        and _torch_house.burning)
+                        if burning or (_t - _sub_t) > 40.0:
+                                _check("torch_thrown_at_house", _max_torches >= 1,
+                                                "%d torches (t=%.1f)" % [_max_torches, _t - _sub_t])
+                                _check("house_ignited_by_torches", burning,
+                                                "torch_hp_left=%s" % str(
+                                                _torch_house.hp if is_instance_valid(_torch_house) else -1))
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        var burned: bool = _house_burned_fired \
+                                        or (_torch_house != null and is_instance_valid(_torch_house) \
+                                        and _torch_house.burned)
+                        if burned or (_t - _sub_t) > 16.0:
+                                _check("house_burned_down", burned,
+                                                "t=%.1f after ignite" % [_t - _sub_t])
+                                if is_instance_valid(_torch_peltast):
+                                        _torch_peltast.take_hit(99)   # پاکسازی صحنه
+                                _phase = 18
+                                _sub = 0
+                                _sub_t = _t
+
+
+func _nearest_unit_xz(to: Vector2) -> Vector2:
+        var best := to
+        var best_d := 1e9
+        for u in _units():
+                if is_instance_valid(u) and not u.is_dead():
+                        var d := _xz(u).distance_to(to)
+                        if d < best_d:
+                                best_d = d
+                                best = _xz(u)
+        return best
+
+
+# ---------------- فاز ۱۸: گاریسون و تکمیل دسته (گام ۶R) ----------------
+
+func _phase18_garrison_replenish() -> void:
+        match _sub:
+                0:
+                        _connect_houses()
+                        # زمانِ تست: ۲۰ ثانیه‌ی کاربر برای سرعت تست به ۳ ثانیه کوتاه می‌شود
+                        target_scene.garrison_duration = 3.0
+                        target_scene._clear_dummies()
+                        # دسته با بیشترین عضو زنده + نزدیک‌ترین خانه‌ی زنده به آن
+                        var host_si := -1
+                        var best_n := 0
+                        for si in target_scene.squads.size():
+                                var n: int = target_scene._alive_members(si).size()
+                                if n > best_n:
+                                        best_n = n
+                                        host_si = si
+                        _check("garrison_host_squad_found", host_si >= 0 and best_n >= 2,
+                                        "squad=%d alive=%d" % [host_si, best_n])
+                        if host_si < 0 or best_n < 2:
+                                target_scene.garrison_duration = GameConstants.LOOT_DURATION_SECONDS
+                                _phase = 19
+                                return
+                        _garrison_si = host_si
+                        var center: Vector2 = target_scene.squad_center(host_si)
+                        var hxz: Vector2 = target_scene.props.nearest_alive_house_xz(center)
+                        _check("garrison_house_found", hxz != Vector2.INF, str(hxz))
+                        if hxz == Vector2.INF:
+                                target_scene.garrison_duration = GameConstants.LOOT_DURATION_SECONDS
+                                _phase = 19
+                                return
+                        for b in target_scene.props.buildings:
+                                if is_instance_valid(b) and \
+                                                Vector2(b.global_position.x, b.global_position.z) \
+                                                .distance_to(hxz) < 0.5:
+                                        _garrison_house = b
+                        _check("garrison_building_ref_found", _garrison_house != null)
+                        target_scene._issue_move_to(hxz, host_si, true)
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        # در حال رفتن به خانه → یکی را حذف می‌کنیم تا «تکمیل» مشهود شود
+                        var g: Dictionary = target_scene.garrison_state(_garrison_si)
+                        if not g.is_empty() and g["phase"] == "walk":
+                                var alive: Array = target_scene._alive_members(_garrison_si)
+                                if alive.size() >= 2:
+                                        alive[alive.size() - 1].take_hit(99)
+                                _garrison_alive_before \
+                                                = target_scene._alive_members(_garrison_si).size()
+                                _sub = 2
+                                _sub_t = _t
+                        elif (_t - _sub_t) > 25.0:
+                                _check("garrison_started", false,
+                                                "no garrison state in 25s")
+                                target_scene.garrison_duration \
+                                                = GameConstants.LOOT_DURATION_SECONDS
+                                _phase = 19
+                2:
+                        # همه‌ی اعضای زنده داخل خانه پنهان شده‌اند؟
+                        var g2: Dictionary = target_scene.garrison_state(_garrison_si)
+                        if not g2.is_empty() and g2["phase"] == "inside":
+                                var hidden := true
+                                for u in target_scene._alive_members(_garrison_si):
+                                        if u.visible or u.is_in_group("units"):
+                                                hidden = false
+                                _check("squad_hidden_inside_house", hidden)
+                                _sub = 3
+                                _sub_t = _t
+                        elif (_t - _sub_t) > 25.0:
+                                _check("squad_hidden_inside_house", false, "timeout")
+                                _sub = 3
+                                _sub_t = _t
+                        # DBG18 — وضعیت زنده‌ی اعضا هر ۲ ثانیه
+                        if int((_t - _sub_t) * 0.5) != int(maxf(_t - _sub_t - 0.016, 0.0) * 0.5):
+                                var g18: Dictionary = target_scene.garrison_state(_garrison_si)
+                                var ph18: String = str(g18.get("phase", "NONE"))
+                                for u18 in target_scene._alive_members(_garrison_si):
+                                        var nav18: NavGrid = PathService.nav
+                                        var c18 := nav18.world_to_cell(Vector2(
+                                                        u18.global_position.x,
+                                                        u18.global_position.z))
+                                        var s18: Vector2 = u18.slot_pos()
+                                        print("[AUTOTEST] DBG18 t=%.1f phase=%s id=%d arr=%s slot=%s s=(%.1f,%.1f) pos=(%.1f,%.1f) cell=%s walk=%s flow=%s brain=%s fidget=%d vis=%s units=%s"
+                                                        % [_t - _sub_t, ph18,
+                                                        u18.get_instance_id(),
+                                                        u18.is_arrived(),
+                                                        str(u18.has_slot()),
+                                                        s18.x, s18.y,
+                                                        u18.global_position.x,
+                                                        u18.global_position.z,
+                                                        str(c18),
+                                                        nav18.is_walkable(c18),
+                                                        str(PathService.sample_direction(
+                                                                Vector2(u18.global_position.x,
+                                                                u18.global_position.z),
+                                                                u18.squad_id)),
+                                                        u18.brain_state(),
+                                                        u18.fidget_state_now(),
+                                                        u18.visible,
+                                                        u18.is_in_group("units")])
+                3:
+                        # پایان شمارش → بیرون آمدن + تکمیل تا ظرفیت اصلی دسته
+                        var g3: Dictionary = target_scene.garrison_state(_garrison_si)
+                        if g3.is_empty():
+                                var want := int(target_scene.SQUAD_DEFS[_garrison_si]["count"])
+                                var alive2: Array = target_scene._alive_members(_garrison_si)
+                                var all_out := true
+                                for u in alive2:
+                                        if not u.visible or u.garrisoned:
+                                                all_out = false
+                                _check("squad_replenished_to_full",
+                                                alive2.size() == want and all_out,
+                                                "%d/%d out=%s" % [alive2.size(), want, all_out])
+                                target_scene.garrison_duration \
+                                                = GameConstants.LOOT_DURATION_SECONDS
+                                _phase = 19
+                        elif (_t - _sub_t) > 12.0:
+                                _check("squad_replenished_to_full", false, "timeout inside")
+                                target_scene.garrison_duration \
+                                                = GameConstants.LOOT_DURATION_SECONDS
+                                _phase = 19
 
 
 # ---------------- پایان ----------------

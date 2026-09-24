@@ -5,7 +5,7 @@ class_name GameConstants
 
 # ---------- هویت بیلد ----------
 ## روی صفحه‌ی تست و منو نمایش داده می‌شود تا همیشه مشخص باشد کاربر کدام نسخه را اجرا می‌کند
-const BUILD_ID := "2026-09-24-r7"
+const BUILD_ID := "2026-09-25-r10"
 
 # ---------- زمان‌بندی و اسلوموشن (§۶ پرامت) ----------
 const SLOWMO_SCALE := 0.5                 # قانون: انتخاب جوخه یا نگه‌داشتن Space → 0.5
@@ -42,7 +42,7 @@ const CAM_HEIGHT0 := 18.0
 const CAM_MIN_HEIGHT := 12.0
 const CAM_MAX_HEIGHT := 26.0
 const CAM_ZOOM_SPEED := 6.0               # m/s
-const CAM_ROTATE_SPEED := 90.0            # درجه بر ثانیه (Q/E)
+const CAM_ROTATE_SPEED := 120.0           # درجه بر ثانیه (Q/E/جهت‌نما) — بازخورد کاربر: چرخش حس‌بهتر
 const CAM_NEAR := 0.1
 const CAM_FAR := 200.0
 
@@ -73,7 +73,6 @@ const FRIENDLY_CORRIDOR_HALF_W := 0.8    # نیم‌پهنای کریدور «ب
 const ENEMY_CHANNEL_BASE := 4            # کانال FlowField گروه‌های هجوم (۴..۷) — ۰..۳ مال دسته‌های بازیکن
 const ENEMY_AGGRO_UNITS := 3.4           # سربازِ در این شعاع، هدف درگیری دشمن می‌شود (m)
 const ENEMY_ENGAGE_RANGE := 1.4          # برد تماس نزدیک دشمن (m)
-const ENEMY_RAID_REACH := 1.7            # فاصله‌ی «رسیدن به خانه» برای غارت نمایشی (m)
 const ENEMY_SCAN_INTERVAL := 0.3         # فاصله‌ی جست‌وجوی سرباز (s)
 
 const HOPLITE_LIGHT_HP := 2              # سبک: سریع، کم‌جان
@@ -111,8 +110,21 @@ const DEATH_FADE_SECONDS := 1.6          # محو جسد (لکه‌ی خون د�
 
 # ---------- قوانین آهنین بعدی (برای گام‌های آینده) ----------
 const FIRE_DESTROY_SECONDS := 10.0        # خانه در آتش پس از 10 ثانیه نابود می‌شود
-const RESUPPLY_SECONDS := 5.0             # بازپرگری داخل خانه: 5 ثانیه
-const LOOT_DURATION_SECONDS := 20.0       # دشمن برای غارت خانه
+## مدت اشغال خانه توسط دسته‌ی خودی تا «تکمیل دسته» — عدد کاربر: ۲۰ ثانیه
+const LOOT_DURATION_SECONDS := 20.0
+
+# ---------- گام ۶R — بازخورد کاربر: مشعل، اشغال خانه، فرمانده و پرچم ----------
+## ⚠️ اعداد این بخش «پیش‌فرض موقت»‌اند (کاربر فقط ۲۰ ثانیه را قطعی داد)؛
+## بالانس بعد از تست کاربر قطعی می‌شود.
+const TORCH_RANGE := 5.5                  # برد پرتاب مشعل به خانه (m)
+const TORCH_COOLDOWN := 3.2               # فاصله‌ی پرتاب مشعل‌ها (s)
+const TORCH_SPEED := 9.0                  # سرعت مشعل پرتابی (m/s)
+const HOUSE_TORCH_HP := 2                 # تعداد مشعل لازم تا آتش‌گرفتن خانه
+const ENEMY_RAID_STANDOFF := 4.2          # مهاجمان نزدیک‌تر از این به خانه نمی‌روند (m)
+const GARRISON_SNAP := 2.0                # فرمان روی سلولِ این فاصله از خانه = اشغال خانه (m)
+const GARRISON_EMERGE_RING := 2.1         # شعاع بیرون‌آمدن/آرایش بعد از خروج از خانه (m)
+const SQUAD_FLAG_W := 0.52                # پهنای پرچم فرمانده (m)
+const SQUAD_FLAG_H := 0.34                # بلندی پارچه‌ی پرچم (m)
 
 # ---------- پالت هخامنشی (§۱۴ پرامت — HEX مرجع) ----------
 const COL_TURQUOISE := Color("1f8a8a")    # فیروزه‌ای (UI)

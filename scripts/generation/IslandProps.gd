@@ -5,6 +5,7 @@ extends Node3D
 ##   * خانه‌ی گنبددار: دیوار #E8D9B8 + کاشی گنبد #3AB0A0 + در چوبی #6B4A2E
 ##   * بادگیر #D4B483 روی یکی از خانه‌ها | آتشکده‌ی سنگی #C4B5A0 (چک‌پوینت آینده)
 ##   * خانه‌ها ۲×۲ سلول NavGrid را اشغال و مسدود می‌کنند (واحدها دورشان می‌پیچند)
+##   * گام ۶R: هر بنا BuildingBase است — جان دارد، با مشعل آتش می‌گیرد، می‌سوزد
 ##   * بوته/درخت مینیمال سبک Bad North — مانع ناوبری نیستند
 ##   * چیدمان قطعی با seed جزیره (بازتولید = همان روستا)
 
@@ -14,6 +15,8 @@ const SITE_HALF := 1            # نیم‌اندازه‌ی سایت: ۲×۲ س
 
 var house_positions: Array[Vector3] = []
 var blocked_cells: Array[Vector2i] = []
+## همه‌ی بناهای جان‌دار (خانه‌ها + آتشکده) — گروه «buildings» هم می‌شوند
+var buildings: Array[BuildingBase] = []
 
 var _rng := RandomNumberGenerator.new()
 
@@ -24,6 +27,7 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
                 c.free()
         house_positions.clear()
         blocked_cells.clear()
+        buildings.clear()
         _rng.seed = hash("props:%d" % seed_value)
 
         var sites := _pick_house_sites(ground, nav)
@@ -39,6 +43,21 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
                 else:
                         _build_fire_temple(pos)
         _build_vegetation(ground, nav, island, sites)
+
+
+## نزدیک‌ترین بنای زنده (نسوخته) — برای هدف مشعل دشمن و اشغال خودی
+func nearest_alive_house_xz(from: Vector2) -> Vector2:
+        var best := Vector2.INF
+        var best_d := 1e9
+        for b in buildings:
+                if not is_instance_valid(b) or b.burned:
+                        continue
+                var bxz := Vector2(b.global_position.x, b.global_position.z)
+                var d := bxz.distance_to(from)
+                if d < best_d:
+                        best_d = d
+                        best = bxz
+        return best
 
 
 # ---------------- انتخاب سایت خانه‌ها ----------------
@@ -89,9 +108,7 @@ func _stamp_site_blocked(nav: NavGrid, cell00: Vector2i) -> void:
 # ---------------- خانه‌ی گنبددار هخامنشی ----------------
 
 func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
-        var root := Node3D.new()
-        root.position = pos
-        add_child(root)
+        var root := _make_building(pos)
 
         # بدنه‌ی استوانه‌ای با دیوار گچی
         var wall := MeshInstance3D.new()
@@ -101,7 +118,7 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         wm.height = 0.85
         wall.mesh = wm
         wall.position.y = 0.42
-        wall.material_override = _flat_mat(GameConstants.COL_DOME_WALL)
+        wall.material_override = _building_mat(root, GameConstants.COL_DOME_WALL)
         root.add_child(wall)
 
         # گنبد کاشی فیروزه‌ای
@@ -111,7 +128,7 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         dm.height = 0.85
         dome.mesh = dm
         dome.position.y = 0.85
-        dome.material_override = _flat_mat(GameConstants.COL_DOME_TILE)
+        dome.material_override = _building_mat(root, GameConstants.COL_DOME_TILE)
         root.add_child(dome)
 
         # نوک طلایی کوچک گنبد
@@ -121,7 +138,7 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         tm.height = 0.14
         tip.mesh = tm
         tip.position.y = 1.28
-        tip.material_override = _flat_mat(GameConstants.COL_GOLD)
+        tip.material_override = _building_mat(root, GameConstants.COL_GOLD)
         root.add_child(tip)
 
         # در چوبی (سمت +Z)
@@ -130,7 +147,7 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         dm2.size = Vector3(0.34, 0.52, 0.08)
         door.mesh = dm2
         door.position = Vector3(0.0, 0.26, 1.0)
-        door.material_override = _flat_mat(GameConstants.COL_DOOR_WOOD)
+        door.material_override = _building_mat(root, GameConstants.COL_DOOR_WOOD)
         root.add_child(door)
 
         # بادگیر — امضای معماری ایرانی (روی یکی از خانه‌ها)
@@ -140,14 +157,14 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
                 wc_mesh.size = Vector3(0.44, 1.55, 0.44)
                 wc.mesh = wc_mesh
                 wc.position = Vector3(-0.55, 1.1, -0.35)
-                wc.material_override = _flat_mat(GameConstants.COL_WINDCATCHER)
+                wc.material_override = _building_mat(root, GameConstants.COL_WINDCATCHER)
                 root.add_child(wc)
                 var cap := MeshInstance3D.new()
                 var cap_mesh := BoxMesh.new()
                 cap_mesh.size = Vector3(0.5, 0.1, 0.5)
                 cap.mesh = cap_mesh
                 cap.position = Vector3(-0.55, 1.9, -0.35)
-                cap.material_override = _flat_mat(GameConstants.COL_TILE_PATTERN)
+                cap.material_override = _building_mat(root, GameConstants.COL_TILE_PATTERN)
                 root.add_child(cap)
         # چرخش قطعی خانه برای تنوع
         root.rotation.y = _rng.randf() * TAU
@@ -155,16 +172,14 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
 
 ## آتشکده‌ی سنگی (چک‌پوینت گام‌های بعد) — مکعب ساده با پیش‌کمره‌ی بالا
 func _build_fire_temple(pos: Vector3) -> void:
-        var root := Node3D.new()
-        root.position = pos
-        add_child(root)
+        var root := _make_building(pos)
 
         var body := MeshInstance3D.new()
         var bm := BoxMesh.new()
         bm.size = Vector3(1.5, 0.95, 1.5)
         body.mesh = bm
         body.position.y = 0.47
-        body.material_override = _flat_mat(GameConstants.COL_FIRETEMPLE)
+        body.material_override = _building_mat(root, GameConstants.COL_FIRETEMPLE)
         root.add_child(body)
 
         var top := MeshInstance3D.new()
@@ -172,7 +187,8 @@ func _build_fire_temple(pos: Vector3) -> void:
         tm.size = Vector3(1.1, 0.5, 1.1)
         top.mesh = tm
         top.position.y = 1.18
-        top.material_override = _flat_mat(GameConstants.COL_FIRETEMPLE.lerp(Color.WHITE, 0.12))
+        top.material_override = _building_mat(root,
+                        GameConstants.COL_FIRETEMPLE.lerp(Color.WHITE, 0.12))
         root.add_child(top)
 
         var door := MeshInstance3D.new()
@@ -180,9 +196,26 @@ func _build_fire_temple(pos: Vector3) -> void:
         dm.size = Vector3(0.36, 0.55, 0.08)
         door.mesh = dm
         door.position = Vector3(0.0, 0.28, 0.76)
-        door.material_override = _flat_mat(GameConstants.COL_DOOR_WOOD)
+        door.material_override = _building_mat(root, GameConstants.COL_DOOR_WOOD)
         root.add_child(door)
         root.rotation.y = _rng.randf() * TAU
+
+
+## بنای جان‌دار: در گروه «buildings» + ثبت در buildings
+func _make_building(pos: Vector3) -> BuildingBase:
+        var b := BuildingBase.new()
+        b.position = pos
+        add_child(b)
+        b.add_to_group("buildings")
+        buildings.append(b)
+        return b
+
+
+## ماتریال یکتا برای مش‌های بنا + ثبت در BuildingBase برای ذغالی‌شدن
+func _building_mat(b: BuildingBase, c: Color) -> StandardMaterial3D:
+        var m := _flat_mat(c)
+        b.register_material(m)
+        return m
 
 
 # ---------------- پوشش گیاهی مینیمال (سبک Bad North) ----------------

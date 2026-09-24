@@ -61,13 +61,23 @@ var _in_combat := false      # فلگ صریح — freed == null در Godot 4 گ
 var _shoot_cooldown := 0.0
 var _strike_cd := 0.0
 
-# ---------------- سلامت و مرگ (گام ۶ — قانون آهنین §۷: مرگ دائمی) ----------------
+## ---------------- سلامت و مرگ (گام ۶ — قانون آهنین §۷: مرگ دائمی) ----------------
 ## صفر عدد و نوار سلامت روی صفحه (§۱۰) — فقط فلش سفیدِ ضربه و افتادن هنگام مرگ
 var hp := 3
 var dead := false
 var _flash_t := 10.0
 var _flashing := false
 var _flash_restore := Color.WHITE
+
+# گام ۶R — وضعیت پرهیز از مانع (تعهد سمتِ چرخش، ضد نوسان حدی)
+var _avoid_side := 0     # 0=غیرفعال | ‎+۱‎=پادساعتگرد | ‎−۱‎=ساعتگرد
+var _avoid_hold := 0.0   # ثانیه‌ی باقی‌مانده‌ی تعهد
+
+# ---------------- گام ۶R — فرمانده و گاریسون ----------------
+## فرمانده دسته = عضو اول؛ پرچم رنگِ دسته را حمل می‌کند (SquadFlag را صحنه وصل می‌کند)
+var is_commander := false
+## داخل خانه پنهان است (گاریسون): دیداری خاموش، خارج از گروه «units»، بدون لایه‌ها
+var garrisoned := false
 
 # ---------------- بصری ----------------
 var _spawn_color: Color
@@ -134,6 +144,23 @@ func _ready() -> void:
 
         # تجهیزات اختصاصی کلاس (سپر/نیزه/کمان — در زیرکلاس‌ها)
         _build_gear()
+
+        # گام ۶R — نشان فرمانده: سربند طلایی (پرچم را صحنه وصل می‌کند)
+        if is_commander:
+                var band := MeshInstance3D.new()
+                var bm := TorusMesh.new()
+                bm.inner_radius = 0.095
+                bm.outer_radius = 0.13
+                bm.rings = 10
+                bm.ring_segments = 5
+                band.mesh = bm
+                band.position.y = 0.66
+                var gm := StandardMaterial3D.new()
+                gm.albedo_color = GameConstants.COL_GOLD
+                gm.metallic = 0.5
+                gm.roughness = 0.35
+                band.material_override = gm
+                add_child(band)
 
         _fidget_timer = _rng.randf_range(GameConstants.FIDGET_INTERVAL_MIN,
                         GameConstants.FIDGET_INTERVAL_MAX)
@@ -266,6 +293,9 @@ func _effective_arrive_radius() -> float:
 # ---------------- حلقه‌ی اصلی: ۴ لایه با اولویت ----------------
 
 func _process(delta: float) -> void:
+        # گام ۶R — داخل خانه: هیچ لایه‌ای اجرا نمی‌شود (نامرئی، خارج از گروه units)
+        if garrisoned:
+                return
         _bob_t += delta
 
         # فلش سفید ضربه (§۱۰ — بدون عدد)
@@ -320,7 +350,12 @@ func _process(delta: float) -> void:
         var dir := to_goal.normalized() if to_goal.length() < steer_r \
                         else PathService.sample_direction(pos, squad_id)
         if dir == Vector2.ZERO:
-                return  # میدان هنوز منتشر نشده یا هدف دست‌نیافتنی → ایست
+                # گام ۶R — میدان روی «سلول هدفِ تغییرمسیر» (خانه/مانعِ وسط مسیر)
+                # صفر است؛ ایستِ مطلق اینجا یخ‌زدگی دائمی می‌سازد (باگ گاریسون).
+                # → هدایت مستقیم با گارد لغزش دیوار؛ واحد دور مانع می‌پیچد.
+                dir = to_goal.normalized()
+                if dir == Vector2.ZERO:
+                        return
 
         var speed := GameConstants.SPEED_BASE * speed_mult
         var desired := dir * speed
@@ -328,7 +363,10 @@ func _process(delta: float) -> void:
         _vel = _vel.move_toward(desired, GameConstants.ACCEL * delta)
         if _vel.length_squared() < 0.0001:
                 return
-        pos += _vel * delta
+        # گام ۶R — قدم با پرهیز از مانع: اگر مسیر مستقیم بسته بود (حتی نزدیک
+        # اسلات، داخل «سایه‌ی» شعاع هدایت مستقیم) جهت را نرم می‌چرخاند تا دور
+        # مانع پیچ بخورد — رفع یخ‌زدگیِ «اسلات پشت خانه».
+        pos = _avoid_step(pos, _vel * delta, dir, delta)
         pos = _separate(pos)
         pos = PathService.clamp_to_grid(pos)
         # ایستادن روی زمین هموار (اگر provider وصل باشد) — هموارشده تا نپَرد
@@ -364,6 +402,11 @@ func is_arrived() -> bool:
 
 func is_fidgeting() -> bool:
         return _arrived and _fidget_state != 0
+
+
+## وضعیت داخلی Fidget — برای تست خودکار گام ۶R
+func fidget_state_now() -> int:
+        return _fidget_state
 
 
 ## هدف فعلی لایه ۳ (null = بیرون نبرد)
@@ -476,6 +519,34 @@ func is_ring_visible() -> bool:
         return _ring != null and _ring.visible
 
 
+# ---------------- گام ۶R — ورود/خروج از خانه (گاریسون) ----------------
+
+## ورود به خانه: پنهان، بی‌واکنش، خارج از گروه «units» (مهاجمان نمی‌بینندش)
+func enter_house() -> void:
+        garrisoned = true
+        visible = false
+        _in_combat = false
+        _combat_target = null
+        _combat_end()
+        _fidget_state = 0
+        if is_in_group("units"):
+                remove_from_group("units")
+
+
+## خروج از خانه در نقطه‌ی داده‌شده — آماده‌ی آرایش تازه
+func exit_house(at: Vector3) -> void:
+        garrisoned = false
+        visible = true
+        global_position = at
+        _y_smooth = at.y
+        _vel = Vector2.ZERO
+        _arrived = false
+        _set_color(_spawn_color)
+        _body.position.y = 0.25
+        if not is_in_group("units"):
+                add_to_group("units")
+
+
 ## «در سفر به فرمان جدید است؟» — لایه ۳ نباید فرمان کاربر را خفه کند:
 ## تا وقتی واحد دور از اسلاتِ تازه است، فقط تماسِ نزدیک (CONTACT) واکنش می‌دهد
 func _is_traveling() -> bool:
@@ -513,6 +584,72 @@ func _separate(pos: Vector2) -> Vector2:
                 if d > 0.001 and d < SEPARATION_DIST:
                         pos += (diff / d) * (SEPARATION_DIST - d) * 0.5
         return pos
+
+
+## گام ۶R — گارد لغزش: قدم بعدی روی سلول بلاک (خانه/آب/صخره) نمی‌افتد.
+## مثل _move_with دشمن: اول لغزش تک‌محوره X، بعد Y؛ اگر هر دو بسته → همان‌جا.
+func _slide_walkable(from: Vector2, next: Vector2) -> Vector2:
+        var nav := PathService.nav
+        if nav == null or nav.is_walkable(nav.world_to_cell(next)):
+                return next
+        var s1 := Vector2(next.x, from.y)
+        if nav.is_walkable(nav.world_to_cell(s1)):
+                return s1
+        var s2 := Vector2(from.x, next.y)
+        if nav.is_walkable(nav.world_to_cell(s2)):
+                return s2
+        return from
+
+
+## گام ۶R — قدمِ پرهیز از مانع: مسیر مستقیم اگر بیش از ۴۰٪ بسته بود، جهت را
+## در ۴۵°/۹۰°/۱۳۵° می‌چرخانیم و بهترین پیشرفتِ «به سمت هدف» را برمی‌داریم.
+## موانع جزیره (خانه/صخره) محدب‌اند → پیچ خوردن نرم همیشه راه باز می‌کند.
+## ⚠️ ضد نوسان: سمتِ چرخش تا ۰.۸s «تعهد» می‌شود — وگرنه tieهای هر فریم واحد را
+## در یک چرخه‌ی حدی (بالا-پایین جلوی دیوار) قفل می‌کردند.
+func _avoid_step(from: Vector2, step: Vector2, to_dir: Vector2,
+                delta: float) -> Vector2:
+        var want := step.length()
+        if want < 0.0001:
+                return from
+        var base := _slide_walkable(from, from + step)
+        if from.distance_to(base) >= want * 0.6:
+                _avoid_side = 0          # حرکت مستقیم برقرار — تعهد برداشته می‌شود
+                _avoid_hold = 0.0
+                return base
+        _avoid_hold -= delta
+        var angs: Array = [PI * 0.25, -PI * 0.25, PI * 0.5, -PI * 0.5,
+                        PI * 0.75, -PI * 0.75]
+        if _avoid_side != 0 and _avoid_hold > 0.0:
+                # فقط سمتِ تعهدشده — تا دور زدنِ مانع تمام شود
+                angs = [_avoid_side * PI * 0.25, _avoid_side * PI * 0.5,
+                                _avoid_side * PI * 0.75]
+        var best := base
+        var best_score := -1e9
+        var best_ang := 0.0
+        for ang in angs:
+                var d := to_dir.rotated(ang)
+                var cand := _slide_walkable(from, from + d * want)
+                var progress := from.distance_to(cand)
+                if progress < 0.0005:
+                        continue
+                var toward := (cand - from).normalized().dot(to_dir)
+                # امتیاز = پیشرفت واقعی × هم‌راستایی با هدف؛ چرخش زیاد جریمه می‌شود
+                var score := progress * (0.35 + 0.65 * clampf(toward, 0.0, 1.0))
+                if score > best_score:
+                        best_score = score
+                        best = cand
+                        best_ang = ang
+        if best_score <= -1e9:
+                # سمتِ تعهدشده کاملاً بسته شد → تعهد را بشکن و یک‌بار full-scan کن
+                if _avoid_side != 0:
+                        _avoid_side = 0
+                        _avoid_hold = 0.0
+                        return _avoid_step(from, step, to_dir, 0.0)
+                return base
+        if _avoid_side == 0 and best_ang != 0.0:
+                _avoid_side = 1 if best_ang > 0.0 else -1
+        _avoid_hold = 0.8
+        return best
 
 
 func _bob_visual(moving: bool) -> void:

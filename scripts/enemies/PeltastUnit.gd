@@ -3,10 +3,15 @@ extends EnemyBase
 ## پلتاست (§۶): پرتاب‌گر — «قبل از تماس می‌زند».
 ## نزدیک‌ترین سرباز در برد پرتاب → هدف؛ اگر سرباز خیلی نزدیک شد، عقب می‌رود و
 ## دوباره پرتاب می‌کند. پرتابه: JavelinProjectile (گروه «javelins» → گروه «units»).
-## بصری: پیراهن شنی، نوار سرخ سر، نیزه‌ی پرتاب در دست.
+## گام ۶R — مشعل‌زنی خانه‌ها برای «همه‌ی مهاجمان» به EnemyBase منتقل شد
+## (_house_tick — بدون اشغال خانه، بازخورد کاربر)؛ اینجا فقط:
+##   * مشعل روشن در دست (بصری)
+##   * ژست اختصاصی پرتاب مشعل (بالا بردن دست)
+## بصری: پیراهن شنی، نوار سرخ سر، نیزه‌ی پرتاب در یک دست، مشعل روشن در دست دیگر.
 
 var javelins_thrown := 0     # برای تست خودکار
 var _javelin: MeshInstance3D
+var _torch_in_hand: MeshInstance3D
 
 
 func _init() -> void:
@@ -55,6 +60,33 @@ func _build_gear() -> void:
         _javelin.material_override = wood
         add_child(_javelin)
 
+        # گام ۶R — مشعل روشن در دست دیگر (سمت چپ مدل)
+        _torch_in_hand = MeshInstance3D.new()
+        var st := BoxMesh.new()
+        st.size = Vector3(0.035, 0.035, 0.4)
+        _torch_in_hand.mesh = st
+        _torch_in_hand.rotation_degrees = Vector3(-18.0, 0.0, 0.0)
+        _torch_in_hand.position = Vector3(-0.22, 0.5, 0.1)
+        var stick_mat := StandardMaterial3D.new()
+        stick_mat.albedo_color = GameConstants.COL_DOOR_WOOD
+        stick_mat.roughness = 0.9
+        _torch_in_hand.material_override = stick_mat
+        add_child(_torch_in_hand)
+        # سرِ آتشین مشعل دستی
+        var fl := MeshInstance3D.new()
+        var fm := SphereMesh.new()
+        fm.radius = 0.06
+        fm.height = 0.12
+        fl.mesh = fm
+        fl.position = Vector3(-0.22, 0.72, 0.02)
+        var flm := StandardMaterial3D.new()
+        flm.albedo_color = GameConstants.COL_GOLD
+        flm.emission_enabled = true
+        flm.emission = GameConstants.COL_CRIMSON
+        flm.emission_energy_multiplier = 2.2
+        fl.material_override = flm
+        add_child(fl)
+
 
 ## رفتار پرتابی: دور بمان، رو به هدف، پرتاب کن (override لایه ۳)
 func _combat_tick(delta: float) -> void:
@@ -64,7 +96,6 @@ func _combat_tick(delta: float) -> void:
 
         # خیلی نزدیک شد → عقب‌نشینی کوتاه (پرتابگر بی‌سپر است)
         if d < GameConstants.PELTAST_MIN_DIST:
-                raiding = false
                 _move_with((pos - up).normalized(), delta, move_speed)
                 return
 
@@ -89,6 +120,17 @@ func _throw_anim() -> void:
 
 func _javelin_back() -> void:
         _javelin.position = Vector3(0.2, 0.45, 0.12)
+
+
+# ---------------- گام ۶R — ژست اختصاصی پرتاب مشعل ----------------
+
+## منطق مشعل در EnemyBase._house_tick است — اینجا فقط ژست دست
+func _torch_throw_anim() -> void:
+        if _torch_in_hand == null:
+                return
+        var tw := create_tween()
+        tw.tween_property(_torch_in_hand, "rotation_degrees:x", -85.0, 0.1)
+        tw.tween_property(_torch_in_hand, "rotation_degrees:x", -18.0, 0.22)
 
 
 ## مسیر پرتاب باز است؟ (ارتفاع خط = بیشینه‌ی شلیک‌کننده و هدف — شوتِ سربالایی بسته نمی‌شود)
