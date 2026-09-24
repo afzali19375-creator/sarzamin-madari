@@ -11,11 +11,13 @@ extends Node
 ##   godot --headless --path . res://scenes/dev/FlowFieldTest.tscn -- --autotest
 ## کد خروج: 0 = همه‌ی بررسی‌ها PASS، 1 = حداقل یک FAIL
 
-const CLICK_CELL := Vector2i(6, 6)          # مقصد کلیکِ شبیه‌سازی‌شده
+const CLICK_CELL := Vector2i(6, 6)          # مقصد کلیکِ شبیه‌سازی‌شده‌ی اول
+const CLICK_CELL_2 := Vector2i(26, 26)      # کلیک دوم — «بعد از رسیدن» (باگ آیدل)
 const MOVE_MIN_UNITS := 8                    # حداقل واحدهایی که تا ثانیه ۳ باید تکان بخورند
 const ARRIVE_MIN_UNITS := 9                  # حداقل رسیده‌ها (۱۰ از ۱۰ ممکن است به جداسازی گیر کند)
 const ARRIVE_DEADLINE := 30.0                # سقف انتظار برای رسیدن (ثانیه)
-## مرجع رنگ «رسیده» — همان ثابت بازی؛ تست اجازه‌ی هرگونه نزدیکی به رنگ‌های تولد را نمی‌دهد
+const REDIRECT_GRACE := 1.5                  # سکوت بعد از کلیک دوم برای بیدارشدن رسیده‌ها
+const REDIRECT_MIN_UNITS := 8                # حداقل واحدهایی که باید از رسیدن بیدار شوند
 var _arrived_ref: Color = GameConstants.COL_ARRIVED
 
 var target_scene: Node3D
@@ -28,10 +30,13 @@ var _spawn_pos: Array[Vector3] = []
 var _goal_before := Vector2.ZERO
 var _computes_before := 0
 var _arrive_t0 := 0.0
+var _sub := 0                 # زیرفازها داخل فاز ۵
+var _arrive2_t0 := 0.0
+var _redirect_t0 := 0.0
 
 
 func _ready() -> void:
-        print("[AUTOTEST] harness attached — 5 phases")
+        print("[AUTOTEST] harness attached — 6 phases (incl. post-arrival redirect)")
 
 
 func _check(name: String, ok: bool, detail: String = "") -> void:
@@ -64,6 +69,8 @@ func _process(delta: float) -> void:
                 4:
                         _phase4_wait_arrival()
                 5:
+                        _phase5_post_arrival_redirect()
+                6:
                         _finish()
 
 
@@ -184,6 +191,52 @@ func _phase4_wait_arrival() -> void:
                 _check("arrived_units_at_CLICKED_flag", arrived_at_click >= ARRIVE_MIN_UNITS, \
                                 "%d/%d within 1.5m of clicked cell %s" % [arrived_at_click, units.size(), CLICK_CELL])
                 _phase = 5
+                _sub = 0
+
+
+# ---------------- فاز ۵: کلیک دوم بعد از رسیدن (باگ «گیر کردن در آیدل») ----------------
+
+func _phase5_post_arrival_redirect() -> void:
+        match _sub:
+                0:
+                        # همان لحظه‌ای که همه دور پرچم اول قرمز شده‌اند، پرچم را برمی‌گردانیم
+                        var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
+                        var nav: NavGrid = PathService.nav
+                        var world: Vector2 = nav.cell_center(CLICK_CELL_2)
+                        var screen: Vector2 = cam.unproject_position(Vector3(world.x, 0.0, world.y))
+                        var ev := InputEventMouseButton.new()
+                        ev.button_index = MOUSE_BUTTON_RIGHT
+                        ev.pressed = true
+                        ev.position = screen
+                        ev.global_position = screen
+                        ev.button_mask = MOUSE_BUTTON_MASK_RIGHT
+                        target_scene.get_viewport().push_input(ev, true)
+                        _redirect_t0 = _t
+                        _sub = 1
+                1:
+                        # پس از ۱.۵ ثانیه: رسیده‌ها باید بیدار شده باشند (قرمز → رنگ تولد، در حال حرکت)
+                        if _t - _redirect_t0 >= REDIRECT_GRACE:
+                                var awake := 0
+                                for u in _units():
+                                        if u is TestUnit and not u.is_arrived():
+                                                awake += 1
+                                _check("arrived_units_wake_on_new_click", awake >= REDIRECT_MIN_UNITS, \
+                                                "%d/%d marching again 1.5s after 2nd click" % [awake, _units().size()])
+                                _arrive2_t0 = _t
+                                _sub = 2
+                2:
+                        # و در نهایت باید به پرچم دوم برسند
+                        var want: Vector2 = PathService.nav.cell_center(CLICK_CELL_2)
+                        var arrived2 := 0
+                        for u in _units():
+                                if u is TestUnit and u.is_arrived():
+                                        var p: Vector3 = u.global_position
+                                        if Vector2(p.x, p.z).distance_to(want) <= 1.5:
+                                                arrived2 += 1
+                        if arrived2 >= ARRIVE_MIN_UNITS or (_t - _arrive2_t0) > ARRIVE_DEADLINE:
+                                _check("units_reach_SECOND_flag", arrived2 >= ARRIVE_MIN_UNITS, \
+                                                "%d/%d at cell %s in %.1fs" % [arrived2, _units().size(), CLICK_CELL_2, _t - _arrive2_t0])
+                                _phase = 6
 
 
 # ---------------- پایان ----------------

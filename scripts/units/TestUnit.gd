@@ -12,6 +12,7 @@ const SEPARATION_DIST := 0.5
 var _vel := Vector2.ZERO
 var _arrived := false
 var _bob_t := 0.0
+var _spawn_color: Color
 var _mat: StandardMaterial3D
 var _body: MeshInstance3D
 
@@ -20,9 +21,14 @@ func _ready() -> void:
         add_to_group("units")
         _bob_t = randf() * TAU
 
+        _spawn_color = GameConstants.UNIT_PALETTE.pick_random()
         _mat = StandardMaterial3D.new()
-        _mat.albedo_color = GameConstants.UNIT_PALETTE.pick_random()
+        _mat.albedo_color = _spawn_color
         _mat.roughness = 0.8
+
+        # رسیدن موقتی است: با جابه‌جایی پرچم باید دوباره راه بیفتند
+        # (رفع باگ «گیر کردن در آیدل بعد از رسیدن»)
+        GameEvents.goal_changed.connect(_on_goal_changed)
 
         # تنه
         _body = MeshInstance3D.new()
@@ -96,6 +102,15 @@ func _process(delta: float) -> void:
 
 func is_arrived() -> bool:
         return _arrived
+
+
+## پرچم جابه‌جا شد → همه‌ی «رسیده‌ها» بیدار می‌شوند و دوباره راه می‌افتند
+func _on_goal_changed(_new_goal: Vector2) -> void:
+        if _arrived:
+                _arrived = false
+                _vel = Vector2.ZERO
+                _set_color(_spawn_color)  # برگشت به رنگ تولد
+                _body.position.y = 0.25
 
 
 ## رنگ فعلی بدنه — برای تست خودکار (رنگ تولد نباید نارنجی «رسیده» باشد)
