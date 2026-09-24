@@ -19,6 +19,9 @@ signal village_destroyed(village_id: int)
 signal commander_died(commander: Node)
 signal unit_permanently_died(unit: Node)
 
+## پایان بازی — گام ۶R2 (بازخورد کاربر: «وقتی خانه‌ها کامل آتش گرفت کاربر می‌بازد»)
+signal game_over(reason: String)
+
 ## تغییر دوره‌ی تاریخی (وراثت از سیستم Era پروژه‌ی قبلی)
 signal era_changed(era_id: StringName)
 

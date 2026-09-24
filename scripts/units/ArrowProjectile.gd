@@ -14,12 +14,16 @@ var _vel := Vector3.ZERO
 var _life := 0.0
 var _mesh: MeshInstance3D
 var ground_provider: Callable = Callable()   # IslandGround.height_at_world
+## گام ۶R2 — شلیک‌کننده: به هدف پاس می‌شود تا مهاجمِ تلافی‌گر بداند کیست
+var shooter: Node3D = null
 
 
 static func fire(parent: Node, from: Vector3, to: Vector3,
-                ground_height: Callable = Callable()) -> ArrowProjectile:
+                ground_height: Callable = Callable(),
+                from_shooter: Node3D = null) -> ArrowProjectile:
         var a := ArrowProjectile.new()
         a.ground_provider = ground_height
+        a.shooter = from_shooter
         parent.add_child(a)
         a.global_position = from
         var flat := Vector2(to.x - from.x, to.z - from.z)
@@ -73,7 +77,7 @@ func _physics_process(delta: float) -> void:
                                 queue_free()
                                 return
                         if h.has_method("take_hit"):
-                                h.take_hit(1, v_norm)
+                                h.take_hit(1, v_norm, shooter)
                         queue_free()
                         return
 

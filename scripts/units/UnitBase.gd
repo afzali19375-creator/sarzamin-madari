@@ -183,7 +183,9 @@ func is_dead() -> bool:
 
 
 ## ضربه (تیر/نیزه/پرتاب) — فلش سفید کوتاه؛ مرگ فقط با رسیدن صفر
-func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO) -> void:
+## گام ۶R2 — پارامتر «attacker» برای هم‌امایی با EnemyBase (تلافی دشمن)
+func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO,
+                _attacker: Node3D = null) -> void:
         if dead:
                 return
         hp -= dmg
@@ -224,6 +226,7 @@ func die() -> void:
 
 
 ## ضربه‌ی تن‌به‌تن — true = ضربه زده شد (خنک‌شدن تمام). جهتِ ضربه به هدف می‌رود
+## گام ۶R2 — شلیک‌کننده هم پاس می‌شود تا دشمنِ تلافی‌گر بداند چه کسی زده
 func _try_strike(delta: float, cooldown: float, hostile: Node3D, dmg: int = 1) -> bool:
         _strike_cd = maxf(0.0, _strike_cd - delta)
         if _strike_cd > 0.0:
@@ -234,7 +237,40 @@ func _try_strike(delta: float, cooldown: float, hostile: Node3D, dmg: int = 1) -
         _strike_cd = cooldown
         var dir := hostile.global_position - global_position
         dir.y = 0.0
-        hostile.take_hit(dmg, dir.normalized() if dir.length() > 0.001 else Vector3.ZERO)
+        hostile.take_hit(dmg,
+                        dir.normalized() if dir.length() > 0.001 else Vector3.ZERO, self)
+        return true
+
+
+## گام ۶R2 — حرکت در حین نبرد به سمت هدف تا فاصله‌ی stop_at.
+## ریشه‌ی «شمشیرزن به تیرانداز نزدیک نمی‌شود»: لایه ۳ فقط رو می‌چرخید و ضربه
+## می‌زد — هدفِ دورِتر هیچ‌وقت تعقیب نمی‌شد. true = این فریم جابه‌جا شد.
+func _combat_move_toward(delta: float, hostile: Node3D, stop_at: float,
+                speed: float) -> bool:
+        var d := _dist_xz_to(hostile)
+        if d <= stop_at:
+                return false
+        var pos := Vector2(global_position.x, global_position.z)
+        var up := Vector2(hostile.global_position.x, hostile.global_position.z)
+        var dir := (up - pos).normalized()
+        if dir == Vector2.ZERO:
+                return false
+        var step := dir * speed * delta
+        var next := _avoid_step(pos, step, dir, delta)
+        next = _separate(next)
+        next = PathService.clamp_to_grid(next)
+        var gy := 0.0
+        if ground_provider.is_valid():
+                gy = ground_provider.call(next)
+        _y_smooth = lerpf(_y_smooth, gy, clampf(10.0 * delta, 0.0, 1.0))
+        global_position = Vector3(next.x, _y_smooth, next.y)
+        var target := atan2(dir.x, dir.y)
+        var diff := wrapf(target - _heading, -PI, PI)
+        _heading = wrapf(_heading + clampf(diff,
+                        -GameConstants.ROTATE_SPEED_RAD * delta,
+                        GameConstants.ROTATE_SPEED_RAD * delta), -PI, PI)
+        rotation.y = _heading
+        _bob_visual(true)
         return true
 
 

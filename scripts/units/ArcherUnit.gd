@@ -102,8 +102,10 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
         _shoot_cooldown = GameConstants.ARCHER_COOLDOWN
         _nock.visible = false
         shots_fired += 1
+        # گام ۶R2 — shooter پاس می‌شود تا مهاجمِ تیرخورده به «این کماندار» تلافی کند
         ArrowProjectile.fire(get_parent(), global_position + Vector3(0, 0.5, 0),
-                        hostile.global_position + Vector3(0, 0.4, 0))
+                        hostile.global_position + Vector3(0, 0.4, 0),
+                        ground_provider, self)
 
 
 func _combat_end() -> void:

@@ -9,13 +9,15 @@ extends Node3D
 ##     آماده‌باش می‌شود، کماندار تیر می‌اندازد (بدون آسیب دوستانه، مسیر باز)
 ##   * لایه ۴: واحدِ جابه‌جاشده خودش به پست بازمی‌گردد
 ##
-## تعامل (§۲ پرامت + گام ۵ + گام ۶R):
+## تعامل (§۲ پرامت + گام ۵ + گام ۶R + ۶R2):
 ##   کلیک چپ روی سرباز → انتخاب دسته‌اش: اسلوموشن (۰.۱۵s) + هاله‌ی سفید (§۲.۳)
 ##   کلیک چپ روی سلول سفید → فرمان به دسته‌ی انتخابی (§۲.۴) | Shift+کلیک → Waypoint
 ##   فرمان روی خانه‌ی زنده → اشغال خانه: دسته داخل می‌رود و پس از ۲۰ ثانیه کامل می‌شود (گام ۶R)
 ##   کلیک روی جای خالی / سربازِ انتخابی / Esc → لغو انتخاب (بازگشت ۰.۲s)
 ##   Space (نگه‌داشتن) → اسلوموشن  |  Q/E یا جهت‌نما: چرخش دور به دور جزیره  |  Wheel زوم
-##   R جزیره‌ی جدید  |  G همان seed  |  T کوله‌ی تمرین  |  D پاک‌کردن کوله‌ها
+##   کشیدن با موس (چپ/وسط) یا انگشت → چرخش آزاد دوربین — اندروید (گام ۶R2)
+##   همه‌ی خانه‌ها بسوزند → باخت (گام ۶R2)  |  R جزیره‌ی جدید  |  G همان seed
+##   T کوله‌ی تمرین  |  D پاک‌کردن کوله‌ها
 
 enum Mode { IDLE, COMMAND }
 
@@ -77,6 +79,16 @@ var _yaw := GameConstants.CAM_YAW0_DEG
 var _target_height := GameConstants.CAM_HEIGHT0
 var _middle_drag := false
 var _keys_held := {}
+
+# گام ۶R2 — چرخش دوربین با کشیدن موس/لمس (اندروید): لمس با emulate_mouse_from_touch
+# خودکار به رویداد ماوسِ چپ تبدیل می‌شود؛ تپ = کلیک، کشیدن > آستانه = چرخش
+var _left_down := false
+var _left_start := Vector2.ZERO
+var _left_dragging := false
+
+# گام ۶R2 — پایان بازی: همه‌ی خانه‌ها کامل سوختند (بازخورد کاربر)
+var game_over := false
+var _game_over_panel: Control
 
 # اسلوموشن (§۶ پرامت)
 var _slow_select := false
@@ -166,9 +178,15 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         if director == null:
                 director = InvasionDirector.new()
                 add_child(director)
+                # گام ۶R2 — ساحلِ رو به دوربین → قایق از گوشه‌ی دید وارد می‌شود
+                director.cam_xz_provider = Callable(self, "_cam_xz")
         director.auto_waves = not OS.get_cmdline_user_args().has("--autotest")
         director.setup(ground, props, _squad_posts)
         director.clear_all()
+        # گام ۶R2 — ریست باخت (جزیره‌ی تازه = شانس تازه)
+        game_over = false
+        if _game_over_panel != null:
+                _game_over_panel.visible = false
         if announce:
                 _toast_msg("جزیره‌ی جدید — بذر %d (تلاش %d، %.0f ms)\nNew island — seed %d (attempt %d, %.0f ms)" % [
                         island["seed_used"], island["attempts"], island["gen_ms"],
@@ -421,6 +439,14 @@ func _build_environment() -> void:
         _wp_root.add_child(_wp_line)
 
 
+## گام ۶R2 — موقعیت دوربین (XZ) برای کارگردان: ساحلِ رو به دید انتخاب می‌شود
+func _cam_xz() -> Vector2:
+        var cam := get_viewport().get_camera_3d()
+        if cam == null:
+                return Vector2.ZERO
+        return Vector2(cam.global_position.x, cam.global_position.z)
+
+
 # ---------------- رابط کاربری ----------------
 
 func _build_ui() -> void:
@@ -457,6 +483,8 @@ func _build_ui() -> void:
         hint.text = "%s  |  %s  |  %s  |  %s  |  %s  |  N: %s" % [
                 tr("hint_select"), tr("hint_island_move"), tr("hint_camera"),
                 tr("hint_regen"), tr("hint_slow"), tr("hint_wave")]
+        # گام ۶R2 — چرخش با کشیدن موس/انگشت (اندروید)
+        hint.text += "  |  کشیدن با موس/انگشت: چرخش — Drag: rotate"
         vb.add_child(hint)
 
         _toast = Label.new()
@@ -475,6 +503,46 @@ func _build_ui() -> void:
         _toast.offset_right = -40.0
         _toast.visible = false
         layer.add_child(_toast)
+
+        # گام ۶R2 — پرده‌ی باخت: همه‌ی خانه‌ها کامل سوختند (بازخورد کاربر)
+        _game_over_panel = ColorRect.new()
+        var gp := _game_over_panel as ColorRect
+        gp.color = Color(0.03, 0.1, 0.12, 0.82)
+        gp.set_anchors_preset(Control.PRESET_FULL_RECT)
+        gp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        gp.visible = false
+        layer.add_child(_game_over_panel)
+        var gv := VBoxContainer.new()
+        gv.set_anchors_preset(Control.PRESET_CENTER)
+        gv.grow_horizontal = Control.GROW_DIRECTION_BOTH
+        gv.grow_vertical = Control.GROW_DIRECTION_BOTH
+        gv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        gv.add_theme_constant_override("separation", 14)
+        gp.add_child(gv)
+        var go_fa := Label.new()
+        go_fa.text = "جزیره سقوط کرد"
+        go_fa.add_theme_font_size_override("font_size", 64)
+        go_fa.add_theme_color_override("font_color", GameConstants.COL_CRIMSON)
+        go_fa.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+        go_fa.add_theme_constant_override("outline_size", 10)
+        go_fa.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        if ResourceLoader.exists(FONT_FA):
+                go_fa.add_theme_font_override("font", load(FONT_FA))
+        gv.add_child(go_fa)
+        var go_en := Label.new()
+        go_en.text = "The island has fallen — every house has burned"
+        go_en.add_theme_font_size_override("font_size", 22)
+        go_en.add_theme_color_override("font_color", GameConstants.COL_IVORY)
+        go_en.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        gv.add_child(go_en)
+        var go_hint := Label.new()
+        go_hint.text = "R: جزیره‌ی جدید  —  New island: R"
+        go_hint.add_theme_font_size_override("font_size", 26)
+        go_hint.add_theme_color_override("font_color", GameConstants.COL_GOLD)
+        go_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        if ResourceLoader.exists(FONT_FA):
+                go_hint.add_theme_font_override("font", load(FONT_FA))
+        gv.add_child(go_hint)
 
 
 func _toast_msg(msg: String) -> void:
@@ -546,6 +614,9 @@ func _refresh_stats() -> void:
                 computes, str(info["channels"]), Engine.time_scale,
                 _target_height, _yaw, gar,
         ]
+        # گام ۶R2 — نشان باخت روی پنل آمار
+        if game_over:
+                _stats_label.text += "  |  ★ ISLAND FALLEN"
 
 
 # ---------------- حلقه‌ی هر فریم ----------------
@@ -641,7 +712,11 @@ func _input(event: InputEvent) -> void:
                 if event.pressed:
                         match event.button_index:
                                 MOUSE_BUTTON_LEFT:
-                                        _on_left_click(event)
+                                        # گام ۶R2 — فشارِ چپ = شروع احتمالی کشیدن؛
+                                        # تپ فقط با رها‌شدن بدون کشیدن (تفکیک از چرخش)
+                                        _left_down = true
+                                        _left_start = event.position
+                                        _left_dragging = false
                                 MOUSE_BUTTON_RIGHT:
                                         _on_right_click(event)
                                 MOUSE_BUTTON_MIDDLE:
@@ -652,10 +727,27 @@ func _input(event: InputEvent) -> void:
                                 MOUSE_BUTTON_WHEEL_DOWN:
                                         _target_height = clampf(_target_height + GameConstants.CAM_ZOOM_SPEED,
                                                         GameConstants.CAM_MIN_HEIGHT, GameConstants.CAM_MAX_HEIGHT)
-                elif event.button_index == MOUSE_BUTTON_MIDDLE:
-                        _middle_drag = false
-        elif event is InputEventMouseMotion and _middle_drag:
-                _yaw += event.relative.x * 0.35
+                else:
+                        match event.button_index:
+                                MOUSE_BUTTON_LEFT:
+                                        _left_down = false
+                                        if not _left_dragging:
+                                                _on_left_tap(event.position,
+                                                                event.shift_pressed)
+                                        _left_dragging = false
+                                MOUSE_BUTTON_MIDDLE:
+                                        _middle_drag = false
+        elif event is InputEventMouseMotion:
+                if _middle_drag:
+                        _yaw += event.relative.x * GameConstants.CAM_DRAG_SENS
+                elif _left_down:
+                        # گام ۶R2 — کشیدن با دکمه‌ی چپ (یا انگشت روی اندروید —
+                        # لمس با emulate_mouse_from_touch همین‌جا می‌رسد) = چرخش
+                        if not _left_dragging and event.position.distance_to(
+                                        _left_start) > GameConstants.CAM_DRAG_START_PX:
+                                _left_dragging = true
+                        if _left_dragging:
+                                _yaw += event.relative.x * GameConstants.CAM_DRAG_SENS
         elif event is InputEventKey:
                 if event.pressed and not event.echo:
                         _keys_held[event.physical_keycode] = true
@@ -674,11 +766,13 @@ func _input(event: InputEvent) -> void:
                                 KEY_SPACE:
                                         _slow_space = true  # نگه‌داشتن Space = اسلوموشن (§۶)
                                 KEY_T:
-                                        _spawn_training_dummy()
+                                        if not game_over:
+                                                _spawn_training_dummy()
                                 KEY_D:
                                         _clear_dummies()
                                 KEY_N:
-                                        _spawn_wave_manual()   # گام ۶ — موج هجوم دستی
+                                        if not game_over:
+                                                _spawn_wave_manual()   # گام ۶ — موج هجوم دستی
                                 KEY_ESCAPE:
                                         _deselect()
                 elif not event.pressed:
@@ -687,8 +781,12 @@ func _input(event: InputEvent) -> void:
                                 _slow_space = false  # §۶.۲ — رها کردن Space = پایان اسلوموشن
 
 
-func _on_left_click(event: InputEventMouseButton) -> void:
-        var u := _unit_at_screen(event.position)
+## گام ۶R2 — تپ/کلیک چپ: انتخاب سرباز یا فرمان روی سلول
+func _on_left_tap(screen: Vector2, shift: bool) -> void:
+        if game_over:
+                _toast_msg("جزیره سقوط کرده — R: جزیره‌ی جدید\nThe island has fallen — R: new island")
+                return
+        var u := _unit_at_screen(screen)
         if u != null:
                 var si := _squad_index_of(u)
                 if si == selected:
@@ -697,19 +795,19 @@ func _on_left_click(event: InputEventMouseButton) -> void:
                         _select_squad(si)
                 return
         var cam := get_viewport().get_camera_3d()
-        var hit := ground.ray_pick(cam, event.position)
+        var hit := ground.ray_pick(cam, screen)
         if mode != Mode.COMMAND:
-                _last_input_msg = "left-click: no squad selected"
+                _last_input_msg = "tap: no squad selected"
                 _toast_msg("اول یک دسته را انتخاب کن (کلید ۱-۳ یا کلیک روی سرباز)\nFirst select a squad (keys 1-3 or click a soldier)")
                 return
         if hit.is_empty() or not bool(hit["in_island"]):
                 _deselect()
-                _last_input_msg = "left-click empty → deselect"
+                _last_input_msg = "tap empty → deselect"
                 return
         var xz := _xz_of_hit(hit)
         var info := cmd_grid.cell_at_world(xz)
         if bool(info.get("ok", false)):
-                if event.shift_pressed:
+                if shift:
                         _add_waypoint(info["center"], selected)
                 else:
                         _issue_move_to(info["center"], selected, false)
@@ -720,6 +818,9 @@ func _on_left_click(event: InputEventMouseButton) -> void:
 
 
 func _on_right_click(event: InputEventMouseButton) -> void:
+        if game_over:
+                _toast_msg("جزیره سقوط کرده — R: جزیره‌ی جدید\nThe island has fallen — R: new island")
+                return
         # سازگاری با عادت قبلی: راست‌کلیک = انتخاب و فرمان
         if mode != Mode.COMMAND:
                 var u := _unit_at_screen(event.position)
@@ -746,6 +847,8 @@ func _on_right_click(event: InputEventMouseButton) -> void:
 # ---------------- انتخاب دسته و فرمان per-squad (§۲.۳ / §۲.۴ / گام ۵) ----------------
 
 func _select_squad(idx: int) -> void:
+        if game_over:
+                return
         if idx < 0 or idx >= squads.size():
                 _toast_msg("دسته‌ی %d هنوز استخدام نشده (دسته‌های فعال: %d)\nSquad %d not recruited yet (active: %d)" % [
                         idx + 1, squads.size(), idx + 1, squads.size()])
@@ -796,6 +899,10 @@ func selected_waypoints() -> Array[Vector2]:
 ## فرمان حرکت دسته به مرکز سلول: اسلات‌های آرایش + هدف کانالِ دسته + پینگ موقتی
 ## silent=true برای فرمان‌های داخلی (پست اولیه/Waypoint) — بدون قطع انتخاب/تُست
 func _issue_move_to(center: Vector2, idx: int, silent: bool) -> void:
+        if game_over:
+                if not silent:
+                        _toast_msg("جزیره سقوط کرده — R: جزیره‌ی جدید\nThe island has fallen — R: new island")
+                return
         if idx < 0 or idx >= squads.size():
                 return
         # گام ۶R — فرمان روی خانه‌ی زنده = اشغال خانه (بازخورد کاربر)
@@ -1023,6 +1130,29 @@ func _on_house_ignited(_b: BuildingBase) -> void:
 func _on_house_burned(_b: BuildingBase) -> void:
         _toast_msg("خانه‌ای نابود شد\nA house has burned down")
         _last_input_msg = "house burned down"
+        # گام ۶R2 — بازخورد کاربر: «وقتی خانه‌ها کامل آتش گرفت کاربر می‌بازد»
+        if props != null:
+                var any_alive := false
+                for b in props.buildings:
+                        if is_instance_valid(b) and not b.burned:
+                                any_alive = true
+                                break
+                if not any_alive:
+                        _trigger_game_over()
+
+
+## گام ۶R2 — پایان بازی: همه‌ی خانه‌ها نابود شدند → پرده‌ی باخت + قفل فرمان
+func _trigger_game_over() -> void:
+        if game_over:
+                return
+        game_over = true
+        if director != null:
+                director.auto_waves = false   # موج تازه بی‌معناست
+        _deselect()
+        if _game_over_panel != null:
+                _game_over_panel.visible = true
+        GameEvents.game_over.emit("all_houses_burned")
+        _last_input_msg = "game over — all houses burned"
 
 
 ## اسلات‌های آرایش ۱.۲ متری دور مرکز سلول (§۵.۲) — فقط روی سلول‌های قابل‌عبور
@@ -1230,7 +1360,7 @@ func dummy_hits_total() -> int:
 # ---------------- موج هجوم (گام ۶ — N) ----------------
 
 func _spawn_wave_manual() -> void:
-        if director == null:
+        if director == null or game_over:
                 return
         var gid := director.spawn_wave()
         if gid < 0:

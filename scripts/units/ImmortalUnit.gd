@@ -69,6 +69,11 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
                 # سپر به سمت جلو بالا می‌آید + نشستنِ کوتاه زانو
                 _shield.position = Vector3(-0.05, 0.32, 0.3)
                 _body.scale = Vector3(1.0, 0.92, 1.0)
+        # گام ۶R2 — شمشیرزن تیرانداز را تعقیب می‌کند (بازخورد کاربر:
+        # «سرباز شمشیرزن به سرباز تیرانداز نزدیک نمی‌شود») — یورش با سپرِ بالا
+        if _combat_move_toward(delta, hostile, GameConstants.IMMORTAL_ENGAGE_RANGE,
+                        GameConstants.SPEED_BASE * speed_mult * 0.9):
+                return
         # گام ۶ — ضربه‌ی تن‌به‌تن در فاصله‌ی نبرد نزدیک
         if _dist_xz_to(hostile) <= GameConstants.IMMORTAL_ENGAGE_RANGE:
                 if _try_strike(delta, GameConstants.IMMORTAL_STRIKE_COOLDOWN, hostile):

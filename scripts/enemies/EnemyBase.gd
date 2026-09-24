@@ -44,6 +44,8 @@ var target_house: BuildingBase = null
 ## شمارنده‌ی مشعل‌های پرتاب‌شده — برای تست خودکار (گام ۶R)
 var torches_thrown := 0
 var _torch_cd := 1.2                # تاخیر اول کوتاه تا مشعل اول زود برسد
+## گام ۶R2 — تلافی: مهاجمِ تیرخورده به شلیک‌کننده حمله می‌کند
+var _chase_t := 0.0
 
 var _channel := 4
 var _scan_accum := 0.0
@@ -120,6 +122,7 @@ func _process(delta: float) -> void:
         _bob_t += delta
         _tick_flash(delta)
         _atk_cd = maxf(0.0, _atk_cd - delta)
+        _chase_t = maxf(0.0, _chase_t - delta)
 
         _scan_accum += delta
         if _scan_accum >= GameConstants.ENEMY_SCAN_INTERVAL:
@@ -180,6 +183,14 @@ func _rescan_units() -> void:
                         engaged_unit = best
                         _atk_cd = maxf(_atk_cd, 0.15)  # لحظه‌ی روکردن قبل از اولین ضربه
         else:
+                # گام ۶R2 — در حال تلافی؟ هدفِ تلافی حتی بیرون آگرو رها نمی‌شود
+                if _chase_t > 0.0 and is_instance_valid(engaged_unit) \
+                                and not _unit_dead(engaged_unit):
+                        var drop := aggro_units * GameConstants.ENEMY_CHASE_DROP_MULT
+                        if Vector2(global_position.x, global_position.z).distance_to(
+                                        Vector2(engaged_unit.global_position.x,
+                                        engaged_unit.global_position.z)) <= drop:
+                                return
                 engaged_unit = null
 
 
@@ -189,21 +200,22 @@ func _unit_dead(u: Node) -> bool:
 
 # ---------------- گام ۶R — آتش‌زنه‌ی خانه (بدون اشغال — بازخورد کاربر) ----------------
 
-## خانه‌ی زنده‌ی هدف در برد مشعل → ایست، رو به خانه، پرتاب مشعل.
-## نزدیک‌تر از حدِ ایمن → یک قدم عقب. خروجی true = این فریم مشغول خانه است
-## (رژه/حرکت متوقف). خانه در حال سوختن مشعل نمی‌خواهد — فقط مواظبت می‌کند.
+## خانه‌ی زنده‌ی هدف تا فاصله‌ی ایستِ نزدیک جلو می‌رود، بعد مشعل پرتاب می‌کند.
+## گام ۶R2 — بازخورد کاربر: «سربازهای دشمن خیلی دور می‌ایستند؛ نزدیک‌تر بیایند»
+## → مهاجمان تا ENEMY_RAID_STANDOFF (۲.۶m) جلو می‌روند و از همان‌جا پرتاب می‌کنند
+##   (قبلاً از ۴.۲-۵.۵ متری پرتاب می‌شد). خروجی true = این فریم مشغول خانه است.
 func _house_tick(pos: Vector2, delta: float) -> bool:
         var h := target_house
         if h == null or not is_instance_valid(h) or h.burned:
                 return false
         var hxz := Vector2(h.global_position.x, h.global_position.z)
         var d := pos.distance_to(hxz)
-        # زیاده‌روی نزدیک خانه → عقب (هیچ‌کس جلوی خانه ازدحام نمی‌کند)
-        if d < GameConstants.ENEMY_RAID_STANDOFF - 0.5:
+        # زیاده‌روی نزدیک خانه → عقب (هیچ‌کس جلوی درِ خانه ازدحام نمی‌کند)
+        if d < GameConstants.ENEMY_RAID_STANDOFF - 0.6:
                 _move_with((pos - hxz).normalized(), delta, move_speed)
                 return true
-        # خارج از برد مشعل → هنوز نزدیک می‌شود
-        if d > GameConstants.TORCH_RANGE:
+        # هنوز دور است → جلو (گام ۶R2: نزدیک‌تر از قبل)
+        if d > GameConstants.ENEMY_RAID_STANDOFF:
                 return false
         _face_toward(hxz, delta)
         _bob_visual(false)
@@ -330,7 +342,10 @@ func is_alive() -> bool:
         return not dead
 
 
-func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO) -> void:
+## ضربه (تیر/ضربه‌ی تن‌به‌تن) — گام ۶R2: اگر «attacker» شناخته باشد، مهاجم
+## به شلیک‌کننده تلافی می‌کند (تعقیبِ کوتاه حتی بیرون شعاع توجه)
+func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO,
+                attacker: Node3D = null) -> void:
         if dead:
                 return
         hp -= dmg
@@ -338,6 +353,12 @@ func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO) -> void:
         _mat.albedo_color = Color(1, 1, 1, 1)
         _flash_t = 0.0
         _flashing = true
+        if attacker != null and is_instance_valid(attacker) \
+                        and attacker.is_in_group("units") \
+                        and not _unit_dead(attacker):
+                engaged_unit = attacker
+                _atk_cd = maxf(_atk_cd, 0.3)   # لحظه‌ی روکردن به سمت شلیک‌کننده
+                _chase_t = GameConstants.ENEMY_CHASE_SECONDS
         if hp <= 0:
                 die()
 

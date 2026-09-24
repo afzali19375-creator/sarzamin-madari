@@ -21,11 +21,18 @@ extends Node
 ##      هدف رژه = خانه، مهاجمان به داخل جزیره رژه می‌روند
 ##  ۱۴) نبرد تن‌به‌تن: مهاجم به سرباز درگیری؛ جاویدان سپر؛ تبادل ضربه دو طرفه
 ##  ۱۵) سپر سنگین (مخروط پیش‌رو) + کماندار با دشمن واقعی + پلتاست پرتاب می‌کند
-##  ۱۶) مرگ دائمی سرباز (حذف از دسته‌ها) + پاکسازی موج (سیگنال، قایق بازمی‌گردد)
+##      + گام ۶R2: مهاجمِ تیرخورده به شلیک‌کننده تلافی می‌کند (engaged)
+##  ۱۶) مرگ دائمی سرباز (حذف از دسته‌ها) + گام ۶R2: قایق بعد از مرگ مهاجمان
+##      در ساحل می‌ماند (دیگر برنمی‌گردد)
 ##  --- گام ۶R (بازخورد کاربر) ---
 ##  ۱۷) فرمانده هر دسته عضو اول با پرچم رنگِ دسته + چرخش دوربین (Q و جهت‌نما)
-##  ۱۸) مشعل: پلتاست خانه را آتش می‌زند → خانه بعد از ۱۰ ثانیه نابود می‌شود
+##  ۱۸) مشعل: پلتاست خانه را «از نزدیک» آتش می‌زند (گام ۶R2: ایست در ~۲.۶m)
+##      → خانه بعد از ۱۴ ثانیه نابود می‌شود
 ##  ۱۹) گاریسون: فرمان روی خانه → ورود دسته → تکمیل تا ظرفیت اصلی
+##  --- گام ۶R2 (بازخورد کاربر) ---
+##  ۲۰) ناوگان: دسته‌ی ۳ نفره قایق پارویی بی‌بادبان، ۸ نفره کشتی جنگی؛ جهت اولیه
+##      رو به لنگر؛ قایق‌ها بعد از مرگ مهاجمان می‌مانند؛ چرخش دوربین با لمس و
+##      کشیدن موس؛ باخت با سوختن همه‌ی خانه‌ها + ریست با بازتولید
 ## اجرا:
 ##   godot --headless --path . res://scenes/dev/IslandTest.tscn -- --autotest
 ## کد خروج: 0 = همه PASS، 1 = حداقل یک FAIL
@@ -71,6 +78,7 @@ var _arrow_baseline := 0
 var _max_deflects := 0
 var _heavy_hurt_seen := false
 var _max_thrown := 0
+var _max_arrows := 0     # گام ۶R2 — بیشینه‌ی تیرها (کماندار ممکن است وسط کار بمیرد)
 var _squad_alive_before := 0
 var _contact_forced := false
 var _p15_raiders_cleared := false
@@ -90,9 +98,15 @@ var _garrison_si := -1
 var _flag_squad := -1
 var _flag_dead_cmd: UnitBase = null
 
+# --- گام ۶R2 ---
+var _min_house_dist := 1e9      # نزدیک‌ترین فاصله‌ی پلتاست مشعل‌زن تا خانه
+var _fleet_g3 := -1
+var _fleet_g8 := -1
+var _drag_yaw0 := 0.0
+
 
 func _ready() -> void:
-        print("[AUTOTEST] island harness attached — 19 phases (squads + invasion + torch/garrison)")
+        print("[AUTOTEST] island harness attached — 20 phases (squads + invasion + fleet/touch/gameover)")
         if target_scene.director != null:
                 target_scene.director.wave_cleared.connect(
                                 func(_g: int): _wave_cleared_fired = true)
@@ -192,6 +206,8 @@ func _process(delta: float) -> void:
                 18:
                         _phase18_garrison_replenish()
                 19:
+                        _phase19_fleet_touch_gameover()
+                20:
                         _finish()
 
 
@@ -521,6 +537,14 @@ func _push_click(button: MouseButton, screen: Vector2, shift: bool = false) -> v
         ev.shift_pressed = shift
         ev.button_mask = MOUSE_BUTTON_MASK_LEFT if button == MOUSE_BUTTON_LEFT else MOUSE_BUTTON_MASK_RIGHT
         target_scene.get_viewport().push_input(ev, true)  # همان مسیر ورودی واقعی بازیکن
+        # گام ۶R2 — کلیک چپ حالا در «رها‌شدن» ثبت می‌شود (تفکیک تپ از کشیدن)
+        var ev2 := InputEventMouseButton.new()
+        ev2.button_index = button
+        ev2.pressed = false
+        ev2.position = screen
+        ev2.global_position = screen
+        ev2.shift_pressed = shift
+        target_scene.get_viewport().push_input(ev2, true)
 
 
 func _push_key(keycode: Key) -> void:
@@ -1424,16 +1448,17 @@ func _phase14_shield_and_peltast() -> void:
                                         _heavy_hurt_seen = true
                         if is_instance_valid(_peltast_test):
                                 _max_thrown = maxi(_max_thrown, _peltast_test.javelins_thrown)
+                        # گام ۶R2 — تیرهای شلیک‌شده جمع‌شدنی روی زنده‌ها نیست: کماندار
+                        # با تلافیِ تازه‌ی دشمن ممکن است کشته شود → بیشینه ثبت می‌شود
+                        _max_arrows = maxi(_max_arrows, target_scene.arrows_fired_total())
                         if _t - _sub_t >= 9.0:
                                 _check("heavy_deflect_or_take_hits",
                                                 _max_deflects >= 1 or _heavy_hurt_seen,
                                                 "deflects=%d hurt=%s" % [
                                                         _max_deflects, _heavy_hurt_seen])
                                 _check("arrows_flew_at_enemies",
-                                                target_scene.arrows_fired_total()
-                                                > _arrow_baseline,
-                                                "%d→%d" % [_arrow_baseline,
-                                                target_scene.arrows_fired_total()])
+                                                _max_arrows > _arrow_baseline,
+                                                "%d→%d" % [_arrow_baseline, _max_arrows])
                                 _check("peltast_throws_javelins", _max_thrown >= 1,
                                                 "%d throws" % _max_thrown)
                                 _phase = 15
@@ -1484,18 +1509,20 @@ func _phase15_permanence_and_clear() -> void:
                                 _check("wave_cleared_signal", _wave_cleared_fired)
                                 _check("all_raiders_dead",
                                                 target_scene.director.alive_raiders_total() == 0)
-                                _check("boat_leaving",
-                                                target_scene.director.boat_state(_group0) == 2,
+                                # گام ۶R2 — قایق بعد از مرگ همه‌ی مهاجمانش «می‌ماند»
+                                _check("boat_stays_anchored_after_death",
+                                                target_scene.director.boat_state(_group0) == 1,
                                                 "state=%d" % target_scene.director.boat_state(_group0))
+                                _check("boats_remain_on_shore",
+                                                target_scene.director.boats_active() >= 1,
+                                                "%d" % target_scene.director.boats_active())
                                 _sub = 3
                                 _sub_t = _t
                 3:
-                        if _t - _sub_t >= 10.0:
-                                _check("boat_departed_and_freed",
-                                                target_scene.director.boat_state(_group0) == -1,
+                        if _t - _sub_t >= 2.0:
+                                _check("boat_still_parked_after_2s",
+                                                target_scene.director.boat_state(_group0) == 1,
                                                 "state=%d" % target_scene.director.boat_state(_group0))
-                                _check("no_boats_active",
-                                                target_scene.director.boats_active() == 0)
                                 # سلامت نهایی: زنده‌ها روی سلول قابل‌عبور + زمان نرمال
                                 var all_ok := true
                                 var nav: NavGrid = PathService.nav
@@ -1509,6 +1536,8 @@ func _phase15_permanence_and_clear() -> void:
                                 _check("time_back_to_normal_after_invasion",
                                                 absf(Engine.time_scale - 1.0) < 0.06,
                                                 "time=%.2f" % Engine.time_scale)
+                                _sub = 0
+                                _sub_t = _t
                                 _phase = 16
 
 
@@ -1526,7 +1555,7 @@ func _phase16_flags_and_camera() -> void:
                                 _push_key_release(KEY_Q)
                                 var dyaw: float = absf(wrapf(deg_to_rad(target_scene._yaw
                                                 - _yaw_before), -PI, PI))
-                                _check("camera_rotates_with_q", dyaw > 10.0,
+                                _check("camera_rotates_with_q", rad_to_deg(dyaw) > 10.0,
                                                 "%.1f deg" % rad_to_deg(dyaw))
                                 _yaw_before = target_scene._yaw
                                 _push_key(KEY_RIGHT)
@@ -1537,7 +1566,7 @@ func _phase16_flags_and_camera() -> void:
                                 _push_key_release(KEY_RIGHT)
                                 var dyaw2: float = absf(wrapf(deg_to_rad(target_scene._yaw
                                                 - _yaw_before), -PI, PI))
-                                _check("camera_rotates_with_arrow_keys", dyaw2 > 10.0,
+                                _check("camera_rotates_with_arrow_keys", rad_to_deg(dyaw2) > 10.0,
                                                 "%.1f deg" % rad_to_deg(dyaw2))
                                 # دسته‌ای با حداقل ۲ عضو زنده برای تست انتقال پرچم
                                 _flag_squad = -1
@@ -1643,6 +1672,14 @@ func _phase17_torch_burns_house() -> void:
                         if is_instance_valid(_torch_peltast):
                                 _max_torches = maxi(_max_torches,
                                                 _torch_peltast.torches_thrown)
+                                # گام ۶R2 — مهاجم باید «نزدیک» خانه بایستد نه دور
+                                if _torch_house != null and is_instance_valid(_torch_house):
+                                        _min_house_dist = minf(_min_house_dist,
+                                                        Vector2(_torch_peltast.global_position.x,
+                                                        _torch_peltast.global_position.z)
+                                                        .distance_to(Vector2(
+                                                        _torch_house.global_position.x,
+                                                        _torch_house.global_position.z)))
                         var burning: bool = _house_ignited_fired \
                                         or (_torch_house != null and is_instance_valid(_torch_house) \
                                         and _torch_house.burning)
@@ -1652,13 +1689,17 @@ func _phase17_torch_burns_house() -> void:
                                 _check("house_ignited_by_torches", burning,
                                                 "torch_hp_left=%s" % str(
                                                 _torch_house.hp if is_instance_valid(_torch_house) else -1))
+                                # گام ۶R2 — بازخورد کاربر: «خیلی دور می‌ایستند؛ نزدیک‌تر بیایند»
+                                _check("torch_thrown_from_close_range",
+                                                _min_house_dist <= 3.4,
+                                                "min=%.1f m" % _min_house_dist)
                                 _sub = 2
                                 _sub_t = _t
                 2:
                         var burned: bool = _house_burned_fired \
                                         or (_torch_house != null and is_instance_valid(_torch_house) \
                                         and _torch_house.burned)
-                        if burned or (_t - _sub_t) > 16.0:
+                        if burned or (_t - _sub_t) > 20.0:
                                 _check("house_burned_down", burned,
                                                 "t=%.1f after ignite" % [_t - _sub_t])
                                 if is_instance_valid(_torch_peltast):
@@ -1736,6 +1777,8 @@ func _phase18_garrison_replenish() -> void:
                                                 "no garrison state in 25s")
                                 target_scene.garrison_duration \
                                                 = GameConstants.LOOT_DURATION_SECONDS
+                                _sub = 0
+                                _sub_t = _t
                                 _phase = 19
                 2:
                         # همه‌ی اعضای زنده داخل خانه پنهان شده‌اند؟
@@ -1795,12 +1838,151 @@ func _phase18_garrison_replenish() -> void:
                                                 "%d/%d out=%s" % [alive2.size(), want, all_out])
                                 target_scene.garrison_duration \
                                                 = GameConstants.LOOT_DURATION_SECONDS
+                                _sub = 0
+                                _sub_t = _t
                                 _phase = 19
                         elif (_t - _sub_t) > 12.0:
                                 _check("squad_replenished_to_full", false, "timeout inside")
                                 target_scene.garrison_duration \
                                                 = GameConstants.LOOT_DURATION_SECONDS
+                                _sub = 0
+                                _sub_t = _t
                                 _phase = 19
+
+
+# ---------------- فاز ۱۹: ناوگان چندقایقی + لمس + باخت (گام ۶R2) ----------------
+
+func _phase19_fleet_touch_gameover() -> void:
+        match _sub:
+                0:
+                        # دسته‌ی ۳ نفره → قایق پاروییِ کوچک «بدون بادبان» (بازخورد کاربر)
+                        _fleet_g3 = target_scene.director.spawn_wave(
+                                        {"size": 3, "force": true})
+                        _check("rowboat_wave_spawned", _fleet_g3 >= 0)
+                        if _fleet_g3 >= 0:
+                                var b3: Array = target_scene.director.group_boats(_fleet_g3)
+                                _check("rowboat_fleet_one_boat", b3.size() == 1,
+                                                "%d boats" % b3.size())
+                                if b3.size() == 1:
+                                        var boat0: EnemyBoat = b3[0]
+                                        _check("rowboat_is_rowboat",
+                                                        boat0.type_name() == "rowboat",
+                                                        boat0.type_name())
+                                        _check("rowboat_has_no_sail",
+                                                        not boat0.has_sail())
+                                        # جهت اولیه رو به لنگر — رفع «گیج‌زدن» اول قایق
+                                        var fwd := Vector3(sin(boat0.rotation.y), 0.0,
+                                                        cos(boat0.rotation.y))
+                                        var to_anchor: Vector3 = boat0.anchor_point \
+                                                        - boat0.global_position
+                                        to_anchor.y = 0.0
+                                        var dot := fwd.normalized().dot(
+                                                        to_anchor.normalized())
+                                        _check("boat_initial_heading_on_target",
+                                                        dot > 0.85, "dot=%.2f" % dot)
+                        # دسته‌ی ۸ نفره → کشتی جنگی بزرگ با بادبان
+                        _fleet_g8 = target_scene.director.spawn_wave(
+                                        {"size": 8, "force": true})
+                        _check("warship_wave_spawned", _fleet_g8 >= 0)
+                        if _fleet_g8 >= 0:
+                                var b8: Array = target_scene.director.group_boats(_fleet_g8)
+                                _check("warship_fleet_one_boat", b8.size() == 1,
+                                                "%d boats" % b8.size())
+                                if b8.size() == 1:
+                                        _check("warship_is_warship",
+                                                        (b8[0] as EnemyBoat).type_name()
+                                                        == "warship",
+                                                        (b8[0] as EnemyBoat).type_name())
+                                        _check("warship_has_sail",
+                                                        (b8[0] as EnemyBoat).has_sail())
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        # پیاده‌شدن هر دو ناوگان (مهلت ۳۰s)
+                        var n3: int = target_scene.director.raiders_alive(_fleet_g3)
+                        var n8: int = target_scene.director.raiders_alive(_fleet_g8)
+                        if (n3 >= 3 and n8 >= 8) or (_t - _sub_t) > 30.0:
+                                _check("both_fleets_landed", n3 >= 3 and n8 >= 8,
+                                                "g3=%d g8=%d" % [n3, n8])
+                                target_scene.director.kill_all_raiders()
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        # قایق‌ها بعد از مرگ سربازها هم در ساحل می‌مانند (بازخورد کاربر)
+                        if _t - _sub_t >= 2.0:
+                                _check("rowboat_stays_after_death",
+                                                target_scene.director.boat_state(_fleet_g3) == 1,
+                                                "state=%d" % target_scene.director.boat_state(_fleet_g3))
+                                _check("warship_stays_after_death",
+                                                target_scene.director.boat_state(_fleet_g8) == 1,
+                                                "state=%d" % target_scene.director.boat_state(_fleet_g8))
+                                _check("boats_still_active",
+                                                target_scene.director.boats_active() >= 2,
+                                                "%d" % target_scene.director.boats_active())
+                                # — چرخش دوربین با کشیدن دکمه‌ی چپ موس —
+                                # (روی اندروید، لمس با emulate_mouse_from_touch
+                                # به همین مسیر می‌رسد: فشار+کشیدن+رهاشدن)
+                                _drag_yaw0 = target_scene._yaw
+                                _push_left_drag()
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        var dyaw := absf(wrapf(deg_to_rad(target_scene._yaw
+                                                        - _drag_yaw0), -PI, PI))
+                        _check("camera_rotates_with_left_drag", rad_to_deg(dyaw) > 10.0,
+                                        "%.1f deg" % rad_to_deg(dyaw))
+                        # — باخت: همه‌ی خانه‌ها آتش می‌گیرند → بعد از فروریختن، باخت
+                        for b in target_scene.props.buildings:
+                                if is_instance_valid(b) and not b.burned:
+                                        b.ignite()
+                        _sub = 5
+                        _sub_t = _t
+                5:
+                        if target_scene.game_over or (_t - _sub_t) > 25.0:
+                                _check("game_over_when_all_houses_burned",
+                                                target_scene.game_over,
+                                                "t=%.1f" % (_t - _sub_t))
+                                _check("game_over_panel_visible",
+                                                target_scene._game_over_panel != null
+                                                and target_scene._game_over_panel.visible)
+                                _check("auto_waves_stopped_on_game_over",
+                                                not target_scene.director.auto_waves)
+                                # پاکسازی + جزیره‌ی تازه → باخت ریست می‌شود
+                                target_scene.director.clear_all()
+                                target_scene.regenerate(777777)
+                                _sub = 6
+                                _sub_t = _t
+                6:
+                        if _t - _sub_t >= 1.0:
+                                _check("regen_resets_game_over",
+                                                not target_scene.game_over)
+                                _phase = 20
+                                _sub = 0
+                                _sub_t = _t
+
+
+## رشته‌ی کشیدن با دکمه‌ی چپ موس: فشار + ۶ حرکت افقی + رهاکردن
+## (روی اندروید لمس با emulate_mouse_from_touch به همین دنباله‌ی رویداد تبدیل می‌شود)
+func _push_left_drag() -> void:
+        var vp := target_scene.get_viewport()
+        var p := InputEventMouseButton.new()
+        p.button_index = MOUSE_BUTTON_LEFT
+        p.pressed = true
+        p.position = Vector2(200, 400)
+        p.global_position = Vector2(200, 400)
+        vp.push_input(p, true)
+        for i in 6:
+                var m := InputEventMouseMotion.new()
+                m.position = Vector2(200 + 40.0 * float(i + 1), 400)
+                m.global_position = m.position
+                m.relative = Vector2(40, 0)
+                vp.push_input(m, true)
+        var r := InputEventMouseButton.new()
+        r.button_index = MOUSE_BUTTON_LEFT
+        r.pressed = false
+        r.position = Vector2(440, 400)
+        r.global_position = r.position
+        vp.push_input(r, true)
 
 
 # ---------------- پایان ----------------
