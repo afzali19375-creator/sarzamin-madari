@@ -5,6 +5,7 @@ extends Control
 const FONT_REGULAR := "res://assets/fonts/Vazirmatn-Regular.ttf"
 const FONT_BOLD := "res://assets/fonts/Vazirmatn-Bold.ttf"
 const TEST_SCENE := "res://scenes/dev/FlowFieldTest.tscn"
+const ISLAND_SCENE := "res://scenes/dev/IslandTest.tscn"
 
 
 func _ready() -> void:
@@ -56,6 +57,10 @@ func _ready() -> void:
         start_btn.pressed.connect(_on_start_pressed)
         vb.add_child(start_btn)
 
+        var island_btn := _make_button(tr("menu_island"))
+        island_btn.pressed.connect(_on_island_pressed)
+        vb.add_child(island_btn)
+
         var quit_btn := _make_button(tr("menu_quit"))
         quit_btn.pressed.connect(_on_quit_pressed)
         vb.add_child(quit_btn)
@@ -67,7 +72,7 @@ func _ready() -> void:
         bottom.add_theme_constant_override("margin_bottom", 16)
         add_child(bottom)
         var version := Label.new()
-        version.text = "v0.1  |  build %s  |  گام ۱–۳: مسیریابی FlowField با نخ پایدار  |  Steps 1–3: threaded flow field" % GameConstants.BUILD_ID
+        version.text = "v0.2  |  build %s  |  گام ۱–۴: مسیریابی + جزیره‌ی WFC با کاشی‌های قابل‌کلیک  |  Steps 1–4: flow field + WFC island" % GameConstants.BUILD_ID
         version.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
         version.add_theme_font_size_override("font_size", 14)
         version.add_theme_color_override("font_color", Color(0.7, 0.8, 0.78, 0.8))
@@ -77,6 +82,10 @@ func _ready() -> void:
 
 func _on_start_pressed() -> void:
         get_tree().change_scene_to_file(TEST_SCENE)
+
+
+func _on_island_pressed() -> void:
+        get_tree().change_scene_to_file(ISLAND_SCENE)
 
 
 func _on_quit_pressed() -> void:

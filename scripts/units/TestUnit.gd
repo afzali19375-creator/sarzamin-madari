@@ -16,10 +16,16 @@ var _spawn_color: Color
 var _mat: StandardMaterial3D
 var _body: MeshInstance3D
 
+## گام ۴ — صحنه این را به IslandTiles.height_at_world وصل می‌کند تا واحد
+## روی سقف کاشی‌ها بایستد (بدون آن: y = 0 مثل صحنه‌ی FlowFieldTest)
+var ground_provider: Callable = Callable()
+var _y_smooth := 0.0
+
 
 func _ready() -> void:
         add_to_group("units")
         _bob_t = randf() * TAU
+        _y_smooth = global_position.y
 
         _spawn_color = GameConstants.UNIT_PALETTE.pick_random()
         _mat = StandardMaterial3D.new()
@@ -92,7 +98,12 @@ func _process(delta: float) -> void:
         pos += _vel * delta
         pos = _separate(pos)
         pos = PathService.clamp_to_grid(pos)
-        global_position = Vector3(pos.x, 0.0, pos.y)
+        # ایستادن روی سقف کاشی (اگر provider وصل باشد) — هموارشده تا پله‌ها نپَرد
+        var gy := 0.0
+        if ground_provider.is_valid():
+                gy = ground_provider.call(pos)
+        _y_smooth = lerpf(_y_smooth, gy, clampf(10.0 * delta, 0.0, 1.0))
+        global_position = Vector3(pos.x, _y_smooth, pos.y)
 
         var moving := _vel.length_squared() > 0.01
         if moving:
