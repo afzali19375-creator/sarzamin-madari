@@ -8,6 +8,9 @@ signal squad_selected(squad: Node)
 ## هدف ناوبری تغییر کرد (world_pos روی صفحه‌ی XZ)
 signal goal_changed(world_pos: Vector2)
 
+## هدف ناوبری «یک دسته» تغییر کرد (گام ۵ — میدان جریان چندکاناله per-squad)
+signal squad_goal_changed(squad_id: int, world_pos: Vector2)
+
 ## دشمنی شروع به غارت خانه کرد / خانه نابود شد
 signal village_looted(village_id: int)
 signal village_destroyed(village_id: int)

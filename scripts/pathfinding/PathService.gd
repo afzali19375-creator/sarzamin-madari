@@ -13,7 +13,8 @@ var field_thread: FlowFieldThread
 var auto_recompute := true
 
 var _grid_ready := false
-var _last_goal_world := Vector2.ZERO
+## گام ۵ — هدفِ هر کانال (کانال = squad_id). کانال ۰ = هدف سراسری سازگار با گام‌های قبل
+var _goals: Dictionary = {}          # channel:int -> world:Vector2
 var _accum := 0.0
 var _last_read_ms := 0.0
 
@@ -34,25 +35,37 @@ func is_ready() -> bool:
         return _grid_ready
 
 
-## تعیین هدف از نخ اصلی (کلیک کاربر و...)
+## تعیین هدف سراسری (کانال ۰) — سازگار با صحنه‌های گام‌های قبل
 func set_goal_world(world_xz: Vector2) -> void:
+        set_goal_for(0, world_xz)
+        GameEvents.goal_changed.emit(goal_world())
+
+
+## تعیین هدف یک دسته (گام ۵ — میدان چندکاناله per-squad)
+func set_goal_for(channel: int, world_xz: Vector2) -> void:
         if not _grid_ready:
                 return
-        _last_goal_world = nav.clamp_to_grid(world_xz)
+        _goals[channel] = nav.clamp_to_grid(world_xz)
         _post_compute()
-        GameEvents.goal_changed.emit(_last_goal_world)
+        GameEvents.squad_goal_changed.emit(channel, _goals[channel])
 
 
+## هدف سراسری (کانال ۰)
 func goal_world() -> Vector2:
-        return _last_goal_world
+        return goal_for(0)
+
+
+## هدف فعلی یک کانال (گام ۵)
+func goal_for(channel: int) -> Vector2:
+        return _goals.get(channel, Vector2.ZERO)
 
 
 ## خواندن جهت جریان در یک نقطه — هزینه‌ی نخ اصلی اندازه‌گیری و ثبت می‌شود
-func sample_direction(world_xz: Vector2) -> Vector2:
+func sample_direction(world_xz: Vector2, channel: int = 0) -> Vector2:
         if not _grid_ready:
                 return Vector2.ZERO
         var t0 := Time.get_ticks_usec()
-        var d := field_thread.sample_direction(world_xz, nav)
+        var d := field_thread.sample_direction(world_xz, nav, channel)
         _last_read_ms = float(Time.get_ticks_usec() - t0) / 1000.0
         return d
 
@@ -70,7 +83,8 @@ func debug_info() -> Dictionary:
                 "compute_ms": field_thread.last_compute_ms() if field_thread != null else 0.0,
                 "read_ms": _last_read_ms,
                 "computes": field_thread.compute_count() if field_thread != null else 0,
-                "goal": _last_goal_world,
+                "goal": goal_world(),
+                "channels": _goals.keys(),
         }
 
 
@@ -90,9 +104,15 @@ func _process(delta: float) -> void:
 
 
 func _post_compute() -> void:
-        # اسنپ‌شات همیشه در نخ اصلی گرفته می‌شود — هیچ اشتراک حافظه‌ای با کارگر نیست
-        field_thread.request_compute(nav.world_to_cell(_last_goal_world),
-                        nav.snapshot_walkable(), nav.snapshot_costs())
+        # اسنپ‌شات همیشه در نخ اصلی گرفته می‌شود — هیچ اشتراک حافظه‌ای با کارگر نیست.
+        # یک اسنپ‌شات مشترک برای همه‌ی کانال‌ها (فقط‌خواندنی برای کارگر)
+        if _goals.is_empty():
+                return
+        var walk := nav.snapshot_walkable()
+        var costs := nav.snapshot_costs()
+        for channel in _goals:
+                field_thread.request_compute(nav.world_to_cell(_goals[channel]),
+                                walk, costs, channel)
 
 
 func _exit_tree() -> void:

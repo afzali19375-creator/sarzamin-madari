@@ -19,18 +19,18 @@ var _started := false
 
 var _w := 0
 var _h := 0
-var _work: FlowField
-var _published: FlowField
 
-# پستِ درخواست (زیر قفل) — اسنپ‌شات walkable/costs از نخ اصلی کپی می‌شود
-var _pending_goal := Vector2i(-1, -1)
-var _pending_walk := PackedByteArray()
-var _pending_costs := PackedFloat32Array()
+# گام ۵ — میدان چندکاناله: هر دسته (squad_id) میدان جریان خودش را دارد.
+# الگوی دو-بافر به ازای هر کانال حفظ می‌شود؛ نخ پایدارِ واحد باقی می‌ماند.
+var _work_fields: Dictionary = {}       # channel -> FlowField (بافر کار)
+var _published_fields: Dictionary = {}  # channel -> FlowField (بافر منتشرشده)
+
+# پستِ درخواست (زیر قفل) — آخرین درخواستِ هر کانال نگه داشته می‌شود (coalesce)
+# ساختار: channel -> {"goal": Vector2i, "walk": PackedByteArray, "costs": PackedFloat32Array}
+var _pending: Dictionary = {}
 var _has_request := false
 
 # آمار منتشرشده (زیر قفل)
-var _published_goal := Vector2i(-1, -1)
-var _published_invalid := true
 var _compute_ms := 0.0
 var _compute_count := 0
 
@@ -40,13 +40,8 @@ func start(w: int, h: int) -> void:
                 return
         _w = w
         _h = h
-        # ⚠️ هر دو بافر از ابتدا ساخته می‌شوند — اگر «منتشرشده» null بماند،
-        # بعد از اولین جابه‌جایی، بافرِ کار null می‌شود و نخ کارگر در درخواست
-        # بعدی می‌میرد (باگ واقعی: «پرچم می‌آید ولی سربازها به سمتش نمی‌روند»)
-        _work = FlowField.new()
-        _work.setup(w, h)
-        _published = FlowField.new()
-        _published.setup(w, h)  # تا اولین محاسبه: is_invalid → has_field() == false
+        # ⚠️ بافر کارِ هر کانال از ابتدا ساخته می‌شود — بافر null هرگز به کارگر
+        # داده نمی‌شود (باگ واقعی: «پرچم می‌آید ولی سربازها به سمتش نمی‌روند»)
         _mutex = Mutex.new()
         _sem = Semaphore.new()
         _thread = Thread.new()
@@ -79,24 +74,26 @@ func is_alive() -> bool:
 ## درخواست محاسبه — فقط از نخ اصلی.
 ## walkable_snapshot / cost_snapshot را فراخوان (نخ اصلی) از NavGrid کپی می‌کند؛
 ## بدین ترتیب هیچ حافظه‌ی مشترکی بین دو نخ باقی نمی‌ماند.
+## channel: شناسه‌ی دسته (squad_id) — کانال ۰ همان هدف سراسریِ سازگار با گام‌های قبل است.
+## درخواست‌های هم‌کانال coalesce می‌شوند؛ کانال‌های مختلف در یک بیداریِ کارگر همه محاسبه می‌شوند.
 func request_compute(goal_cell: Vector2i, walkable_snapshot: PackedByteArray,
-                cost_snapshot: PackedFloat32Array = PackedFloat32Array()) -> void:
+                cost_snapshot: PackedFloat32Array = PackedFloat32Array(),
+                channel: int = 0) -> void:
         if not _started:
                 return
         _mutex.lock()
-        _pending_goal = goal_cell
-        _pending_walk = walkable_snapshot
-        _pending_costs = cost_snapshot
+        _pending[channel] = {"goal": goal_cell, "walk": walkable_snapshot,
+                        "costs": cost_snapshot}
         _has_request = true
         _mutex.unlock()
         _sem.post()
 
 
 ## جهت واحد در یک نقطه‌ی جهانی — فقط نخ اصلی، هزینه: چند میکروثانیه
-func sample_direction(world_xz: Vector2, nav: NavGrid) -> Vector2:
+func sample_direction(world_xz: Vector2, nav: NavGrid, channel: int = 0) -> Vector2:
         var f: FlowField = null
         _mutex.lock()
-        f = _published
+        f = _published_fields.get(channel)
         _mutex.unlock()
         if f == null or nav == null:
                 return Vector2.ZERO
@@ -108,10 +105,24 @@ func sample_direction(world_xz: Vector2, nav: NavGrid) -> Vector2:
 
 func has_field() -> bool:
         _mutex.lock()
-        # بافر خالیِ اولیه هنوز «میدان» نیست — باید حداقل یک محاسبه منتشر شده باشد
-        var has := _published != null and not _published.is_invalid()
+        # حداقل یک کانال میدانِ معتبر منتشر کرده باشد
+        var has := false
+        for k in _published_fields:
+                var f: FlowField = _published_fields[k]
+                if f != null and not f.is_invalid():
+                        has = true
+                        break
         _mutex.unlock()
         return has
+
+
+## آیا کانال مشخصی میدانِ منتشرشده دارد؟ (گام ۵)
+func has_channel(channel: int) -> bool:
+        _mutex.lock()
+        var f: FlowField = _published_fields.get(channel)
+        var ok := f != null and not f.is_invalid()
+        _mutex.unlock()
+        return ok
 
 
 func last_compute_ms() -> float:
@@ -139,25 +150,43 @@ func _worker_loop() -> void:
                         break
                 var has := _has_request
                 _has_request = false
-                var goal := _pending_goal
-                var walk := _pending_walk
-                var costs := _pending_costs
+                var jobs: Dictionary = _pending
+                _pending = {}
                 _mutex.unlock()
-                if has and walk.size() == _w * _h:
-                        # محافظ دفاعی: کارگر هرگز نباید به‌خاطر بافر null بمیرد
-                        if _work == null or _work.width != _w or _work.height != _h:
-                                _work = FlowField.new()
-                                _work.setup(_w, _h)
-                        var t0 := Time.get_ticks_usec()
-                        _work.compute(_w, _h, walk, goal, costs)
-                        var ms := float(Time.get_ticks_usec() - t0) / 1000.0
-                        _mutex.lock()
-                        _compute_ms = ms
-                        _compute_count += 1
-                        # جابه‌جایی بافرها: نتیجه‌ی تازه «منتشر» می‌شود، بافر قدیمی می‌شود «کارِ» بعدی
-                        var tmp := _published
-                        _published = _work
-                        _work = tmp
-                        _published_goal = goal
-                        _published_invalid = _published.is_invalid()
-                        _mutex.unlock()
+                if has and not jobs.is_empty():
+                        _run_jobs(jobs)
+
+
+## اجرای همه‌ی درخواست‌های جمع‌شده — محاسبه بیرون از قفل، انتشار زیر قفل
+func _run_jobs(jobs: Dictionary) -> void:
+        for channel in jobs:
+                var job: Dictionary = jobs[channel]
+                var walk: PackedByteArray = job["walk"]
+                if walk.size() != _w * _h:
+                        continue
+                var goal: Vector2i = job["goal"]
+                var costs: PackedFloat32Array = job["costs"]
+                _mutex.lock()
+                var work: FlowField = _work_fields.get(channel)
+                _mutex.unlock()
+                # محافظ دفاعی: کارگر هرگز نباید به‌خاطر بافر null بمیرد
+                if work == null or work.width != _w or work.height != _h:
+                        work = FlowField.new()
+                        work.setup(_w, _h)
+                var t0 := Time.get_ticks_usec()
+                work.compute(_w, _h, walk, goal, costs)
+                var ms := float(Time.get_ticks_usec() - t0) / 1000.0
+                _mutex.lock()
+                _compute_ms = ms
+                _compute_count += 1
+                # جابه‌جایی بافرِ همین کانال: نتیجه‌ی تازه «منتشر» می‌شود،
+                # بافر قدیمی می‌شود «کارِ» بعدیِ همان کانال
+                var published: FlowField = _published_fields.get(channel)
+                _published_fields[channel] = work
+                if published != null and published.width == _w and published.height == _h:
+                        _work_fields[channel] = published
+                else:
+                        var nw := FlowField.new()
+                        nw.setup(_w, _h)
+                        _work_fields[channel] = nw
+                _mutex.unlock()

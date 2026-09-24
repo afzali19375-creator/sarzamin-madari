@@ -1,31 +1,37 @@
 extends Node3D
-## صحنه‌ی آزمون گام ۴ R2 — «زمین صاف Bad North + شبکه‌ی فرمان سفید»
+## صحنه‌ی آزمون گام ۵ — «سه دسته و فرمان کامل»
 ##
-## بازخوردهای کاربر که این صحنه پاسخ می‌دهد:
-##   ۱) کل زمین بلوک‌بلوک نیست — زمین صاف است؛ بلوک‌ها فقط هنگام فرمان ظاهر می‌شوند
-##   ۲) سلول‌های فرمان بزرگ‌ترند (۲×۲ متر) و به‌صورت «هاله‌ی سفید» می‌درخشند
-##   ۳) دسته‌ی انتخابی واقعاً روی سلول فرمان می‌ایستد (آرایش ۱.۲ متری §۵)
-##   ۴) آب متحرک + خانه‌های واقعی هخامنشی؛ بقیه‌ی گرافیک مینیمال (§۱۳/§۱۴)
+## گام ۵ روی بازخوردهای گام ۴ می‌سازد (زمین صاف + هاله‌ی سفید + ایستادن روی سلول):
+##   * سه دسته از سه کلاس واحد — دسته ۱: جاویدان ×۴ | دسته ۲: نیزه‌دار ×۴ | دسته ۳: کماندار ×۳
+##   * انتخاب: کلیک چپ روی هر سرباز → دسته‌ی «او» انتخاب می‌شود؛ یا کلیدهای 1..3
+##   * فرمان per-squad: هر دسته هدف و میدان جریانِ خودش را دارد (کانال = squad_id)
+##   * لایه ۳ روی صحنه: کوله‌ی تمرین (T) → جاویدان سپر می‌گیرد، نیزه‌دار فقط در ایست
+##     آماده‌باش می‌شود، کماندار تیر می‌اندازد (بدون آسیب دوستانه، مسیر باز)
+##   * لایه ۴: واحدِ جابه‌جاشده خودش به پست بازمی‌گردد
 ##
-## تعامل دقیقاً طبق §۲ پرامت:
-##   کلیک چپ روی سرباز  → انتخاب دسته: اسلوموشن (۰.۱۵s) + هاله‌ی سفید (§۲.۳)
-##   کلیک چپ روی سلول سفید → فرمان: دسته می‌رود و همان‌جا می‌ایستد (§۲.۴)
-##   Shift + کلیک → Waypoint (حداکثر ۸، خط فیروزه‌ای #3AB0A0) (§۴)
-##   کلیک چپ روی جای خالی / سربازِ انتخابی → لغو انتخاب (بازگشت ۰.۲s)
-##   Space (نگه‌داشتن) → اسلوموشن (§۶)  |  Q/E چرخش دوربین ۳۶۰°  |  Wheel زوم
-##   R جزیره‌ی جدید  |  G همان seed  |  کلیک راست = فرمان (سازگاری با عادت قبل)
+## تعامل (§۲ پرامت + گام ۵):
+##   کلیک چپ روی سرباز → انتخاب دسته‌اش: اسلوموشن (۰.۱۵s) + هاله‌ی سفید (§۲.۳)
+##   کلیک چپ روی سلول سفید → فرمان به دسته‌ی انتخابی (§۲.۴) | Shift+کلیک → Waypoint
+##   کلیک روی جای خالی / سربازِ انتخابی / Esc → لغو انتخاب (بازگشت ۰.۲s)
+##   Space (نگه‌داشتن) → اسلوموشن  |  Q/E چرخش دوربین ۳۶۰°  |  Wheel زوم
+##   R جزیره‌ی جدید  |  G همان seed  |  T کوله‌ی تمرین  |  D پاک‌کردن کوله‌ها
 
 enum Mode { IDLE, COMMAND }
 
 const GRID := 32
 const CELL := 1.0
-const UNIT_COUNT := 10
 const FONT_FA := "res://assets/fonts/Vazirmatn-Regular.ttf"
 const DEFAULT_SEED := 20260924
 const SELECT_PICK_PX := 46.0
 const SELECT_PICK_WORLD := 1.15
-const WP_REACH_ARRIVED := 8     # ≥۸ سرباز رسیده → waypoint بعدی
+const WP_REACH_FRACTION := 0.8   # ≥۸۰٪ دسته رسیده → waypoint بعدی
 const SLOT_MAX_RING := 3
+## تعریف دسته‌ها — رنگ از پالت UNIT_PALETTE (طلایی برای UI نگه داشته شده)
+const SQUAD_DEFS := [
+        {"fa": "جاویدان", "en": "Immortal", "script": "res://scripts/units/ImmortalUnit.gd", "count": 4, "color": 0},
+        {"fa": "نیزه‌دار", "en": "Spearman", "script": "res://scripts/units/SpearmanUnit.gd", "count": 4, "color": 1},
+        {"fa": "کماندار", "en": "Archer", "script": "res://scripts/units/ArcherUnit.gd", "count": 3, "color": 3},
+]
 
 var mode := Mode.IDLE
 var island: Dictionary = {}
@@ -33,13 +39,25 @@ var ground: IslandGround
 var cmd_grid: CommandGrid
 var props: IslandProps
 var blocked_by_houses: Array[Vector2i] = []
-var waypoints: Array[Vector2] = []
-var squad: Array[TestUnit] = []
+
+# ---------------- دسته‌ها (گام ۵) ----------------
+## دسته‌ها به تفکیک: squads[0] = جاویدان‌ها و ...
+var squads: Array = []
+## همه‌ی واحدها به‌صورت تخت — سازگار با تست‌های خودکار قبلی
+var squad: Array = []
+## دسته‌ی انتخاب‌شده (-1 = هیچ)
+var selected := -1
 var squad_selected_fired := false   # برای تست خودکار
+
+## صف Waypoint هر دسته؛ «waypoints» آینه‌ی دسته‌ی انتخابی است (سازگاری تست)
+var squad_waypoints: Array = []
+var waypoints: Array[Vector2] = []
 
 var _island_seed := DEFAULT_SEED
 var _units_root: Node3D
-var _goal_cell := Vector2i(-1, -1)
+var _arrows_root: Node3D
+var _dummies: Array[TrainingDummy] = []
+var _squad_posts: Array[Vector2] = []   # مرکز پست هر دسته (برای تست لایه ۳/۴)
 
 # دوربین (§۷ پرامت)
 var _cam_pivot: Node3D
@@ -115,17 +133,19 @@ func _regenerate(seed_value: int, announce: bool) -> void:
                 add_child(cmd_grid)
         cmd_grid.rebuild(ground, nav)
         # ریست وضعیت فرمان
+        for wq in squad_waypoints:
+                wq.clear()
         waypoints.clear()
         _rebuild_waypoint_line()
         mode = Mode.IDLE
+        selected = -1
         _slow_select = false
         _slow_space = false
         Engine.time_scale = 1.0
+        _clear_dummies()
         _clear_units()
-        # هدف اولیه: نزدیک‌ترین سلول فرمان معتبر به مرکز خشکی
-        _goal_cell = _pick_goal_cell()
-        _spawn_units()
-        PathService.set_goal_world(PathService.nav.cell_center(_goal_cell))
+        # سه پست دور از هم برای سه دسته + فرمان اولیه‌ی هر دسته به پست خودش
+        _spawn_squads()
         if announce:
                 _toast_msg("جزیره‌ی جدید — بذر %d (تلاش %d، %.0f ms)\nNew island — seed %d (attempt %d, %.0f ms)" % [
                         island["seed_used"], island["attempts"], island["gen_ms"],
@@ -154,7 +174,10 @@ func _apply_island_to_nav() -> void:
 
 
 func _clear_units() -> void:
+        squads.clear()
         squad.clear()
+        squad_waypoints.clear()
+        _squad_posts.clear()
         if _units_root == null:
                 _units_root = Node3D.new()
                 _units_root.name = "Units"
@@ -164,74 +187,100 @@ func _clear_units() -> void:
                 c.free()
 
 
-func _spawn_units() -> void:
+# ---------------- اسپاون سه دسته ----------------
+
+## سه پست (سلول فرمان) دور از هم: اولی نزدیک مرکز خشکی، بقیه دورترین به قبلی‌ها
+func _pick_cluster_cells() -> Array[Vector2]:
+        var nav := PathService.nav
+        var pts: Array[Vector2] = []
+        for i in cmd_grid.cell_count:
+                pts.append(cmd_grid.cell_info(i)["center"])
+        if pts.is_empty():
+                return [nav.cell_center(Vector2i(GRID / 2, GRID / 2))]
+        var acc := Vector2.ZERO
+        for p in pts:
+                acc += p
+        var centroid := acc / float(pts.size())
+        var first := pts[0]
+        var best_d := 1e9
+        for p in pts:
+                var d: float = p.distance_to(centroid)
+                if d < best_d:
+                        best_d = d
+                        first = p
+        var picked: Array[Vector2] = [first]
+        while picked.size() < mini(SQUAD_DEFS.size(), 3):
+                var far := first
+                var far_score := -1.0
+                for p in pts:
+                        var min_d := 1e9
+                        for q in picked:
+                                min_d = minf(min_d, p.distance_to(q))
+                        if min_d > far_score:
+                                far_score = min_d
+                                far = p
+                picked.append(far)
+        return picked
+
+
+func _spawn_squads() -> void:
         var nav := PathService.nav
         var rng := RandomNumberGenerator.new()
         rng.seed = int(island["seed_used"]) * 31 + int(island["attempts"])
-        var goal_center := nav.cell_center(_goal_cell)
-        var cands: Array[Vector2i] = []
-        var fallback: Array[Vector2i] = []
-        for y in GRID:
-                for x in GRID:
-                        var c := Vector2i(x, y)
+        var clusters := _pick_cluster_cells()
+        for si in SQUAD_DEFS.size():
+                var def: Dictionary = SQUAD_DEFS[si]
+                var post: Vector2 = clusters[si % clusters.size()]
+                _squad_posts.append(post)
+                var units: Array = []
+                var wq: Array[Vector2] = []
+                squad_waypoints.append(wq)
+                # سلول‌های اسپاون: قابل‌عبور در شعاع ۲.۵ متری پست (پشتیبان: ۵ متری)
+                var spawn_cells := _walkable_cells_near(post, 2.5, def["count"])
+                if spawn_cells.size() < int(def["count"]):
+                        spawn_cells = _walkable_cells_near(post, 5.0, def["count"])
+                var uscript := load(def["script"])
+                for k in int(def["count"]):
+                        var center: Vector2
+                        if k < spawn_cells.size():
+                                center = spawn_cells[k]
+                        else:
+                                center = post
+                        var u: UnitBase = uscript.new()
+                        u.squad_id = si
+                        u.squad_color = GameConstants.UNIT_PALETTE[int(def["color"])]
+                        u.speed_mult = 1.0 - GameConstants.SPEED_VARIATION \
+                                        + rng.randf() * 2.0 * GameConstants.SPEED_VARIATION
+                        u.fidget_enabled = true
+                        u.position = Vector3(center.x, ground.height_at_world(center), center.y)
+                        u.ground_provider = Callable(ground, "height_at_world")
+                        _units_root.add_child(u)
+                        units.append(u)
+                        squad.append(u)
+                squads.append(units)
+                # فرمان اولیه: هر دسته روی پست خودش آرایش می‌گیرد (میدانِ کانال خودش)
+                _issue_move_to(post, si, true)
+
+
+func _walkable_cells_near(center: Vector2, radius: float, want: int) -> Array[Vector2]:
+        var nav := PathService.nav
+        var cells := int(ceil(radius / nav.cell_size))
+        var base := nav.world_to_cell(center)
+        var out: Array[Vector2] = []
+        var dists: Array = []
+        for dy in range(-cells, cells + 1):
+                for dx in range(-cells, cells + 1):
+                        var c := base + Vector2i(dx, dy)
                         if not nav.is_walkable(c):
                                 continue
-                        fallback.append(c)
-                        var d := (nav.cell_center(c) - goal_center).length()
-                        if d >= 3.5 and d <= 14.0:
-                                cands.append(c)
-        if cands.size() < UNIT_COUNT:
-                cands = fallback
-        for i in range(cands.size() - 1, 0, -1):
-                var j := rng.randi_range(0, i)
-                var tmp := cands[i]
-                cands[i] = cands[j]
-                cands[j] = tmp
-        var spawned := 0
-        for c in cands:
-                if spawned >= UNIT_COUNT:
+                        var cc := nav.cell_center(c)
+                        dists.append([cc.distance_to(center), cc])
+        dists.sort_custom(func(a, b): return a[0] < b[0])
+        for d in dists:
+                out.append(d[1])
+                if out.size() >= want:
                         break
-                var center := nav.cell_center(c)
-                var u := TestUnit.new()
-                u.position = Vector3(center.x, ground.height_at_world(center), center.y)
-                u.ground_provider = Callable(ground, "height_at_world")
-                u.speed_mult = 1.0 - GameConstants.SPEED_VARIATION \
-                                + rng.randf() * 2.0 * GameConstants.SPEED_VARIATION
-                u.fidget_enabled = true
-                _units_root.add_child(u)
-                squad.append(u)
-                spawned += 1
-
-
-func _pick_goal_cell() -> Vector2i:
-        # نزدیک‌ترین سلول فرمان معتبر به مرکز خشکی — همه‌چیز در مختصات «جهانی»
-        # (سلول مرکزِ سلول‌فرمان باید قابل‌عبور باشد تا BFS/تست از آن شروع شود)
-        var nav := PathService.nav
-        var acc := Vector2.ZERO
-        var count := 0
-        for y in GRID:
-                for x in GRID:
-                        if nav.is_walkable(Vector2i(x, y)):
-                                acc += nav.cell_center(Vector2i(x, y))
-                                count += 1
-        if count == 0:
-                return Vector2i(GRID / 2, GRID / 2)
-        var centroid := acc / float(count)
-        var best := -1
-        var best_d := 1e9
-        for i in cmd_grid.cell_count:
-                var info := cmd_grid.cell_info(i)
-                var cc: Vector2i = nav.world_to_cell(info["center"])
-                if not nav.is_walkable(cc):
-                        continue
-                var d: float = (info["center"] - centroid).length()
-                if d < best_d:
-                        best_d = d
-                        best = i
-        if best < 0:
-                return Vector2i(GRID / 2, GRID / 2)
-        var center: Vector2 = cmd_grid.cell_info(best)["center"]
-        return nav.world_to_cell(center)
+        return out
 
 
 func regenerate(seed_value: int) -> void:
@@ -383,6 +432,11 @@ func _flash_ping(p: Vector3) -> void:
         _ping_t = 0.0
 
 
+func _squad_label(si: int) -> String:
+        var def: Dictionary = SQUAD_DEFS[si]
+        return "%d %s/%s" % [si + 1, def["fa"], def["en"]]
+
+
 func _refresh_stats() -> void:
         var info := PathService.debug_info()
         var computes: int = int(info["computes"])
@@ -398,15 +452,25 @@ func _refresh_stats() -> void:
                         arrived += 1
         var goal: Vector2 = info["goal"]
         var mode_str := "COMMAND" if mode == Mode.COMMAND else "IDLE"
-        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  slow: %s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  input: %s\nisland seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d  |  houses %d\ncomputes: %d  |  goal: (%.1f, %.1f)  |  time_scale: %.2f  |  cam h %.0f yaw %.0f" % [
+        var sel_str := "-" if selected < 0 else str(selected + 1)
+        var sq := "squads: "
+        for si in squads.size():
+                var a := 0
+                for u in squads[si]:
+                        if u.is_arrived():
+                                a += 1
+                sq += "%s(%d/%d) " % [_squad_label(si), a, squads[si].size()]
+        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nisland seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d  |  houses %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f" % [
                 GameConstants.BUILD_ID, Engine.get_frames_per_second(), field_state, mode_str,
-                ("ON" if Engine.time_scale < 0.99 else "off"),
-                squad.size(), arrived, slots_assigned(), waypoints.size(), _last_input_msg,
+                sel_str, ("ON" if Engine.time_scale < 0.99 else "off"),
+                sq,
+                squad.size(), arrived, slots_assigned(), selected_waypoints().size(),
+                _dummies.size(), _last_input_msg,
                 island.get("seed_used", -1), island.get("attempts", -1), island.get("gen_ms", 0.0),
                 int(round(100.0 * float(island.get("land_count", 0)) / float(GRID * GRID))),
                 cmd_grid.cell_count if cmd_grid != null else 0,
                 props.house_positions.size() if props != null else 0,
-                computes, goal.x, goal.y, Engine.time_scale,
+                computes, str(info["channels"]), Engine.time_scale,
                 _target_height, _yaw,
         ]
 
@@ -461,19 +525,23 @@ func _process(delta: float) -> void:
                         _hover_info = {}
                         cmd_grid.hover_at_world(Vector2(1e6, 1e6))
 
-        # پیشروی Waypoint: رسیدن دسته → 0.2s انتظار → مقصد بعدی (§۴.۳)
-        if not waypoints.is_empty():
-                var arrived := 0
-                for u in squad:
+        # پیشروی Waypoint هر دسته: رسیدن → 0.2s انتظار → مقصد بعدی (§۴.۳)
+        for si in squads.size():
+                var wq: Array = squad_waypoints[si]
+                if wq.is_empty():
+                        continue
+                var need := maxi(1, ceili(float(squads[si].size()) * WP_REACH_FRACTION))
+                var arrived_n := 0
+                for u in squads[si]:
                         if u.is_arrived():
-                                arrived += 1
-                if arrived >= WP_REACH_ARRIVED:
+                                arrived_n += 1
+                if arrived_n >= need:
                         _wp_wait += delta
                         if _wp_wait >= GameConstants.WAYPOINT_WAIT:
                                 _wp_wait = 0.0
-                                waypoints.pop_front()
-                                if not waypoints.is_empty():
-                                        _issue_move_to(waypoints[0])
+                                wq.pop_front()
+                                if not wq.is_empty():
+                                        _issue_move_to(wq[0], si, true)
                                 _rebuild_waypoint_line()
                 else:
                         _wp_wait = 0.0
@@ -490,7 +558,7 @@ func _xz_of_hit(hit: Dictionary) -> Vector2:
         return center
 
 
-# ---------------- ورودی (§۲ پرامت) ----------------
+# ---------------- ورودی (§۲ پرامت + گام ۵) ----------------
 
 func _input(event: InputEvent) -> void:
         if event is InputEventMouseButton:
@@ -521,10 +589,20 @@ func _input(event: InputEvent) -> void:
                                 KEY_G:
                                         _regenerate(_island_seed, true)
                                 KEY_1, KEY_2, KEY_3, KEY_4:
-                                        # §۲.۱ — میان‌بر انتخاب جوخه 1..4 (فعلاً یک دسته)
-                                        _select_squad()
+                                        # §۲.۱ — میان‌بر انتخاب دسته 1..4 (الگوی Bad North)
+                                        var idx := int(event.physical_keycode) - int(KEY_1)
+                                        if idx == selected:
+                                                _deselect()  # کلید تکراری = لغو
+                                        else:
+                                                _select_squad(idx)
                                 KEY_SPACE:
                                         _slow_space = true  # نگه‌داشتن Space = اسلوموشن (§۶)
+                                KEY_T:
+                                        _spawn_training_dummy()
+                                KEY_D:
+                                        _clear_dummies()
+                                KEY_ESCAPE:
+                                        _deselect()
                 elif not event.pressed:
                         _keys_held[event.physical_keycode] = false
                         if event.physical_keycode == KEY_SPACE:
@@ -534,16 +612,17 @@ func _input(event: InputEvent) -> void:
 func _on_left_click(event: InputEventMouseButton) -> void:
         var u := _unit_at_screen(event.position)
         if u != null:
-                if mode == Mode.COMMAND:
+                var si := _squad_index_of(u)
+                if si == selected:
                         _deselect()  # کلیک دوباره روی دسته‌ی انتخابی = لغو
                 else:
-                        _select_squad()
+                        _select_squad(si)
                 return
         var cam := get_viewport().get_camera_3d()
         var hit := ground.ray_pick(cam, event.position)
         if mode != Mode.COMMAND:
                 _last_input_msg = "left-click: no squad selected"
-                _toast_msg("اول سربازها را انتخاب کن (کلیک چپ روی دسته)\nFirst select the squad (left-click on it)")
+                _toast_msg("اول یک دسته را انتخاب کن (کلید ۱-۳ یا کلیک روی سرباز)\nFirst select a squad (keys 1-3 or click a soldier)")
                 return
         if hit.is_empty() or not bool(hit["in_island"]):
                 _deselect()
@@ -553,11 +632,9 @@ func _on_left_click(event: InputEventMouseButton) -> void:
         var info := cmd_grid.cell_at_world(xz)
         if bool(info.get("ok", false)):
                 if event.shift_pressed:
-                        _add_waypoint(info["center"])
+                        _add_waypoint(info["center"], selected)
                 else:
-                        waypoints.clear()
-                        waypoints.append(info["center"])
-                        _issue_move_to(info["center"])
+                        _issue_move_to(info["center"], selected, false)
                         _rebuild_waypoint_line()
         else:
                 _last_input_msg = "cell invalid (%d,%d)" % [hit["cell"].x, hit["cell"].y]
@@ -567,11 +644,12 @@ func _on_left_click(event: InputEventMouseButton) -> void:
 func _on_right_click(event: InputEventMouseButton) -> void:
         # سازگاری با عادت قبلی: راست‌کلیک = انتخاب و فرمان
         if mode != Mode.COMMAND:
-                if _unit_at_screen(event.position) != null:
-                        _select_squad()
+                var u := _unit_at_screen(event.position)
+                if u != null:
+                        _select_squad(_squad_index_of(u))
                 else:
                         _last_input_msg = "right-click: no squad selected"
-                        _toast_msg("اول سربازها را انتخاب کن (کلیک چپ روی دسته)\nFirst select the squad (left-click on it)")
+                        _toast_msg("اول یک دسته را انتخاب کن (کلید ۱-۳ یا کلیک روی سرباز)\nFirst select a squad (keys 1-3 or click a soldier)")
                 return
         var cam := get_viewport().get_camera_3d()
         var hit := ground.ray_pick(cam, event.position)
@@ -580,64 +658,109 @@ func _on_right_click(event: InputEventMouseButton) -> void:
                 return
         var info := cmd_grid.cell_at_world(_xz_of_hit(hit))
         if bool(info.get("ok", false)):
-                waypoints.clear()
-                waypoints.append(info["center"])
-                _issue_move_to(info["center"])
+                _issue_move_to(info["center"], selected, false)
                 _rebuild_waypoint_line()
         else:
                 _last_input_msg = "cell invalid (right-click)"
                 _toast_msg("سربازها آنجا نمی‌توانند بایستند\nUnits cannot stand there")
 
 
-# ---------------- انتخاب دسته و فرمان (§۲.۳ / §۲.۴) ----------------
+# ---------------- انتخاب دسته و فرمان per-squad (§۲.۳ / §۲.۴ / گام ۵) ----------------
 
-func _select_squad() -> void:
+func _select_squad(idx: int) -> void:
+        if idx < 0 or idx >= squads.size():
+                _toast_msg("دسته‌ی %d هنوز استخدام نشده (دسته‌های فعال: %d)\nSquad %d not recruited yet (active: %d)" % [
+                        idx + 1, squads.size(), idx + 1, squads.size()])
+                return
         mode = Mode.COMMAND
+        selected = idx
         _slow_select = true  # §۶ — اسلوموشن هنگام انتخاب
         cmd_grid.set_command_mode(true)  # هاله‌ی سفید ظاهر می‌شود
+        _update_selection_rings()
         squad_selected_fired = true
-        GameEvents.squad_selected.emit(_units_root)
-        _last_input_msg = "squad selected → slow-mo + white grid"
-        _toast_msg("دسته انتخاب شد — زمان کند شد؛ روی یکی از سلول‌های سفید کلیک کن\nSquad selected — time slowed; click a white cell")
+        GameEvents.squad_selected.emit(squads[idx])
+        waypoints = squad_waypoints[idx].duplicate()
+        _rebuild_waypoint_line()
+        _last_input_msg = "squad %d selected (%s) → slow-mo + white grid" % [
+                idx + 1, SQUAD_DEFS[idx]["en"]]
+        _toast_msg("دسته‌ی %s انتخاب شد — زمان کند شد؛ روی سلول سفید کلیک کن\n%s squad selected — time slowed; click a white cell" % [
+                SQUAD_DEFS[idx]["fa"], SQUAD_DEFS[idx]["en"]])
 
 
 func _deselect() -> void:
         mode = Mode.IDLE
+        selected = -1
         _slow_select = false  # §۶.۲ — لغو انتخاب = پایان اسلوموشن (۰.۲s)
         cmd_grid.set_command_mode(false)
+        _update_selection_rings()
+        waypoints.clear()
         _last_input_msg = "deselected"
 
 
-## فرمان حرکت به مرکز سلول: اسلات‌های آرایش + هدف FlowField + پینگ موقتی
-func _issue_move_to(center: Vector2) -> void:
-        _assign_slots(center)
-        PathService.set_goal_world(center)
+func _update_selection_rings() -> void:
+        for si in squads.size():
+                var on := si == selected
+                for u in squads[si]:
+                        u.set_selected_ring(on)
+
+
+func _squad_index_of(u: UnitBase) -> int:
+        return u.squad_id if u.squad_id < squads.size() else -1
+
+
+## صف Waypoint دسته‌ی انتخابی (سازگار با تست‌های قبلی)
+func selected_waypoints() -> Array[Vector2]:
+        if selected >= 0 and selected < squad_waypoints.size():
+                return squad_waypoints[selected]
+        return waypoints
+
+
+## فرمان حرکت دسته به مرکز سلول: اسلات‌های آرایش + هدف کانالِ دسته + پینگ موقتی
+## silent=true برای فرمان‌های داخلی (پست اولیه/Waypoint) — بدون قطع انتخاب/تُست
+func _issue_move_to(center: Vector2, idx: int, silent: bool) -> void:
+        if idx < 0 or idx >= squads.size():
+                return
+        if not silent:
+                # فرمان ساده صف Waypoint را پاک می‌کند (رفتار گام ۴)
+                squad_waypoints[idx].clear()
+                waypoints.clear()
+        _assign_slots(center, idx)
+        PathService.set_goal_for(idx, center)
         var y := ground.height_at_world(center)
         _flash_ping(Vector3(center.x, y + 0.08, center.y))
-        _last_input_msg = "move -> (%.1f, %.1f) slots %d" % [center.x, center.y, slots_assigned()]
-        _toast_msg("دسته به سلول می‌رود و همان‌جا می‌ایستند\nSquad moving — they will stand on the cell")
-        # فرمان صادر شد → پایان حالت فرمان و اسلوموشن (رفتار Bad North)
-        _deselect()
+        _last_input_msg = "squad %d move -> (%.1f, %.1f) slots %d" % [
+                idx + 1, center.x, center.y, squad_slots_assigned(idx)]
+        if not silent:
+                _toast_msg("دسته‌ی %s می‌رود و همان‌جا می‌ایستد\n%s squad moving — they will stand on the cell" % [
+                        SQUAD_DEFS[idx]["fa"], SQUAD_DEFS[idx]["en"]])
+                # فرمان صادر شد → پایان حالت فرمان و اسلوموشن (رفتار Bad North)
+                _deselect()
 
 
-func _add_waypoint(center: Vector2) -> void:
-        if waypoints.size() >= GameConstants.WAYPOINT_MAX:
+func _add_waypoint(center: Vector2, idx: int) -> void:
+        if idx < 0 or idx >= squads.size():
+                return
+        var wq: Array = squad_waypoints[idx]
+        if wq.size() >= GameConstants.WAYPOINT_MAX:
                 _toast_msg("حداکثر نقاط مسیر: %d\nMax waypoints: %d" % [
                         GameConstants.WAYPOINT_MAX, GameConstants.WAYPOINT_MAX])
                 return
-        if waypoints.is_empty():
-                _issue_move_to(center)  # اولین waypoint بلافاصله فعال می‌شود
-        waypoints.append(center)
+        if wq.is_empty():
+                _issue_move_to(center, idx, true)  # اولین waypoint بلافاصله فعال می‌شود
+        wq.append(center)
+        waypoints = wq.duplicate()
         _rebuild_waypoint_line()
-        _last_input_msg = "waypoint %d added" % waypoints.size()
+        _last_input_msg = "squad %d waypoint %d added" % [idx + 1, wq.size()]
 
 
 ## اسلات‌های آرایش ۱.۲ متری دور مرکز سلول (§۵.۲) — فقط روی سلول‌های قابل‌عبور
-func _assign_slots(center: Vector2) -> void:
+func _assign_slots(center: Vector2, idx: int) -> void:
         var nav := PathService.nav
+        var members: Array = squads[idx]
+        var n := members.size()
         var slots: Array[Vector2] = [center]
         var ring := 1
-        while slots.size() < UNIT_COUNT and ring <= SLOT_MAX_RING:
+        while slots.size() < n and ring <= SLOT_MAX_RING:
                 var r := GameConstants.FORMATION_SPACING * float(ring)
                 var per := 6 * ring
                 for k in per:
@@ -646,12 +769,12 @@ func _assign_slots(center: Vector2) -> void:
                         var np := _nearest_walkable_point(nav, p, 1.3)
                         if np != Vector2.INF:
                                 slots.append(np)
-                                if slots.size() >= UNIT_COUNT:
+                                if slots.size() >= n:
                                         break
                 ring += 1
         # تضمین: همیشه به اندازه‌ی سربازها اسلات داریم
         var guard := 0
-        while slots.size() < UNIT_COUNT and guard < 60:
+        while slots.size() < n and guard < 60:
                 var ang := _rng_scene() * TAU
                 var rr := 1.2 + float(guard % 3) * 1.2
                 var np := _nearest_walkable_point(nav, center + Vector2(cos(ang), sin(ang)) * rr, 1.6)
@@ -662,15 +785,15 @@ func _assign_slots(center: Vector2) -> void:
         for s in slots:
                 var best := -1
                 var best_d := 1e9
-                for i in squad.size():
+                for i in members.size():
                         if used.has(i):
                                 continue
-                        var d := _unit_xz(squad[i]).distance_to(s)
+                        var d := _unit_xz(members[i]).distance_to(s)
                         if d < best_d:
                                 best_d = d
                                 best = i
                 if best >= 0:
-                        squad[best].set_slot(s)
+                        members[best].set_slot(s)
                         used[best] = true
 
 
@@ -703,21 +826,21 @@ func _unit_xz(u: Node3D) -> Vector2:
         return Vector2(u.global_position.x, u.global_position.z)
 
 
-func _squad_center_xz() -> Vector2:
-        if squad.is_empty():
+func _squad_center_xz(idx: int) -> Vector2:
+        if idx < 0 or idx >= squads.size() or squads[idx].is_empty():
                 return Vector2.ZERO
         var acc := Vector2.ZERO
-        for u in squad:
+        for u in squads[idx]:
                 acc += _unit_xz(u)
-        return acc / float(squad.size())
+        return acc / float(squads[idx].size())
 
 
 ## انتخاب واحد با ماوس: نزدیک‌ترین سرباز در ۴۶ پیکسل یا ۱.۱۵ متر
-func _unit_at_screen(screen: Vector2) -> TestUnit:
+func _unit_at_screen(screen: Vector2) -> UnitBase:
         var cam := get_viewport().get_camera_3d()
         if cam == null:
                 return null
-        var best: TestUnit = null
+        var best: UnitBase = null
         var best_px := SELECT_PICK_PX
         for u in squad:
                 var wp: Vector3 = u.global_position + Vector3(0, 0.35, 0)
@@ -743,50 +866,154 @@ func _unit_at_screen(screen: Vector2) -> TestUnit:
         return best
 
 
+# ---------------- کوله‌ی تمرین (لایه ۳ — T/D) ----------------
+
+## کوله نزدیک پست دسته (یا نزدیک نقطه‌ی دلخواه) — برای آزمایش دستی و تست
+func spawn_dummy_near_world(base: Vector2, offset: Vector2 = Vector2(2.2, 0.0)) -> TrainingDummy:
+        var nav := PathService.nav
+        var p := _nearest_walkable_point(nav, base + offset, 2.5)
+        if p == Vector2.INF:
+                p = base
+        var d := TrainingDummy.new()
+        d.position = Vector3(p.x, ground.height_at_world(p), p.y)
+        if _units_root == null:
+                _units_root = Node3D.new()
+                _units_root.name = "Units"
+                add_child(_units_root)
+        _units_root.add_child(d)
+        _dummies.append(d)
+        return d
+
+
+## کوله نزدیک پست دسته‌ی داده‌شده (T دستی یا تست)
+func spawn_training_dummy(squad_idx: int = -1, offset: Vector2 = Vector2(2.2, 0.0)) -> TrainingDummy:
+        var base: Vector2
+        if squad_idx >= 0 and squad_idx < _squad_posts.size():
+                base = _squad_posts[squad_idx]
+        else:
+                base = _squad_center_xz(0)
+        var d := spawn_dummy_near_world(base, offset)
+        _last_input_msg = "training dummy spawned near squad %d" % (squad_idx + 1)
+        return d
+
+
+## کوله در «برد واقعی کمان» دور از دسته — اولین جهت با مسیر شلیک باز (لایه ۳)
+func spawn_dummy_at_range(squad_idx: int, radius: float = 6.5) -> TrainingDummy:
+        var center := _squad_center_xz(squad_idx)
+        var from_y := ground.height_at_world(center) + 0.5
+        for k in 12:
+                var ang := TAU * float(k) / 12.0
+                var candidate := center + Vector2(cos(ang), sin(ang)) * radius
+                var p := _nearest_walkable_point(PathService.nav, candidate, 2.0)
+                if p == Vector2.INF:
+                        continue
+                if p.distance_to(center) < radius - 2.0:
+                        continue
+                if not _los_clear_from_center(center, from_y, p):
+                        continue
+                return spawn_dummy_near_world(p, Vector2.ZERO)
+        # هیچ جهتی مسیر باز نداشت — نزدیک‌ترین تلاش
+        return spawn_dummy_near_world(center + Vector2(radius, 0.0), Vector2(0.0, 0.0))
+
+
+func _los_clear_from_center(center: Vector2, from_y: float, to: Vector2) -> bool:
+        var dist := center.distance_to(to)
+        var steps := maxi(int(dist / 0.4), 2)
+        for i in range(1, steps):
+                var k := float(i) / float(steps)
+                var p := center.lerp(to, k)
+                var gh := ground.height_at_world(p)
+                if gh > maxf(from_y, ground.height_at_world(to) + 0.4) + 0.5:
+                        return false
+        return true
+
+
+func _spawn_training_dummy() -> void:
+        var idx := selected if selected >= 0 else randi_range(0, maxi(squads.size() - 1, 0))
+        spawn_training_dummy(idx)
+        _toast_msg("کوله‌ی تمرین گذاشته شد — واکنش کلاس‌ها را ببین\nTraining dummy placed — watch class reactions")
+
+
+func _clear_dummies() -> void:
+        for d in _dummies:
+                if is_instance_valid(d):
+                        d.queue_free()
+        _dummies.clear()
+
+
+func dummy_count() -> int:
+        return _dummies.size()
+
+
+func dummy_hits_total() -> int:
+        var n := 0
+        for d in _dummies:
+                if is_instance_valid(d):
+                        n += d.hits
+        return n
+
+
+func arrows_fired_total() -> int:
+        var n := 0
+        for u in squad:
+                if u is ArcherUnit:
+                        n += u.shots_fired
+        return n
+
+
+func alive_arrows() -> int:
+        return get_tree().get_nodes_in_group("arrows").size()
+
+
 # ---------------- خط Waypoint (§۴.۲: #3AB0A0، Alpha 0.6، ضخامت 0.1m) ----------------
+## گام ۵: برای هر دسته‌ای که صف دارد، خط از مرکز دسته تا صف کشیده می‌شود
 
 func _rebuild_waypoint_line() -> void:
         for c in _wp_root.get_children():
                 if c != _wp_line:
                         c.free()
-        if waypoints.size() < 1:
-                _wp_line.visible = false
-                return
-        _wp_line.visible = true
+        var any := false
         var st := SurfaceTool.new()
         st.begin(Mesh.PRIMITIVE_TRIANGLES)
         var col := GameConstants.COL_WAYPOINT
         col.a = 0.6
         var half_w := 0.05  # ضخامت 0.1 متر
-        var prev := _squad_center_xz()
-        for w in waypoints:
-                var a3 := Vector3(prev.x, ground.height_at_world(prev) + 0.12, prev.y)
-                var b2 := w
-                var b3 := Vector3(b2.x, ground.height_at_world(b2) + 0.12, b2.y)
-                var dir := Vector3(b3.x - a3.x, 0.0, b3.z - a3.z)
-                if dir.length() > 0.05:
-                        dir = dir.normalized()
-                        var perp := Vector3(-dir.z, 0.0, dir.x) * half_w
-                        _ribbon_quad(st, a3 + perp, a3 - perp, b3 + perp, b3 - perp, col)
-                # نشانگر نقطه
-                var mk := MeshInstance3D.new()
-                var sm := SphereMesh.new()
-                sm.radius = 0.09
-                sm.height = 0.18
-                mk.mesh = sm
-                mk.position = b3
-                var mm := StandardMaterial3D.new()
-                mm.albedo_color = GameConstants.COL_WAYPOINT
-                mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-                mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-                mk.material_override = mm
-                _wp_root.add_child(mk)
-                prev = b2
-        var mesh := st.commit()
-        if mesh != null:
-                _wp_line.mesh = mesh
-        else:
-                _wp_line.visible = false
+        for si in squads.size():
+                var wq: Array = squad_waypoints[si]
+                if wq.is_empty():
+                        continue
+                any = true
+                var prev := _squad_center_xz(si)
+                for w in wq:
+                        var a3 := Vector3(prev.x, ground.height_at_world(prev) + 0.12, prev.y)
+                        var b2: Vector2 = w
+                        var b3 := Vector3(b2.x, ground.height_at_world(b2) + 0.12, b2.y)
+                        var dir := Vector3(b3.x - a3.x, 0.0, b3.z - a3.z)
+                        if dir.length() > 0.05:
+                                dir = dir.normalized()
+                                var perp := Vector3(-dir.z, 0.0, dir.x) * half_w
+                                _ribbon_quad(st, a3 + perp, a3 - perp, b3 + perp, b3 - perp, col)
+                        # نشانگر نقطه
+                        var mk := MeshInstance3D.new()
+                        var sm := SphereMesh.new()
+                        sm.radius = 0.09
+                        sm.height = 0.18
+                        mk.mesh = sm
+                        mk.position = b3
+                        var mm := StandardMaterial3D.new()
+                        mm.albedo_color = GameConstants.COL_WAYPOINT
+                        mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+                        mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+                        mk.material_override = mm
+                        _wp_root.add_child(mk)
+                        prev = b2
+        _wp_line.visible = any
+        if any:
+                var mesh := st.commit()
+                if mesh != null:
+                        _wp_line.mesh = mesh
+                else:
+                        _wp_line.visible = false
 
 
 func _ribbon_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
@@ -803,9 +1030,32 @@ func is_command_mode() -> bool:
         return mode == Mode.COMMAND
 
 
+## تعداد اسلات تخصیص‌یافته در همه‌ی دسته‌ها
 func slots_assigned() -> int:
         var n := 0
         for u in squad:
                 if u.has_slot():
                         n += 1
         return n
+
+
+## تعداد اسلات تخصیص‌یافته‌ی یک دسته (گام ۵)
+func squad_slots_assigned(idx: int) -> int:
+        if idx < 0 or idx >= squads.size():
+                return 0
+        var n := 0
+        for u in squads[idx]:
+                if u.has_slot():
+                        n += 1
+        return n
+
+
+## دسته‌ی انتخابی (برای تست) — -1 اگر هیچ
+func selected_squad() -> int:
+        return selected
+
+
+## مرکز فعلی یک دسته (برای تست لایه ۳)
+func squad_center(idx: int) -> Vector2:
+        return _squad_center_xz(idx)
+

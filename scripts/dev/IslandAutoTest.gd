@@ -1,21 +1,25 @@
 class_name IslandAutoTest
 extends Node
-## تست خودکار گام ۴ R2 — «زمین صاف Bad North + شبکه‌ی فرمان سفید»
-## معیارهای پذیرش (پرامت فاز اول + بازخوردهای کاربر):
-##   ۰) جزیره سالم: ≤32×32، لبه‌ها آب، خشکی بازی‌پذیر ≥ ~۴۰٪، بدون دریاچه‌ی تک‌سلولی،
-##      خانه‌های هخامنشی (۴ بنا) جای‌گذاری و در NavGrid مسدود شده، سلول‌های فرمان ≥ ۲۰
+## تست خودکار گام ۵ — «سه دسته و فرمان کامل» (روی پایه‌ی گام ۴ R2)
+## معیارهای پذیرش (پرامت فاز اول + سند طراحی §۴/§۵):
+##   ۰) جزیره سالم + سه دسته: جاویدان×۴ / نیزه‌دار×۴ / کماندار×۳ — کلاس‌ها درست
 ##   ۱) قطعیت WFC (همان seed → همان جزیره) + فشار ۸ seed
 ##   ۲) هزینه‌ی زمین (§۳.۲): شن 1.2 | چمن 1.0 + وضعیت اولیه‌ی تمیز
-##   ۳) کلیک چپ روی سرباز → انتخاب دسته: اسلوموشن 0.5 + هاله‌ی سفید (§۲.۳/§۶)
-##   ۴) کلیک چپ روی سلول دور → فرمان: پایان اسلوموشن، اسلات‌های آرایش، میدان زنده (§۲.۴)
-##   ۵) سربازها «روی سلول» می‌ایستند: هر واحد روی اسلات خودش درون سلول (±1.7m) (بازخورد کاربر)
-##   ۶) Shift+کلیک → Waypoint در صف؛ فرمان ساده → صف پاک و مقصد جدید
-##   ۷) بازتولید R → همه‌چیز از نو و سازگار
+##   ۳) رسیدن هر سه دسته به پست اولیه (میدان چندکاناله per-squad)
+##   ۴) کلیک روی سربازِ دسته ۰ → انتخاب همان دسته: اسلوموشن + هاله سفید
+##   ۵) فرمان به سلول دور → فقط دسته ۰ اسلات می‌گیرد؛ دو دسته‌ی دیگر در پست می‌مانند
+##   ۶) ایستادن واقعی روی سلول: اسلات‌ها + مرکز جرم + زمین هموار
+##   ۷) Shift+کلیک → Waypoint در صف؛ فرمان ساده → صف پاک
+##   ۸) بازتولید R → همه‌چیز از نو و سازگار
+##   ۹) کلیدهای 1..4: انتخاب دسته‌ها + حلقه‌ی سفید فقط روی دسته‌ی انتخابی + toggle
+##  ۱۰) جداسازی کانال‌ها: فرمان به دسته ۱ → دسته‌های ۰/۲ منجمد؛ نیزه‌دار در حرکت آماده‌باش نمی‌شود
+##  ۱۱) لایه ۳ روی کوله‌ی تمرین: جاویدان سپر، کماندار تیر (بدون آسیب دوستانه)،
+##      نیزه‌دار فقط در ایست آماده‌باش؛ پاک‌کردن کوله = پایان نبرد
+##  ۱۲) لایه ۴: واحدِ جابه‌جاشده خودش به پست بازمی‌گردد + سلامت نهایی
 ## اجرا:
 ##   godot --headless --path . res://scenes/dev/IslandTest.tscn -- --autotest
 ## کد خروج: 0 = همه PASS، 1 = حداقل یک FAIL
 
-const ARRIVE_MIN_UNITS := 9
 const ARRIVE_DEADLINE := 75.0
 const REGEN_SEED := 4242
 const DIRS := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
@@ -33,14 +37,21 @@ var _results: PackedStringArray = []
 var _computes_before := 0
 var _arrive_t0 := 0.0
 var _goal_before := Vector2.ZERO
-var _cell_b := Vector2.ZERO    # مرکز جهانی سلول فرمان دور (فرمان اصلی)
+var _goal0_before := Vector2.ZERO
+var _cell_b := Vector2.ZERO    # مرکز جهانی سلول فرمان دور (فرمان اصلی دسته ۰)
 var _cell_c := Vector2.ZERO    # مرکز جهانی سلول فرمان میانه (waypoint)
 var _cell_d := Vector2.ZERO    # مرکز جهانی سلول فرمان دوم (فرمان ساده)
+var _cell_e := Vector2.ZERO    # مقصد دسته ۱ در فاز جداسازی
 var _cell_b_nav := Vector2i(-1, -1)
+var _others_snapshot: Array[Vector2] = []   # جای سربازان دسته‌های «دیگر» هنگام فرمان
+var _dummy0: TrainingDummy
+var _dummy1: TrainingDummy
+var _dummy2: TrainingDummy
+var _slot_before := Vector2.ZERO
 
 
 func _ready() -> void:
-        print("[AUTOTEST] island harness attached — 8 phases (smooth ground + command grid)")
+        print("[AUTOTEST] island harness attached — 12 phases (3 squads + 4-layer behavior)")
 
 
 func _check(name: String, ok: bool, detail: String = "") -> void:
@@ -55,6 +66,25 @@ func _units() -> Array:
         return target_scene.squad
 
 
+func _xz(u: Node3D) -> Vector2:
+        return Vector2(u.global_position.x, u.global_position.z)
+
+
+func _all_arrived() -> bool:
+        for u in _units():
+                if not u.is_arrived():
+                        return false
+        return true
+
+
+func _arrived_in(a: Array) -> int:
+        var n := 0
+        for u in a:
+                if u.is_arrived():
+                        n += 1
+        return n
+
+
 func _process(delta: float) -> void:
         _t += delta
         match _phase:
@@ -67,7 +97,7 @@ func _process(delta: float) -> void:
                         if _t >= 1.2:
                                 _phase2_costs_and_initial_state()
                 3:
-                        _phase3_select_squad()
+                        _phase3_wait_posts_then_select()
                 4:
                         _phase4_command_move()
                 5:
@@ -77,16 +107,24 @@ func _process(delta: float) -> void:
                 7:
                         _phase7_regenerate()
                 8:
+                        _phase8_hotkeys_and_rings()
+                9:
+                        _phase9_channel_isolation()
+                10:
+                        _phase10_layer3_combat()
+                11:
+                        _phase11_layer4_guard()
+                12:
                         _finish()
 
 
-# ---------------- فاز ۰: جزیره سالم؟ ----------------
+# ---------------- فاز ۰: جزیره سالم + سه دسته؟ ----------------
 
 func _phase0_island_ready() -> void:
         var isl: Dictionary = target_scene.island
         _check("island_generated", isl.get("ok", false) == true)
         if isl.get("ok", false) != true:
-                _phase = 8
+                _phase = 12
                 return
         _check("gen_fast", float(isl["gen_ms"]) < 2500.0, "%.1f ms" % isl["gen_ms"])
         _check("grid_size_32", int(isl["size"]) == 32, "size=%d" % isl["size"])
@@ -107,11 +145,9 @@ func _phase0_island_ready() -> void:
                 for x in size:
                         if int(isl["walkable"][y * size + x]) == 1:
                                 walk_total += 1
-        # §۸.۳ پرامت: منطقه‌ی قابل‌عبور ≥ ۴۰٪ کل مساحت (تلورانس ۲٪ برای seedهای مرزی)
         _check("walkable_fraction_40pct", walk_total >= int(size * size * 0.38),
                         "%d/%d = %.0f%%" % [walk_total, size * size, 100.0 * walk_total / float(size * size)])
 
-        # §۸.۳ — هیچ دریاچه‌ی تک‌سلولیِ محصور در خشکی نباشد
         var lakes := 0
         for y in range(1, size - 1):
                 for x in range(1, size - 1):
@@ -130,8 +166,9 @@ func _phase0_island_ready() -> void:
 
         var info: Dictionary = PathService.debug_info()
         _check("field_published", info["has_field"] == true, "computes=%d" % info["computes"])
+        _check("multi_channel_goals_registered", (info["channels"] as Array).size() >= 3,
+                        "channels=%s" % str(info["channels"]))
 
-        # خانه‌ها: ۴ بنا + مسدود بودن سلول‌هایشان
         _check("houses_built_4", target_scene.props.house_positions.size() == 4,
                         "%d" % target_scene.props.house_positions.size())
         var nav: NavGrid = PathService.nav
@@ -142,7 +179,6 @@ func _phase0_island_ready() -> void:
         _check("house_cells_blocked_in_nav", houses_blocked,
                         "%d cells" % target_scene.blocked_by_houses.size())
 
-        # همگامی NavGrid با جزیره (به‌جز سلول‌های خانه‌ها)
         var house_set := {}
         for c in target_scene.blocked_by_houses:
                 house_set[c] = true
@@ -156,24 +192,49 @@ func _phase0_island_ready() -> void:
                                 mismatches += 1
         _check("navgrid_matches_island", mismatches == 0, "%d mismatches" % mismatches)
 
-        # سلول‌های فرمان (بازخورد: بلوک‌های بزرگ‌تر ۲×۲ متر)
         _check("command_cells_enough", target_scene.cmd_grid.cell_count >= 20,
                         "%d cells" % target_scene.cmd_grid.cell_count)
 
+        # --- گام ۵: سه دسته، ترکیب و کلاس‌ها ---
+        _check("squad_count_3", target_scene.squads.size() == 3,
+                        "%d" % target_scene.squads.size())
+        _check("unit_count_is_11", _units().size() == 11, "n=%d" % _units().size())
+        var comp := "%d/%d/%d" % [target_scene.squads[0].size(), target_scene.squads[1].size(),
+                        target_scene.squads[2].size()]
+        _check("squad_composition_4_4_3", target_scene.squads[0].size() == 4
+                        and target_scene.squads[1].size() == 4 and target_scene.squads[2].size() == 3,
+                        comp)
+        var class_ok := true
+        for u in target_scene.squads[0]:
+                if not (u is ImmortalUnit):
+                        class_ok = false
+        for u in target_scene.squads[1]:
+                if not (u is SpearmanUnit):
+                        class_ok = false
+        for u in target_scene.squads[2]:
+                if not (u is ArcherUnit):
+                        class_ok = false
+        _check("unit_classes_correct", class_ok)
+        var colors_ok := true
+        for si in 3:
+                var c0: Color = target_scene.squads[si][0].spawn_color()
+                if not (c0 in GameConstants.UNIT_PALETTE):
+                        colors_ok = false
+                for u in target_scene.squads[si]:
+                        # فقط رنگِ تولدِ دسته مقایسه می‌شود (رسیده‌ها سرخِ موقت‌اند)
+                        if u.spawn_color() != c0:
+                                colors_ok = false
+        _check("squad_colors_from_palette", colors_ok)
+
         var on_walkable := 0
         for u in _units():
-                if u is TestUnit:
+                if u is UnitBase:
                         var p: Vector3 = u.global_position
                         if nav.is_walkable(nav.world_to_cell(Vector2(p.x, p.z))):
                                 on_walkable += 1
-        _check("unit_count_is_10", _units().size() == 10, "n=%d" % _units().size())
-        _check("units_spawned_on_walkable", on_walkable == 10, "%d/10" % on_walkable)
-
-        # سلول‌های هدف فاز ۳–۶: B دور، C میانه، D دوم
-        _pick_target_cells()
-        _check("far_targets_found", _cell_b != Vector2.ZERO and _cell_c != Vector2.ZERO
-                        and _cell_d != Vector2.ZERO,
-                        "B=(%.0f,%.0f) C=(%.0f,%.0f)" % [_cell_b.x, _cell_b.y, _cell_c.x, _cell_c.y])
+        _check("units_spawned_on_walkable", on_walkable == 11, "%d/11" % on_walkable)
+        # سلول‌های هدف در فاز ۳ (بعد از نشستن دسته‌ها روی پست) انتخاب می‌شوند تا
+        # کلیک‌ها به سرباز نخورد — همان درسی که از اولین اجرا گرفتیم
         _phase = 1
 
 
@@ -199,7 +260,6 @@ func _pick_target_cells() -> void:
         var far_d := 0
         for v in depths.values():
                 far_d = maxi(far_d, int(v))
-        # سلول‌های فرمانی که عمق دارند: [index, depth, center]
         var entries: Array = []
         for i in target_scene.cmd_grid.cell_count:
                 var info: Dictionary = target_scene.cmd_grid.cell_info(i)
@@ -209,23 +269,39 @@ func _pick_target_cells() -> void:
                         entries.append([i, int(depths[cc]), center])
         if entries.is_empty():
                 return
+        # فیلتر پیکسلی: سلولی که در صفحه نزدیک سربازِ ایستاده است کلیکِ تمیز ندارد
+        var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
+        var clean: Array = []
+        for e in entries:
+                var center: Vector2 = e[2]
+                var click_sp := _screen_of(Vector3(center.x,
+                                target_scene.ground.height_at_world(center) + 0.1, center.y))
+                var min_px := 1e9
+                for u in _units():
+                        var wp: Vector3 = u.global_position + Vector3(0, 0.35, 0)
+                        if cam.is_position_behind(wp):
+                                continue
+                        min_px = minf(min_px, cam.unproject_position(wp).distance_to(click_sp))
+                if min_px > 70.0:
+                        clean.append(e)
+        if clean.size() < 3:
+                clean = entries  # پشتیبان: بدون فیلتر
         var best_b := -1
         var best_b_depth := -1
         var best_c := -1
         var best_c_gap := 1e9
         var best_d_idx := -1
         var best_d_gap := 1e9
-        for e in entries:
+        for e in clean:
                 var idx := int(e[0])
                 var dpt := int(e[1])
                 var center: Vector2 = e[2]
                 if dpt > best_b_depth:
                         best_b_depth = dpt
                         best_b = idx
-        for e in entries:
+        for e in clean:
                 var idx := int(e[0])
                 var dpt := int(e[1])
-                var center: Vector2 = e[2]
                 if idx == best_b:
                         continue
                 var gap := absf(float(dpt) - float(far_d) * 0.5)
@@ -233,7 +309,7 @@ func _pick_target_cells() -> void:
                         best_c_gap = gap
                         best_c = idx
         var center_b: Vector2 = target_scene.cmd_grid.cell_info(best_b)["center"]
-        for e in entries:
+        for e in clean:
                 var idx := int(e[0])
                 var center: Vector2 = e[2]
                 if idx == best_b or idx == best_c:
@@ -316,14 +392,16 @@ func _phase2_costs_and_initial_state() -> void:
         _check("terrain_costs_grass_1_0", found_grass and grass_ok)
 
         _check("initial_state_idle", target_scene.mode == 0
+                        and target_scene.selected_squad() == -1
                         and not target_scene.cmd_grid.is_command_mode()
                         and absf(Engine.time_scale - 1.0) < 0.01,
                         "time=%.2f" % Engine.time_scale)
         _phase = 3
         _sub = 0
+        _sub_t = _t
 
 
-# ---------------- فاز ۳: انتخاب دسته → اسلوموشن + هاله سفید ----------------
+# ---------------- فاز ۳: رسیدن به پست‌ها + انتخاب دسته ۰ با کلیک ----------------
 
 func _push_click(button: MouseButton, screen: Vector2, shift: bool = false) -> void:
         var ev := InputEventMouseButton.new()
@@ -336,24 +414,44 @@ func _push_click(button: MouseButton, screen: Vector2, shift: bool = false) -> v
         target_scene.get_viewport().push_input(ev, true)  # همان مسیر ورودی واقعی بازیکن
 
 
+func _push_key(keycode: Key) -> void:
+        var ev := InputEventKey.new()
+        ev.physical_keycode = keycode
+        ev.pressed = true
+        target_scene.get_viewport().push_input(ev, true)
+
+
 func _screen_of(world: Vector3) -> Vector2:
         var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
         return cam.unproject_position(world)
 
 
-func _phase3_select_squad() -> void:
+func _phase3_wait_posts_then_select() -> void:
         match _sub:
                 0:
-                        var u: TestUnit = _units()[0]
-                        var p: Vector3 = u.global_position + Vector3(0, 0.35, 0)
-                        _goal_before = PathService.goal_world()
-                        _push_click(MOUSE_BUTTON_LEFT, _screen_of(p))
-                        _sub = 1
-                        _sub_t = _t
+                        # سه دسته باید اول روی پست‌هایشان بنشینند (میدان چندکاناله)
+                        var arrived_n := _arrived_in(_units())
+                        if _all_arrived() or (_t - _sub_t) > 60.0:
+                                _check("all_squads_reach_initial_posts", _all_arrived(),
+                                                "%d/11 in %.1fs" % [arrived_n, _t - _sub_t])
+                                # حالا که همه ایستاده‌اند، سلول‌های هدفِ «کلیک تمیز» انتخاب می‌شوند
+                                _pick_target_cells()
+                                _check("far_targets_found", _cell_b != Vector2.ZERO
+                                                and _cell_c != Vector2.ZERO and _cell_d != Vector2.ZERO,
+                                                "B=(%.0f,%.0f) C=(%.0f,%.0f)" % [
+                                                        _cell_b.x, _cell_b.y, _cell_c.x, _cell_c.y])
+                                _goal_before = PathService.goal_world()
+                                var u: UnitBase = _units()[0]
+                                var p: Vector3 = u.global_position + Vector3(0, 0.35, 0)
+                                _push_click(MOUSE_BUTTON_LEFT, _screen_of(p))
+                                _sub = 1
+                                _sub_t = _t
                 1:
                         if _t - _sub_t >= 0.8:
-                                _check("left_click_selects_squad", target_scene.is_command_mode(),
-                                                "mode=%d" % target_scene.mode)
+                                _check("left_click_selects_own_squad",
+                                                target_scene.is_command_mode()
+                                                and target_scene.selected_squad() == 0,
+                                                "sel=%d" % target_scene.selected_squad())
                                 _check("squad_selected_event_fired", target_scene.squad_selected_fired)
                                 _check("slowmo_engaged_on_select",
                                                 absf(Engine.time_scale - 0.5) < 0.06,
@@ -365,12 +463,18 @@ func _phase3_select_squad() -> void:
                                 _sub = 0
 
 
-# ---------------- فاز ۴: فرمان حرکت به سلول دور ----------------
+# ---------------- فاز ۴: فرمان حرکت دسته ۰ به سلول دور ----------------
 
 func _phase4_command_move() -> void:
         match _sub:
                 0:
                         _computes_before = int(PathService.debug_info()["computes"])
+                        # اسنپ‌شات جای دسته‌های ۱ و ۲ — بعد از فرمان نباید تکان بخورند
+                        _others_snapshot.clear()
+                        for u in target_scene.squads[1]:
+                                _others_snapshot.append(_xz(u))
+                        for u in target_scene.squads[2]:
+                                _others_snapshot.append(_xz(u))
                         _push_click(MOUSE_BUTTON_LEFT, _screen_of(Vector3(_cell_b.x,
                                         target_scene.ground.height_at_world(_cell_b) + 0.1, _cell_b.y)))
                         _sub = 1
@@ -386,9 +490,10 @@ func _phase4_command_move() -> void:
                                                 absf(Engine.time_scale - 1.0) < 0.06,
                                                 "time=%.2f" % Engine.time_scale)
                                 _check("grid_hidden_after_command",
-                                                not target_scene.cmd_grid.is_command_mode())
-                                _check("formation_slots_assigned", target_scene.slots_assigned() >= 9,
-                                                "%d/10" % target_scene.slots_assigned())
+                                        not target_scene.cmd_grid.is_command_mode())
+                                _check("formation_slots_assigned",
+                                                target_scene.squad_slots_assigned(0) == 4,
+                                                "%d/4" % target_scene.squad_slots_assigned(0))
                                 var computes_now: int = int(PathService.debug_info()["computes"])
                                 _check("field_recomputed_for_new_goal", computes_now > _computes_before,
                                                 "before=%d now=%d" % [_computes_before, computes_now])
@@ -396,14 +501,12 @@ func _phase4_command_move() -> void:
                                 _arrive_t0 = _t
 
 
-# ---------------- فاز ۵: ایستادن واقعی روی سلول (بازخورد کاربر) ----------------
+# ---------------- فاز ۵: ایستادن واقعی روی سلول + سکون دسته‌های دیگر ----------------
 
 func _phase5_wait_arrival_on_cell() -> void:
-        var arrived := 0
-        for u in _units():
-                if u is TestUnit and u.is_arrived():
-                        arrived += 1
-        if arrived >= ARRIVE_MIN_UNITS or (_t - _arrive_t0) > ARRIVE_DEADLINE:
+        var s0: Array = target_scene.squads[0]
+        var arrived := _arrived_in(s0)
+        if arrived >= 4 or (_t - _arrive_t0) > ARRIVE_DEADLINE:
                 var on_slot := 0
                 var slot_in_cell := 0
                 var on_ground := 0
@@ -411,49 +514,66 @@ func _phase5_wait_arrival_on_cell() -> void:
                 var centroid_acc := Vector2.ZERO
                 var centroid_n := 0
                 var nav: NavGrid = PathService.nav
-                for u in _units():
-                        if not (u is TestUnit) or not u.is_arrived():
+                for u in s0:
+                        if not u.is_arrived():
                                 continue
                         var p: Vector3 = u.global_position
-                        var xz := Vector2(p.x, p.z)
+                        var uxz := Vector2(p.x, p.z)
                         var slot: Vector2 = u.slot_pos()
                         var tol := 1.5 if u.is_fidgeting() else 0.55
-                        if xz.distance_to(slot) <= tol:
+                        if uxz.distance_to(slot) <= tol:
                                 on_slot += 1
-                        # شعاع آرایش ۱.۲m × ۲ حلقه = تا ۲.۹m از مرکز سلول (§۵.۲)
+                        # شعاع آرایش ۱.۲m × ۱ حلقه برای ۴ سرباز
                         if slot.distance_to(_cell_b) <= 2.9:
                                 slot_in_cell += 1
-                        centroid_acc += xz
+                        centroid_acc += uxz
                         centroid_n += 1
-                        var gy: float = target_scene.ground.height_at_world(xz)
+                        var gy: float = target_scene.ground.height_at_world(uxz)
                         if absf(p.y - gy) <= 0.3:
                                 on_ground += 1
-                        if nav.is_walkable(nav.world_to_cell(xz)):
+                        if nav.is_walkable(nav.world_to_cell(uxz)):
                                 on_walkable += 1
-                var n := _units().size()
-                _check("units_reach_FAR_cell", arrived >= ARRIVE_MIN_UNITS,
+                var n := s0.size()
+                _check("squad0_reach_FAR_cell", arrived >= 4,
                                 "%d/%d in %.1fs" % [arrived, n, _t - _arrive_t0])
-                # قانون طلایی بازخورد کاربر: دسته «روی سلول انتخابی» می‌ایستد —
-                # اسلات‌ها در شعاع آرایش + مرکزِ جرم دسته روی خود سلول
-                _check("units_stand_ON_their_slots", on_slot >= 8, "%d/%d" % [on_slot, n])
-                _check("slots_in_formation_radius", slot_in_cell >= 8, "%d/%d" % [slot_in_cell, n])
+                # قانون طلایی بازخورد کاربر: دسته «روی سلول انتخابی» می‌ایستد
+                _check("units_stand_ON_their_slots", on_slot >= 3, "%d/%d" % [on_slot, n])
+                _check("slots_in_formation_radius", slot_in_cell >= 3, "%d/%d" % [slot_in_cell, n])
                 var centroid := centroid_acc / float(maxi(centroid_n, 1))
                 _check("squad_centered_on_cell", centroid.distance_to(_cell_b) <= 1.4,
                                 "centroid=(%.1f,%.1f) cell=(%.1f,%.1f)" % [centroid.x, centroid.y, _cell_b.x, _cell_b.y])
-                _check("units_stand_on_smooth_ground", on_ground >= 8, "%d/%d" % [on_ground, n])
-                _check("units_parked_on_walkable", on_walkable >= 8, "%d/%d" % [on_walkable, n])
+                _check("units_stand_on_smooth_ground", on_ground >= 3, "%d/%d" % [on_ground, n])
+                _check("units_parked_on_walkable", on_walkable >= 3, "%d/%d" % [on_walkable, n])
+
+                # جداسازی کانال‌ها: دسته‌های ۱ و ۲ نباید به سلول B کشیده شوند
+                var drift_ok := true
+                var i2 := 0
+                var max_drift := 0.0
+                for u in target_scene.squads[1]:
+                        max_drift = maxf(max_drift, _xz(u).distance_to(_others_snapshot[i2]))
+                        if _xz(u).distance_to(_others_snapshot[i2]) > 2.0:
+                                drift_ok = false
+                        i2 += 1
+                for u in target_scene.squads[2]:
+                        max_drift = maxf(max_drift, _xz(u).distance_to(_others_snapshot[i2]))
+                        if _xz(u).distance_to(_others_snapshot[i2]) > 2.0:
+                                drift_ok = false
+                        i2 += 1
+                _check("other_squads_hold_posts", drift_ok, "max_drift=%.2f m" % max_drift)
+                _check("channels_are_separate", PathService.goal_for(1).distance_to(PathService.goal_for(0)) > 1.0,
+                                "g0-g1=%.1f m" % PathService.goal_for(1).distance_to(PathService.goal_for(0)))
                 _phase = 6
                 _sub = 0
 
 
-# ---------------- فاز ۶: Waypoint و فرمان ساده ----------------
+# ---------------- فاز ۶: Waypoint و فرمان ساده (روی دسته ۰) ----------------
 
 func _phase6_waypoints() -> void:
         match _sub:
                 0:
                         # دسته باید «انتخاب» باشد تا فرمان/Waypoint کار کند (مثل Bad North)
                         _pick_phase6_cells()
-                        var u: TestUnit = _units()[0]
+                        var u: UnitBase = _units()[0]
                         _push_click(MOUSE_BUTTON_LEFT, _screen_of(u.global_position + Vector3(0, 0.35, 0)))
                         _sub = 1
                         _sub_t = _t
@@ -474,13 +594,16 @@ func _phase6_waypoints() -> void:
                                                 "waypoints=%d" % wp.size())
                                 _check("waypoint_becomes_goal", g.distance_to(_cell_c) <= 0.8,
                                                 "goal=(%.1f,%.1f) want=(%.1f,%.1f)" % [g.x, g.y, _cell_c.x, _cell_c.y])
-                                # دوباره انتخاب برای فرمان ساده‌ی بعدی
-                                var u: TestUnit = _units()[0]
-                                _push_click(MOUSE_BUTTON_LEFT, _screen_of(u.global_position + Vector3(0, 0.35, 0)))
+                                # رفتار Waypoint گام ۵: Shift+کلیک انتخاب را نگه می‌دارد
+                                _check("waypoint_keeps_selection", target_scene.is_command_mode()
+                                                and target_scene.selected_squad() == 0,
+                                                "sel=%d" % target_scene.selected_squad())
                                 _sub = 3
                                 _sub_t = _t
                 3:
                         if _t - _sub_t >= 0.5:
+                                # فرمان ساده در همان انتخاب: صف را پاک و مقصد جدید می‌گذارد
+                                _cell_d = _pick_cell_far_from(_cell_c, 5.0)
                                 _push_click(MOUSE_BUTTON_LEFT, _screen_of(Vector3(_cell_d.x,
                                                 target_scene.ground.height_at_world(_cell_d) + 0.1, _cell_d.y)))
                                 _sub = 4
@@ -489,7 +612,8 @@ func _phase6_waypoints() -> void:
                         if _t - _sub_t >= 0.6:
                                 var wp: Array = target_scene.waypoints
                                 var g := PathService.goal_world()
-                                _check("plain_command_replaces_queue", wp.size() == 1
+                                # رفتار گام ۵: فرمان ساده صف را «خالی» می‌کند و مقصد = goal
+                                _check("plain_command_replaces_queue", wp.is_empty()
                                                 and g.distance_to(_cell_d) <= 0.8,
                                                 "waypoints=%d goal=(%.1f,%.1f) want=(%.1f,%.1f)" % [
                                                         wp.size(), g.x, g.y, _cell_d.x, _cell_d.y])
@@ -510,7 +634,7 @@ func _pick_phase6_cells() -> void:
                 var min_px := 1e9
                 var click_sp := _screen_of(Vector3(center.x,
                                 target_scene.ground.height_at_world(center) + 0.1, center.y))
-                for u in target_scene.squad:
+                for u in _units():
                         var wp: Vector3 = u.global_position + Vector3(0, 0.35, 0)
                         if cam.is_position_behind(wp):
                                 continue
@@ -557,13 +681,14 @@ func _phase7_regenerate() -> void:
                                 _check("regen_nav_resynced", mismatches == 0, "%d mismatches" % mismatches)
                                 var on_walkable := 0
                                 for u in _units():
-                                        if u is TestUnit:
+                                        if u is UnitBase:
                                                 var p: Vector3 = u.global_position
                                                 if nav.is_walkable(nav.world_to_cell(Vector2(p.x, p.z))):
                                                         on_walkable += 1
-                                _check("regen_units_respawned", _units().size() == 10 and on_walkable == 10,
+                                _check("regen_units_respawned", _units().size() == 11 and on_walkable == 11,
                                                 "%d units, %d on walkable" % [_units().size(), on_walkable])
                                 _check("regen_state_reset", target_scene.mode == 0
+                                                and target_scene.selected_squad() == -1
                                                 and target_scene.waypoints.is_empty()
                                                 and not target_scene.cmd_grid.is_command_mode()
                                                 and absf(Engine.time_scale - 1.0) < 0.01)
@@ -576,6 +701,292 @@ func _phase7_regenerate() -> void:
                                 _check("regen_field_alive", computes_now > _computes_before,
                                                 "before=%d now=%d" % [_computes_before, computes_now])
                                 _phase = 8
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- فاز ۸: کلیدهای 1..4 + حلقه‌ی انتخاب ----------------
+
+func _phase8_hotkeys_and_rings() -> void:
+        match _sub:
+                0:
+                        # بعد از بازتولید، سه دسته باید دوباره روی پست بنشینند
+                        if _all_arrived() or (_t - _sub_t) > 60.0:
+                                _check("regen_posts_reached", _all_arrived(),
+                                                "%d/11" % _arrived_in(_units()))
+                                _push_key(KEY_2)
+                                _sub = 1
+                                _sub_t = _t
+                1:
+                        if _t - _sub_t >= 0.7:
+                                _check("key2_selects_spearman_squad",
+                                                target_scene.selected_squad() == 1
+                                                and target_scene.is_command_mode(),
+                                                "sel=%d" % target_scene.selected_squad())
+                                _check("key2_slowmo", absf(Engine.time_scale - 0.5) < 0.06,
+                                                "time=%.2f" % Engine.time_scale)
+                                var rings_on := true
+                                for u in target_scene.squads[1]:
+                                        if not u.is_ring_visible():
+                                                rings_on = false
+                                var rings_off := true
+                                for u in target_scene.squads[0]:
+                                        if u.is_ring_visible():
+                                                rings_off = false
+                                for u in target_scene.squads[2]:
+                                        if u.is_ring_visible():
+                                                rings_off = false
+                                _check("rings_only_on_selected_squad", rings_on and rings_off)
+                                _push_key(KEY_3)
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        if _t - _sub_t >= 0.7:
+                                _check("key3_selects_archer_squad",
+                                                target_scene.selected_squad() == 2,
+                                                "sel=%d" % target_scene.selected_squad())
+                                _push_key(KEY_4)
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        if _t - _sub_t >= 0.7:
+                                _check("key4_not_recruited_keeps_selection",
+                                                target_scene.selected_squad() == 2,
+                                                "sel=%d" % target_scene.selected_squad())
+                                _push_key(KEY_3)  # کلید تکراری = لغو انتخاب
+                                _sub = 4
+                                _sub_t = _t
+                4:
+                        if _t - _sub_t >= 0.7:
+                                _check("same_key_toggles_deselect",
+                                                target_scene.selected_squad() == -1
+                                                and not target_scene.is_command_mode()
+                                                and absf(Engine.time_scale - 1.0) < 0.06,
+                                                "sel=%d time=%.2f" % [target_scene.selected_squad(),
+                                                Engine.time_scale])
+                                _phase = 9
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- فاز ۹: جداسازی کانال‌ها + نیزه‌دار در حرکت نمی‌جنگد ----------------
+
+func _phase9_channel_isolation() -> void:
+        match _sub:
+                0:
+                        _push_key(KEY_2)  # انتخاب دسته ۱ (نیزه‌دارها)
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        if _t - _sub_t >= 0.6:
+                                _goal0_before = PathService.goal_for(0)
+                                _cell_e = _pick_cell_far_from(target_scene.squad_center(1), 6.0)
+                                _others_snapshot.clear()
+                                for u in target_scene.squads[0]:
+                                        _others_snapshot.append(_xz(u))
+                                for u in target_scene.squads[2]:
+                                        _others_snapshot.append(_xz(u))
+                                _push_click(MOUSE_BUTTON_LEFT, _screen_of(Vector3(_cell_e.x,
+                                                target_scene.ground.height_at_world(_cell_e) + 0.1,
+                                                _cell_e.y)))
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        if _t - _sub_t >= 0.9:
+                                var g1 := PathService.goal_for(1)
+                                _check("squad1_channel_goal_set", g1.distance_to(_cell_e) <= 0.8,
+                                                "g1=(%.1f,%.1f) want=(%.1f,%.1f)" % [g1.x, g1.y, _cell_e.x, _cell_e.y])
+                                _check("squad0_channel_untouched",
+                                                PathService.goal_for(0).distance_to(_goal0_before) < 0.01)
+                                _check("command_releases_slowmo_and_deselects",
+                                                target_scene.selected_squad() == -1
+                                                and absf(Engine.time_scale - 1.0) < 0.06,
+                                                "sel=%d time=%.2f" % [target_scene.selected_squad(),
+                                                Engine.time_scale])
+                                var moving := 0
+                                for u in target_scene.squads[1]:
+                                        if u.brain_state() == &"moving":
+                                                moving += 1
+                                _check("squad1_en_route", moving >= 3, "%d/4 moving" % moving)
+                                var braced := 0
+                                for u in target_scene.squads[1]:
+                                        if u is SpearmanUnit and u.brace_active:
+                                                braced += 1
+                                _check("spearman_never_braces_while_moving", braced == 0,
+                                                "%d braced" % braced)
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        if _t - _sub_t >= 0.6:
+                                var drift_ok := true
+                                var i2 := 0
+                                for u in target_scene.squads[0]:
+                                        if _xz(u).distance_to(_others_snapshot[i2]) > 1.2:
+                                                drift_ok = false
+                                        i2 += 1
+                                for u in target_scene.squads[2]:
+                                        if _xz(u).distance_to(_others_snapshot[i2]) > 1.2:
+                                                drift_ok = false
+                                        i2 += 1
+                                _check("other_squads_frozen_while_squad1_marches", drift_ok)
+                                _phase = 10
+                                _sub = 0
+                                _sub_t = _t
+
+
+## سلول فرمان دور از نقطه‌ی داده‌شده + دور از همه‌ی سربازها (برای کلیک تمیز)
+func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
+        var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
+        var best := Vector2.ZERO
+        var best_d := -1.0
+        for i in target_scene.cmd_grid.cell_count:
+                var info: Dictionary = target_scene.cmd_grid.cell_info(i)
+                var center: Vector2 = info["center"]
+                var d: float = center.distance_to(from)
+                if d < min_dist:
+                        continue
+                var click_sp := _screen_of(Vector3(center.x,
+                                target_scene.ground.height_at_world(center) + 0.1, center.y))
+                var min_px := 1e9
+                for u in _units():
+                        var wp: Vector3 = u.global_position + Vector3(0, 0.35, 0)
+                        if cam.is_position_behind(wp):
+                                continue
+                        min_px = minf(min_px, cam.unproject_position(wp).distance_to(click_sp))
+                if min_px < 70.0:
+                        continue
+                if d > best_d:
+                        best_d = d
+                        best = center
+        if best == Vector2.ZERO:
+                best = from  # پشتیبان: همان نقطه (تست فاصله‌ی کوتاه‌تر می‌شود)
+        return best
+
+
+# ---------------- فاز ۱۰: لایه ۳ — واکنش نبرد روی کوله‌ی تمرین ----------------
+
+func _facing(u: UnitBase, target: Node3D, tol_rad: float) -> bool:
+        var d := target.global_position - u.global_position
+        var want := atan2(d.x, d.z)
+        return absf(wrapf(want - u.rotation.y, -PI, PI)) <= tol_rad
+
+
+func _phase10_layer3_combat() -> void:
+        match _sub:
+                0:
+                        # کوله برای جاویدان‌ها (تماس نزدیک) + کوله‌ی کماندارها در «برد واقعی»
+                        # درس اولین اجرا: هدفِ ۲.۲ متری داخل آرایش، کریدور همه را می‌بندد
+                        _dummy0 = target_scene.spawn_dummy_near_world(
+                                        target_scene.squad_center(0), Vector2(2.2, 0.0))
+                        _dummy2 = target_scene.spawn_dummy_at_range(2, 6.5)
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        if _t - _sub_t >= 9.0:
+                                var shielded := 0
+                                for u in target_scene.squads[0]:
+                                        if u is ImmortalUnit and u.shield_up:
+                                                shielded += 1
+                                _check("immortals_raise_shield", shielded >= 2, "%d/4" % shielded)
+                                var facing := 0
+                                for u in target_scene.squads[0]:
+                                        if u is ImmortalUnit and _facing(u, _dummy0, 0.6):
+                                                facing += 1
+                                _check("immortals_face_dummy", facing >= 2, "%d/4" % facing)
+                                var in_combat := 0
+                                for u in target_scene.squads[2]:
+                                        if u.brain_state() == &"combat":
+                                                in_combat += 1
+                                _check("archers_enter_combat_state", in_combat >= 1, "%d/3" % in_combat)
+                                _check("archers_fire_arrows", target_scene.arrows_fired_total() >= 2,
+                                                "%d arrows" % target_scene.arrows_fired_total())
+                                _check("dummy_takes_hits", target_scene.dummy_hits_total() >= 1,
+                                                "%d hits" % target_scene.dummy_hits_total())
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        # صبر تا نیزه‌دارها به مقصد فاز ۹ برسند، بعد کوله‌ی آن‌ها
+                        var arrived1 := _arrived_in(target_scene.squads[1])
+                        if arrived1 >= 4 or (_t - _sub_t) > 60.0:
+                                var dbg := ""
+                                for u in target_scene.squads[1]:
+                                        dbg += " [%.1fm:%s]" % [_xz(u).distance_to(u.slot_pos()),
+                                                        str(u.brain_state())]
+                                _check("squad1_arrives_for_brace_test", arrived1 >= 4,
+                                                "%d/4%s" % [arrived1, dbg])
+                                _dummy1 = target_scene.spawn_dummy_near_world(
+                                                target_scene.squad_center(1), Vector2(2.2, 0.0))
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        if _t - _sub_t >= 6.0:
+                                var braced := 0
+                                for u in target_scene.squads[1]:
+                                        if u is SpearmanUnit and u.brace_active:
+                                                braced += 1
+                                _check("spearmen_brace_only_when_standing", braced >= 2, "%d/4" % braced)
+                                _phase = 11
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- فاز ۱۱: لایه ۴ — بازگشت به پست + سلامت نهایی ----------------
+
+func _phase11_layer4_guard() -> void:
+        match _sub:
+                0:
+                        _push_key(KEY_D)  # پاک‌کردن کوله‌ها → پایان نبرد
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        if _t - _sub_t >= 1.2:
+                                var clear_ok: bool = target_scene.dummy_count() == 0
+                                for u in _units():
+                                        if u.brain_state() == &"combat":
+                                                clear_ok = false
+                                _check("dummies_cleared_ends_combat", clear_ok,
+                                                "dummies=%d" % target_scene.dummy_count())
+                                var imm_down := true
+                                for u in target_scene.squads[0]:
+                                        if u is ImmortalUnit and u.shield_up:
+                                                imm_down = false
+                                var imm_dbg := ""
+                                for u in target_scene.squads[0]:
+                                        imm_dbg += " [%s:%s]" % [str(u.brain_state()),
+                                                        str((u as ImmortalUnit).shield_up)]
+                                _check("immortals_lower_shield_after_clear", imm_down, imm_dbg)
+                                # لایه ۴: جابه‌جایی دستی یک جاویدان → خودش به پست برمی‌گردد
+                                var u0: UnitBase = target_scene.squads[0][0]
+                                _slot_before = u0.slot_pos()
+                                var displaced := _slot_before + Vector2(2.6, 1.4)
+                                var nav: NavGrid = PathService.nav
+                                var np := _nearest_walkable(nav, nav.world_to_cell(displaced))
+                                var c := nav.cell_center(np)
+                                u0.global_position = Vector3(c.x, u0.global_position.y, c.y)
+                                _computes_before = int(PathService.debug_info()["computes"])
+                                _sub = 2
+                                _sub_t = _t
+                2:
+                        if _t - _sub_t >= 8.0:
+                                var u0: UnitBase = target_scene.squads[0][0]
+                                var back := _xz(u0).distance_to(_slot_before) <= 0.7 \
+                                                and u0.is_arrived()
+                                _check("guard_returns_to_post_layer4", back,
+                                                "dist=%.2f m arrived=%s" % [
+                                                        _xz(u0).distance_to(_slot_before),
+                                                        str(u0.is_arrived())])
+                                var computes_now: int = int(PathService.debug_info()["computes"])
+                                _check("field_still_alive_at_end", computes_now > _computes_before,
+                                                "before=%d now=%d" % [_computes_before, computes_now])
+                                var all_ok := true
+                                var nav: NavGrid = PathService.nav
+                                for u in _units():
+                                        if not nav.is_walkable(nav.world_to_cell(_xz(u))):
+                                                all_ok = false
+                                _check("all_units_on_walkable_at_end", all_ok)
+                                _check("time_back_to_normal", absf(Engine.time_scale - 1.0) < 0.06,
+                                                "time=%.2f" % Engine.time_scale)
+                                _phase = 12
 
 
 # ---------------- پایان ----------------
