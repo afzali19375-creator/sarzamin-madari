@@ -16,6 +16,9 @@ extends RefCounted
 
 const DIR_X := [1, -1, 0, 0]
 const DIR_Y := [0, 0, 1, -1]
+## ۸ جهت برای ذوب دریاچه‌های داخلی (§۸.۳)
+const DIR8_X := [1, -1, 0, 0, 1, 1, -1, -1]
+const DIR8_Y := [0, 0, 1, -1, 1, -1, 1, -1]
 
 var _size := 32
 var _phase1 := 0.0
@@ -26,7 +29,7 @@ var _compat_cache: Dictionary = {}
 
 ## آمار آخرین generate — برای تشخیص این‌که شکست‌ها از کدام اعتبارسنجی‌اند
 ## (telemetry دائمی: در تست خودکار و لاگ کاربردی استفاده می‌شود)
-var last_stats := {"contradiction": 0, "land_fraction": 0, "disconnected": 0, "success": 0}
+var last_stats := {"contradiction": 0, "land_fraction": 0, "walkable_fraction": 0, "disconnected": 0, "no_land": 0, "too_small": 0, "success": 0}
 
 
 func _init() -> void:
@@ -38,27 +41,28 @@ func _init() -> void:
 ## ارتفاع سطح بالای کاشی (متر) و رنگ پایه (پالت هخامنشی).
 
 func _build_modules() -> void:
+        # رنگ‌ها = پالت HEX مرجع پرامت §۱۴ (چمن/شن/صخره/آب)
         _mods = [
-                {"name": "water_deep", "socket": "w0", "walkable": false, "weight": 3.0, "top": 0.0, "color": Color("0d3f52")},
-                {"name": "water_wave", "socket": "w0", "walkable": false, "weight": 0.8, "top": 0.0, "color": Color("16697a")},
-                {"name": "water_shallow", "socket": "w0", "walkable": false, "weight": 1.4, "top": 0.0, "color": Color("1c7f8c")},
-                {"name": "water_foam", "socket": "w0", "walkable": false, "weight": 0.5, "top": 0.0, "color": Color("7fc9c9")},
-                {"name": "sand_wet", "socket": "s0", "walkable": true, "weight": 0.7, "top": 0.18, "color": Color("b5a173")},
-                {"name": "sand_dry", "socket": "s0", "walkable": true, "weight": 1.2, "top": 0.22, "color": Color("d8c793")},
-                {"name": "sand_pebbles", "socket": "s0", "walkable": true, "weight": 0.35, "top": 0.22, "color": Color("c2b489")},
-                {"name": "sand_high", "socket": "s1", "walkable": true, "weight": 0.5, "top": 0.5, "color": Color("dccfa0")},
-                {"name": "sand_scrub", "socket": "s1", "walkable": true, "weight": 0.25, "top": 0.5, "color": Color("b8b07e")},
-                {"name": "grass_low", "socket": "g1", "walkable": true, "weight": 1.7, "top": 0.55, "color": Color("7d9c52")},
-                {"name": "grass_flowers", "socket": "g1", "walkable": true, "weight": 0.35, "top": 0.55, "color": Color("8fae62")},
-                {"name": "grass_path", "socket": "g1", "walkable": true, "weight": 0.3, "top": 0.55, "color": Color("a89a5f")},
-                {"name": "grass_mid", "socket": "g2", "walkable": true, "weight": 1.3, "top": 0.9, "color": Color("6f8f47")},
-                {"name": "grass_bush", "socket": "g2", "walkable": true, "weight": 0.35, "top": 0.9, "color": Color("5f7d3e")},
+                {"name": "water_deep", "socket": "w0", "walkable": false, "weight": 3.0, "top": 0.0, "color": Color("2c5f73")},
+                {"name": "water_wave", "socket": "w0", "walkable": false, "weight": 0.8, "top": 0.0, "color": Color("3a7186")},
+                {"name": "water_shallow", "socket": "w0", "walkable": false, "weight": 1.4, "top": 0.0, "color": Color("4a90a4")},
+                {"name": "water_foam", "socket": "w0", "walkable": false, "weight": 0.5, "top": 0.0, "color": Color("a8d8d8")},
+                {"name": "sand_wet", "socket": "s0", "walkable": true, "weight": 0.7, "top": 0.18, "color": Color("d4c290")},
+                {"name": "sand_dry", "socket": "s0", "walkable": true, "weight": 1.2, "top": 0.22, "color": Color("e8d5a8")},
+                {"name": "sand_pebbles", "socket": "s0", "walkable": true, "weight": 0.35, "top": 0.22, "color": Color("d9c89c")},
+                {"name": "sand_high", "socket": "s1", "walkable": true, "weight": 0.5, "top": 0.5, "color": Color("ecdcb2")},
+                {"name": "sand_scrub", "socket": "s1", "walkable": true, "weight": 0.25, "top": 0.5, "color": Color("c2bd8a")},
+                {"name": "grass_low", "socket": "g1", "walkable": true, "weight": 1.7, "top": 0.55, "color": Color("7a9a5c")},
+                {"name": "grass_flowers", "socket": "g1", "walkable": true, "weight": 0.35, "top": 0.55, "color": Color("8aa86a")},
+                {"name": "grass_path", "socket": "g1", "walkable": true, "weight": 0.3, "top": 0.55, "color": Color("b0a276")},
+                {"name": "grass_mid", "socket": "g2", "walkable": true, "weight": 1.3, "top": 0.9, "color": Color("6d8c50")},
+                {"name": "grass_bush", "socket": "g2", "walkable": true, "weight": 0.35, "top": 0.9, "color": Color("5c7a44")},
                 {"name": "grass_flowers2", "socket": "g2", "walkable": true, "weight": 0.25, "top": 0.9, "color": Color("7fa055")},
-                {"name": "grass_high", "socket": "g3", "walkable": true, "weight": 0.85, "top": 1.3, "color": Color("5d7b3c")},
+                {"name": "grass_high", "socket": "g3", "walkable": true, "weight": 0.85, "top": 1.3, "color": Color("5c7a44")},
                 {"name": "grass_stones", "socket": "g3", "walkable": true, "weight": 0.25, "top": 1.3, "color": Color("75855c")},
-                {"name": "rock_low", "socket": "r2", "walkable": false, "weight": 0.3, "top": 1.05, "color": Color("8b8474")},
-                {"name": "rock_high", "socket": "r3", "walkable": false, "weight": 0.2, "top": 1.5, "color": Color("9a9284")},
-                {"name": "rock_peak", "socket": "r4", "walkable": false, "weight": 0.08, "top": 1.95, "color": Color("a8a191")},
+                {"name": "rock_low", "socket": "r2", "walkable": false, "weight": 0.3, "top": 1.05, "color": Color("8b8073")},
+                {"name": "rock_high", "socket": "r3", "walkable": false, "weight": 0.2, "top": 1.5, "color": Color("6e6659")},
+                {"name": "rock_peak", "socket": "r4", "walkable": false, "weight": 0.08, "top": 1.95, "color": Color("5e5548")},
         ]
 
 
@@ -232,13 +236,13 @@ func _weighted_pick(ci: int, dom: PackedInt32Array, rng: RandomNumberGenerator) 
 func generate(seed_value: int, grid_size: int = 32) -> Dictionary:
         var t0 := Time.get_ticks_usec()
         _size = clampi(grid_size, 16, 32)
-        last_stats = {"contradiction": 0, "land_fraction": 0, "disconnected": 0, "success": 0}
+        last_stats = {"contradiction": 0, "land_fraction": 0, "walkable_fraction": 0, "disconnected": 0, "no_land": 0, "too_small": 0, "success": 0}
         var rng := RandomNumberGenerator.new()
         for attempt in range(1, 49):
                 rng.seed = hash("%d:%d" % [seed_value, attempt])
                 _phase1 = rng.randf() * TAU
                 _phase2 = rng.randf() * TAU
-                _radius0 = 0.56 + rng.randf() * 0.10
+                _radius0 = 0.72 + rng.randf() * 0.08  # §۸.۳: خشکیِ بازی‌پذیر ≥ ~۴۰٪ مساحت
                 var grid := _attempt(rng)
                 if grid.is_empty():
                         last_stats["contradiction"] += 1
@@ -249,7 +253,8 @@ func generate(seed_value: int, grid_size: int = 32) -> Dictionary:
                         return packed
                 # شکست اعتبارسنجی — نوعش را ثبت کن (برای ریشه‌یابی)
                 if packed.has("reason"):
-                        last_stats[packed["reason"]] += 1
+                        var reason: String = packed["reason"]
+                        last_stats[reason] = int(last_stats.get(reason, 0)) + 1
         return {"ok": false, "seed_used": seed_value, "attempts": 48, "stats": last_stats.duplicate()}
 
 
@@ -273,8 +278,11 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
                 if walkable[i] == 1:
                         walk += 1
         var frac := float(land) / float(n)
-        if frac < 0.14 or frac > 0.55:
+        if frac < 0.20 or frac > 0.62:
                 return {"reason": "land_fraction"}
+        # §۸.۳ پرامت: «منطقه‌ی قابل‌عبور ≥ ۴۰٪ کل مساحت»
+        if float(walk) < float(n) * 0.40:
+                return {"reason": "walkable_fraction"}
         # --- پس‌پردازش اتصال: «جزیره‌های شنیِ ریز» را در آب ذوب کن ---
         # در نوار ساحلی گاهی یک تک‌کاشی شن وسط آب می‌ماند؛ این جزیره‌های کوچک
         # بازی را خراب نمی‌کنند ولی باید حذف شوند تا خشکی همیشه یک تکه باشد.
@@ -326,6 +334,10 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
                         modules[i] = water_module
                         walkable[i] = 0
                         tops[i] = 0.0
+        # --- ذوب دریاچه‌های تک‌سلولیِ محصور در خشکی ---
+        # §۸.۳ پرامت: «هیچ آب در وسط جزیره نباید» — سلول آب که هر ۸ همسایه‌اش
+        # خشکی است به چمن تبدیل می‌شود (چند گذر تا جابه‌جایی ثابت).
+        _melt_inner_lakes(modules, walkable, tops)
         land = 0
         walk = 0
         for i in n:
@@ -365,3 +377,44 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
                 "walkable_count": walk,
                 "hash": hsh,
         }
+
+
+## ذوب دریاچه‌های تک‌سلولی محصور در خشکی (§۸.۳: «هیچ آب در وسط جزیره نباید»)
+## سلول آب که هر ۸ همسایه‌اش خشکی/قابل‌عبور است → چمن low (g1، ارتفاع همسایه‌ها).
+## قطعی و بدون بازگشت — چند گذر تا جای‌به‌جایی ثابت (حلقه‌های ۲-تایی را هم می‌خورد).
+@warning_ignore("integer_division")
+func _melt_inner_lakes(modules: PackedInt32Array, walkable: PackedByteArray,
+                tops: PackedFloat32Array) -> void:
+        var grass_module := -1
+        for m in _mods.size():
+                if _mods[m]["name"] == "grass_low":
+                        grass_module = m
+                        break
+        if grass_module < 0:
+                return
+        for _pass in 8:
+                var changed := false
+                for cy in _size:
+                        for cx in _size:
+                                var i := cy * _size + cx
+                                if walkable[i] == 1:
+                                        continue  # خشکی است
+                                var surrounded := true
+                                for d in 8:
+                                        var nx: int = cx + DIR8_X[d]
+                                        var ny: int = cy + DIR8_Y[d]
+                                        if nx < 0 or ny < 0 or nx >= _size or ny >= _size:
+                                                surrounded = false
+                                                break
+                                        var ni := ny * _size + nx
+                                        if walkable[ni] == 0:
+                                                surrounded = false
+                                                break
+                                if not surrounded:
+                                        continue
+                                modules[i] = grass_module
+                                walkable[i] = 1
+                                tops[i] = _mods[grass_module]["top"]
+                                changed = true
+                if not changed:
+                        break

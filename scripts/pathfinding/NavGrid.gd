@@ -12,55 +12,76 @@ var origin: Vector2 = Vector2.ZERO
 ## 1 = قابل عبور، 0 = مانع
 var walkable: PackedByteArray = PackedByteArray()
 
+## هزینه‌ی عبور از هر سلول (§۳.۲ پرامت فاز اول):
+##   چمن 1.0 | شن ساحل 1.2 | صخره‌ی کم‌ارتفاع 1.5 | آب/صخره بلند = غیرقابل‌عبور
+var costs: PackedFloat32Array = PackedFloat32Array()
+
 
 func setup(w: int, h: int, cell: float, world_origin: Vector2) -> void:
-	width = w
-	height = h
-	cell_size = cell
-	origin = world_origin
-	walkable.resize(w * h)
-	walkable.fill(1)
+        width = w
+        height = h
+        cell_size = cell
+        origin = world_origin
+        walkable.resize(w * h)
+        walkable.fill(1)
+        costs.resize(w * h)
+        costs.fill(1.0)
 
 
 func size_world() -> Vector2:
-	return Vector2(width, height) * cell_size
+        return Vector2(width, height) * cell_size
 
 
 func idx(c: Vector2i) -> int:
-	return c.y * width + c.x
+        return c.y * width + c.x
 
 
 func in_bounds(c: Vector2i) -> bool:
-	return c.x >= 0 and c.y >= 0 and c.x < width and c.y < height
+        return c.x >= 0 and c.y >= 0 and c.x < width and c.y < height
 
 
 func is_walkable(c: Vector2i) -> bool:
-	return in_bounds(c) and walkable[idx(c)] == 1
+        return in_bounds(c) and walkable[idx(c)] == 1
 
 
 func set_walkable(c: Vector2i, value: bool) -> void:
-	if in_bounds(c):
-		walkable[idx(c)] = 1 if value else 0
+        if in_bounds(c):
+                walkable[idx(c)] = 1 if value else 0
+
+
+func set_cost(c: Vector2i, value: float) -> void:
+        if in_bounds(c):
+                costs[idx(c)] = maxf(value, 0.05)
+
+
+func cost_at(c: Vector2i) -> float:
+        if not in_bounds(c):
+                return 1.0
+        return costs[idx(c)]
 
 
 ## تبدیل مختصات جهانی (XZ) به سلول — فقط نخ اصلی
 func world_to_cell(world_xz: Vector2) -> Vector2i:
-	var local := (world_xz - origin) / cell_size
-	return Vector2i(floori(local.x), floori(local.y))
+        var local := (world_xz - origin) / cell_size
+        return Vector2i(floori(local.x), floori(local.y))
 
 
 ## مرکز جهانی یک سلول — فقط نخ اصلی
 func cell_center(c: Vector2i) -> Vector2:
-	return origin + (Vector2(c) + Vector2(0.5, 0.5)) * cell_size
+        return origin + (Vector2(c) + Vector2(0.5, 0.5)) * cell_size
 
 
 ## محدود کردن یک نقطه‌ی جهانی به داخل شبکه (با حاشیه)
 func clamp_to_grid(world_xz: Vector2, margin: float = 0.3) -> Vector2:
-	var min_v := origin + Vector2(margin, margin)
-	var max_v := origin + size_world() - Vector2(margin, margin)
-	return world_xz.clamp(min_v, max_v)
+        var min_v := origin + Vector2(margin, margin)
+        var max_v := origin + size_world() - Vector2(margin, margin)
+        return world_xz.clamp(min_v, max_v)
 
 
 ## کپی امن برای ارسال به نخ کارگر (بدون اشتراک حافظه)
 func snapshot_walkable() -> PackedByteArray:
-	return walkable.duplicate()
+        return walkable.duplicate()
+
+
+func snapshot_costs() -> PackedFloat32Array:
+        return costs.duplicate()

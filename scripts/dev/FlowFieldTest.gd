@@ -118,7 +118,7 @@ func _build_obstacles() -> void:
                 var center := origin + (Vector2(r.position) + Vector2(r.size) * 0.5) * CELL
                 box.position = Vector3(center.x, 0.35, center.y)
                 var om := StandardMaterial3D.new()
-                om.albedo_color = GameConstants.COL_SAND.lerp(GameConstants.COL_IVORY, randf() * 0.35)
+                om.albedo_color = GameConstants.COL_BEACH_SAND.lerp(GameConstants.COL_IVORY, randf() * 0.35)
                 om.roughness = 1.0
                 box.material_override = om
                 add_child(box)

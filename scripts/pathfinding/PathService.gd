@@ -91,7 +91,8 @@ func _process(delta: float) -> void:
 
 func _post_compute() -> void:
         # اسنپ‌شات همیشه در نخ اصلی گرفته می‌شود — هیچ اشتراک حافظه‌ای با کارگر نیست
-        field_thread.request_compute(nav.world_to_cell(_last_goal_world), nav.snapshot_walkable())
+        field_thread.request_compute(nav.world_to_cell(_last_goal_world),
+                        nav.snapshot_walkable(), nav.snapshot_costs())
 
 
 func _exit_tree() -> void:

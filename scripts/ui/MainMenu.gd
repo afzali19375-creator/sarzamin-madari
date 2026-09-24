@@ -72,7 +72,7 @@ func _ready() -> void:
         bottom.add_theme_constant_override("margin_bottom", 16)
         add_child(bottom)
         var version := Label.new()
-        version.text = "v0.2  |  build %s  |  گام ۱–۴: مسیریابی + جزیره‌ی WFC با کاشی‌های قابل‌کلیک  |  Steps 1–4: flow field + WFC island" % GameConstants.BUILD_ID
+        version.text = "v0.3  |  build %s  |  گام ۱–۴: مسیریابی هزینه‌ای + جزیره‌ی WFC با زمین صاف و شبکه‌ی فرمان Bad North  |  Steps 1–4: cost flow field + WFC island with smooth ground" % GameConstants.BUILD_ID
         version.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
         version.add_theme_font_size_override("font_size", 14)
         version.add_theme_color_override("font_color", Color(0.7, 0.8, 0.78, 0.8))

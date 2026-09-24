@@ -22,9 +22,10 @@ var _h := 0
 var _work: FlowField
 var _published: FlowField
 
-# پستِ درخواست (زیر قفل) — اسنپ‌شات walkable از نخ اصلی کپی می‌شود
+# پستِ درخواست (زیر قفل) — اسنپ‌شات walkable/costs از نخ اصلی کپی می‌شود
 var _pending_goal := Vector2i(-1, -1)
 var _pending_walk := PackedByteArray()
+var _pending_costs := PackedFloat32Array()
 var _has_request := false
 
 # آمار منتشرشده (زیر قفل)
@@ -76,14 +77,16 @@ func is_alive() -> bool:
 
 
 ## درخواست محاسبه — فقط از نخ اصلی.
-## walkable_snapshot را فراخوان (نخ اصلی) از NavGrid کپی می‌کند؛
+## walkable_snapshot / cost_snapshot را فراخوان (نخ اصلی) از NavGrid کپی می‌کند؛
 ## بدین ترتیب هیچ حافظه‌ی مشترکی بین دو نخ باقی نمی‌ماند.
-func request_compute(goal_cell: Vector2i, walkable_snapshot: PackedByteArray) -> void:
+func request_compute(goal_cell: Vector2i, walkable_snapshot: PackedByteArray,
+                cost_snapshot: PackedFloat32Array = PackedFloat32Array()) -> void:
         if not _started:
                 return
         _mutex.lock()
         _pending_goal = goal_cell
         _pending_walk = walkable_snapshot
+        _pending_costs = cost_snapshot
         _has_request = true
         _mutex.unlock()
         _sem.post()
@@ -138,6 +141,7 @@ func _worker_loop() -> void:
                 _has_request = false
                 var goal := _pending_goal
                 var walk := _pending_walk
+                var costs := _pending_costs
                 _mutex.unlock()
                 if has and walk.size() == _w * _h:
                         # محافظ دفاعی: کارگر هرگز نباید به‌خاطر بافر null بمیرد
@@ -145,7 +149,7 @@ func _worker_loop() -> void:
                                 _work = FlowField.new()
                                 _work.setup(_w, _h)
                         var t0 := Time.get_ticks_usec()
-                        _work.compute(_w, _h, walk, goal)
+                        _work.compute(_w, _h, walk, goal, costs)
                         var ms := float(Time.get_ticks_usec() - t0) / 1000.0
                         _mutex.lock()
                         _compute_ms = ms
