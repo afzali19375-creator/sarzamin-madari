@@ -30,6 +30,14 @@ var _stats_label: Label
 var _time_scale := 1.0
 var _ui_accum := 0.0
 var _last_input_msg := "none yet"
+# تشخیص‌های بصری برای کاربر: پیام شناور + حلقه‌ی کلیک + سلامت میدان
+var _toast: Label
+var _toast_t := 10.0
+var _marker: MeshInstance3D
+var _marker_mat: StandardMaterial3D
+var _marker_t := 10.0
+var _last_computes := -1
+var _stall := 0.0
 
 
 func _ready() -> void:
@@ -39,6 +47,7 @@ func _ready() -> void:
         _build_obstacles()
         _build_goal_flag(GOAL_CELL)
         _spawn_units()
+        _build_click_marker()
         _build_ui()
         # تست خودکارِ پیش از تحویل:  godot ... -- --autotest
         if OS.get_cmdline_user_args().has("--autotest"):
@@ -175,6 +184,47 @@ func _random_walkable_cell(min_c: Vector2i, max_c: Vector2i) -> Vector2i:
 
 # ---------------- رابط کاربری ----------------
 
+func _build_click_marker() -> void:
+        # حلقه‌ی طلایی که بعد از هر کلیک روی نقطه‌ی «درک‌شده توسط بازی» فلاش می‌زند —
+        # اگر کلیک بیرون جزیره باشد، حلقه روی لبه ظاهر می‌شود و خودش توضیح می‌دهد
+        _marker = MeshInstance3D.new()
+        var tm := TorusMesh.new()
+        tm.inner_radius = 0.35
+        tm.outer_radius = 0.5
+        _marker.mesh = tm
+        _marker_mat = StandardMaterial3D.new()
+        _marker_mat.albedo_color = GameConstants.COL_GOLD
+        _marker_mat.emission_enabled = true
+        _marker_mat.emission = GameConstants.COL_GOLD
+        _marker_mat.emission_energy_multiplier = 1.2
+        _marker_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+        _marker.material_override = _marker_mat
+        _marker.visible = false
+        add_child(_marker)
+
+
+func _flash_marker(p: Vector3) -> void:
+        _marker.position = p
+        _marker.scale = Vector3.ONE
+        _marker_mat.albedo_color.a = 0.9
+        _marker.visible = true
+        _marker_t = 0.0
+
+
+func _toast_msg(msg: String) -> void:
+        if _toast == null:
+                return
+        _toast.text = msg
+        _toast.visible = true
+        _toast_t = 0.0
+
+
+func _world_inside_grid(p: Vector2) -> bool:
+        var o: Vector2 = PathService.nav.origin
+        var s: Vector2 = PathService.nav.size_world()
+        return p.x >= o.x and p.y >= o.y and p.x <= o.x + s.x and p.y <= o.y + s.y
+
+
 func _build_ui() -> void:
         var layer := CanvasLayer.new()
         add_child(layer)
@@ -209,16 +259,55 @@ func _build_ui() -> void:
         hint.text = "%s  |  %s" % [tr("hint_move"), tr("hint_slow")]
         vb.add_child(hint)
 
+        # پیام شناور دوزبانه‌ی بالای صفحه (نتیجه‌ی هر کلیک راست)
+        _toast = Label.new()
+        _toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        _toast.add_theme_font_size_override("font_size", 24)
+        _toast.add_theme_color_override("font_color", GameConstants.COL_GOLD)
+        _toast.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+        _toast.add_theme_constant_override("outline_size", 8)
+        if ResourceLoader.exists(FONT_FA):
+                _toast.add_theme_font_override("font", load(FONT_FA))
+        _toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        _toast.set_anchors_preset(Control.PRESET_TOP_WIDE)
+        _toast.offset_top = 56.0
+        _toast.offset_bottom = 120.0
+        _toast.offset_left = 40.0
+        _toast.offset_right = -40.0
+        _toast.visible = false
+        layer.add_child(_toast)
+
 
 func _process(delta: float) -> void:
         _ui_accum += delta
         if _ui_accum >= 0.25:
                 _ui_accum = 0.0
                 _refresh_stats()
+        # فَید حلقه‌ی کلیک
+        if _marker != null and _marker.visible:
+                _marker_t += delta
+                var k: float = clampf(_marker_t / 0.6, 0.0, 1.0)
+                _marker_mat.albedo_color.a = 0.9 * (1.0 - k)
+                var s := 1.0 + k * 1.6
+                _marker.scale = Vector3(s, 1.0, s)
+                if k >= 1.0:
+                        _marker.visible = false
+        # پنهان‌سازی پیام شناور پس از ۳ ثانیه
+        _toast_t += delta
+        if _toast != null and _toast.visible and _toast_t > 3.0:
+                _toast.visible = false
 
 
 func _refresh_stats() -> void:
         var info := PathService.debug_info()
+        # سلامت میدان: اگر شمارنده‌ی محاسبه‌ها ۱ ثانیه منجمد بماند → میدان مرده است
+        var computes: int = int(info["computes"])
+        if computes != _last_computes:
+                _last_computes = computes
+                _stall = 0.0
+        else:
+                _stall += 0.25
+        var field_state: String = "LIVE" if _stall < 1.0 else "FROZEN!!"
         var arrived := 0
         var total := 0
         for u in get_tree().get_nodes_in_group("units"):
@@ -226,11 +315,12 @@ func _refresh_stats() -> void:
                 if u is TestUnit and u.is_arrived():
                         arrived += 1
         var goal: Vector2 = info["goal"]
-        _stats_label.text = "FPS %d  |  units %d  arrived %d  |  input: %s\nworker compute: %.2f ms (every %.1f s)  |  main-thread read: %.4f ms (budget %.1f ms)\ncomputes: %d  goal: (%.1f, %.1f)  time_scale: %.1f" % [
-                Engine.get_frames_per_second(), total, arrived, _last_input_msg,
+        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  units %d  arrived %d  |  input: %s\nworker compute: %.2f ms (every %.1f s)  |  main-thread read: %.4f ms (budget %.1f ms)\ncomputes: %d  goal: (%.1f, %.1f)  time_scale: %.1f" % [
+                GameConstants.BUILD_ID, Engine.get_frames_per_second(), field_state,
+                total, arrived, _last_input_msg,
                 info["compute_ms"], GameConstants.FIELD_RECOMPUTE_INTERVAL,
                 info["read_ms"], GameConstants.MAIN_READ_BUDGET_MS,
-                info["computes"], goal.x, goal.y, _time_scale,
+                computes, goal.x, goal.y, _time_scale,
         ]
 
 
@@ -268,9 +358,16 @@ func _move_goal_to_mouse(mouse_pos: Vector2) -> void:
         var plane := Plane(Vector3.UP, 0.0)
         var hit = plane.intersects_ray(from, dir)
         if hit == null:
-                _last_input_msg = "right-click missed ground plane"
+                _last_input_msg = "right-click missed ground plane (click lower, ON the island)"
+                _toast_msg("کلیک به زمین نخورد — پایین‌تر و روی جزیره کلیک کن\nClick missed the ground — click lower, ON the island")
                 return
+        var inside := _world_inside_grid(Vector2(hit.x, hit.z))
         PathService.set_goal_world(Vector2(hit.x, hit.z))
         var g := PathService.goal_world()
         _goal_flag.position = Vector3(g.x, 0.0, g.y)
+        _flash_marker(Vector3(g.x, 0.06, g.y))
         _last_input_msg = "right-click OK @ (%.1f, %.1f)" % [g.x, g.y]
+        if inside:
+                _toast_msg("هدف جابه‌جا شد → (%.1f, %.1f) — سربازها در راه‌اند\nGoal moved — soldiers are on the way" % [g.x, g.y])
+        else:
+                _toast_msg("کلیک بیرون جزیره بود → به لبه محدود شد (%.1f, %.1f)\nClick was outside the island — clamped to its edge" % [g.x, g.y])
