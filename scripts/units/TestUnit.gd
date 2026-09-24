@@ -55,9 +55,11 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if _arrived:
-		return
 	_bob_t += delta
+	if _arrived:
+		# جشن کوچک رسیدن: پریدن بالا-پایین + رنگ نارنجی روشن — از دور هم واضح است
+		_body.position.y = 0.25 + absf(sin(_bob_t * 6.0)) * 0.1
+		return
 
 	var pos := Vector2(global_position.x, global_position.z)
 	var goal := PathService.goal_world()

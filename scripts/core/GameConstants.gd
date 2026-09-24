@@ -23,7 +23,7 @@ const COL_NIGHT := Color("0c2f36")
 
 const UNIT_PALETTE: Array[Color] = [
 	Color("e0d6b8"), # عاجی
-	Color("c9564a"), # سرخ
 	Color("2f8f83"), # فیروزه‌ای
 	Color("d4af37"), # طلایی
+	Color("3f6fb5"), # لاجوردی — بدون نارنجی/سرخ تا با وضعیت «رسیده» اشتباه نشود
 ]

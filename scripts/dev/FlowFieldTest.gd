@@ -29,6 +29,7 @@ var _goal_flag: Node3D
 var _stats_label: Label
 var _time_scale := 1.0
 var _ui_accum := 0.0
+var _last_input_msg := "none yet"
 
 
 func _ready() -> void:
@@ -219,8 +220,8 @@ func _refresh_stats() -> void:
 		if u is TestUnit and u.is_arrived():
 			arrived += 1
 	var goal: Vector2 = info["goal"]
-	_stats_label.text = "FPS %d  |  units %d  arrived %d\nworker compute: %.2f ms (every %.1f s)  |  main-thread read: %.4f ms (budget %.1f ms)\ncomputes: %d  goal: (%.1f, %.1f)  time_scale: %.1f" % [
-		Engine.get_frames_per_second(), total, arrived,
+	_stats_label.text = "FPS %d  |  units %d  arrived %d  |  input: %s\nworker compute: %.2f ms (every %.1f s)  |  main-thread read: %.4f ms (budget %.1f ms)\ncomputes: %d  goal: (%.1f, %.1f)  time_scale: %.1f" % [
+		Engine.get_frames_per_second(), total, arrived, _last_input_msg,
 		info["compute_ms"], GameConstants.FIELD_RECOMPUTE_INTERVAL,
 		info["read_ms"], GameConstants.MAIN_READ_BUDGET_MS,
 		info["computes"], goal.x, goal.y, _time_scale,
@@ -229,24 +230,41 @@ func _refresh_stats() -> void:
 
 # ---------------- ورودی ----------------
 
-func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("command_move"):
-		_move_goal_to_mouse()
-	elif event.is_action_pressed("toggle_slowmo"):
-		_time_scale = GameConstants.SLOWMO_SCALE if _time_scale == 1.0 else 1.0
-		Engine.time_scale = _time_scale
+## تشخیص خام رویدادها در _input — مستقل از InputMap تا هیچ کلیکی گم نشود.
+## (اکشن‌های project.godot برای سامانه‌های بعدی همچنان تعریف شده‌اند.)
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			_move_goal_to_mouse(event.position)
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			_last_input_msg = "left-click seen (use RIGHT-click to move flag)"
+	elif event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_SPACE or event.keycode == KEY_SPACE:
+			_toggle_slowmo()
 
 
-func _move_goal_to_mouse() -> void:
+func _toggle_slowmo() -> void:
+	_time_scale = GameConstants.SLOWMO_SCALE if _time_scale == 1.0 else 1.0
+	Engine.time_scale = _time_scale
+	_last_input_msg = "space -> slow-mo %s" % ("ON" if _time_scale < 1.0 else "OFF")
+
+
+func _move_goal_to_mouse(mouse_pos: Vector2) -> void:
 	var cam := get_viewport().get_camera_3d()
-	if cam == null or _goal_flag == null:
+	if cam == null:
+		_last_input_msg = "right-click but NO CAMERA!"
 		return
-	var mouse := get_viewport().get_mouse_position()
-	var from := cam.project_ray_origin(mouse)
-	var dir := cam.project_ray_normal(mouse)
+	if _goal_flag == null:
+		_last_input_msg = "right-click but no flag!"
+		return
+	var from := cam.project_ray_origin(mouse_pos)
+	var dir := cam.project_ray_normal(mouse_pos)
 	var plane := Plane(Vector3.UP, 0.0)
 	var hit = plane.intersects_ray(from, dir)
-	if hit != null:
-		PathService.set_goal_world(Vector2(hit.x, hit.z))
-		var g := PathService.goal_world()
-		_goal_flag.position = Vector3(g.x, 0.0, g.y)
+	if hit == null:
+		_last_input_msg = "right-click missed ground plane"
+		return
+	PathService.set_goal_world(Vector2(hit.x, hit.z))
+	var g := PathService.goal_world()
+	_goal_flag.position = Vector3(g.x, 0.0, g.y)
+	_last_input_msg = "right-click OK @ (%.1f, %.1f)" % [g.x, g.y]
