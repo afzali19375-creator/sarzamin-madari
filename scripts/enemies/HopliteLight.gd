@@ -1,7 +1,8 @@
 class_name HopliteLight
 extends EnemyBase
-## هوپلیت سبک (§۶): سریع، کم‌جان — خط اول پیاده‌نظام یونانی.
-## بصری: بدنه‌ی برنزی-خاکستری (COL_ROCK) + چُک سرخ (COL_CRIMSON) + نیزه‌ی کوتاه.
+## هوپلیت سبک (§۶): سریع، کم‌جان — خط اول مهاجمان.
+## گام ۶R8 — بصری: شبحِ بنفش (COL_GHOST_LIGHT) با شمشیرِ کم‌رنگِ عمودی —
+## دقیقاً مثلِ تصویرِ مرجعِ کاربر (تیغه‌ی سبز-سفید + دستِ خاکستری).
 
 func _init() -> void:
         hp = GameConstants.HOPLITE_LIGHT_HP
@@ -16,33 +17,33 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_ROCK
+        return GameConstants.COL_GHOST_LIGHT
 
 
 func _build_gear() -> void:
-        # چُک سرخ روی نوکِ کلاه (بدنه چینی ۶R۷)
-        var crest := MeshInstance3D.new()
-        var cm := BoxMesh.new()
-        cm.size = Vector3(0.04, 0.12, 0.22)
-        crest.mesh = cm
-        crest.position.y = 0.9
-        var cmat := StandardMaterial3D.new()
-        cmat.albedo_color = GameConstants.COL_CRIMSON
-        cmat.roughness = 0.6
-        crest.material_override = cmat
-        add_child(crest)
+        # شمشیرِ کم‌رنگِ عمودی در سمتِ راستِ مدل — تیغه‌ی سبز-سفیدِ مرجع
+        var blade := MeshInstance3D.new()
+        var bm := BoxMesh.new()
+        bm.size = Vector3(0.055, 0.52, 0.014)
+        blade.mesh = bm
+        blade.position = Vector3(0.24, 0.53, 0.15)
+        var bmat := StandardMaterial3D.new()
+        bmat.albedo_color = GameConstants.COL_GHOST_BLADE
+        bmat.roughness = 0.45
+        blade.material_override = bmat
+        add_child(blade)
 
-        # نیزه‌ی کوتاه در دست راست
-        var spear := MeshInstance3D.new()
-        var sm := CylinderMesh.new()
-        sm.top_radius = 0.015
-        sm.bottom_radius = 0.02
-        sm.height = 1.3
-        spear.mesh = sm
-        spear.rotation_degrees = Vector3(70.0, 0.0, 0.0)
-        spear.position = Vector3(0.22, 0.42, 0.3)
-        var wood := StandardMaterial3D.new()
-        wood.albedo_color = GameConstants.COL_DOOR_WOOD
-        wood.roughness = 0.85
-        spear.material_override = wood
-        add_child(spear)
+        # محافظِ دسته — خاکستریِ مرجع
+        var guard := MeshInstance3D.new()
+        var gm := BoxMesh.new()
+        gm.size = Vector3(0.1, 0.028, 0.038)
+        guard.mesh = gm
+        guard.position = Vector3(0.24, 0.265, 0.15)
+        var gmat := StandardMaterial3D.new()
+        gmat.albedo_color = GameConstants.COL_GHOST_HAND
+        gmat.roughness = 0.7
+        guard.material_override = gmat
+        add_child(guard)
+
+        # دستِ خاکستریِ گیرنده‌ی دسته
+        GhostLook.add_hand(self, Vector3(0.24, 0.235, 0.15))

@@ -7,7 +7,8 @@ extends EnemyBase
 ## (_house_tick — بدون اشغال خانه، بازخورد کاربر)؛ اینجا فقط:
 ##   * مشعل روشن در دست (بصری)
 ##   * ژست اختصاصی پرتاب مشعل (بالا بردن دست)
-## بصری: پیراهن شنی، نوار سرخ سر، نیزه‌ی پرتاب در یک دست، مشعل روشن در دست دیگر.
+## بصری (گام ۶R8): شبحِ آلویِ گرم (COL_GHOST_PELTAST) — نیزه‌ی پرتابِ استخوانی در
+## یک دست، مشعلِ روشن در دستِ دیگر (آتشِ مشعل سیگنالِ گیم‌پلی می‌ماند).
 
 var javelins_thrown := 0     # برای تست خودکار
 var _javelin: MeshInstance3D
@@ -28,37 +29,26 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_BEACH_SAND
+        return GameConstants.COL_GHOST_PELTAST
 
 
 func _build_gear() -> void:
-        # نوار سرخ سر — حلقه دورِ کلاهِ چینی
-        var band := MeshInstance3D.new()
-        var bm := TorusMesh.new()
-        bm.inner_radius = 0.105
-        bm.outer_radius = 0.15
-        bm.rings = 10
-        bm.ring_segments = 5
-        band.mesh = bm
-        band.position.y = 0.58
-        var bmat := StandardMaterial3D.new()
-        bmat.albedo_color = GameConstants.COL_CRIMSON
-        bmat.roughness = 0.6
-        band.material_override = bmat
-        add_child(band)
+        # گام ۶R8 — بدونِ نوارِ سر (مرجعِ شبح کلاهِ لخت دارد)
 
-        # نیزه‌ی پرتاب در دست
+        # نیزه‌ی پرتابِ استخوانی در دست
         _javelin = MeshInstance3D.new()
         var jm := BoxMesh.new()
         jm.size = Vector3(0.025, 0.025, 0.62)
         _javelin.mesh = jm
         _javelin.rotation_degrees = Vector3(-30.0, 0.0, 0.0)
         _javelin.position = Vector3(0.22, 0.44, 0.12)
-        var wood := StandardMaterial3D.new()
-        wood.albedo_color = GameConstants.COL_DOOR_WOOD
-        wood.roughness = 0.85
-        _javelin.material_override = wood
+        var bone := StandardMaterial3D.new()
+        bone.albedo_color = GameConstants.COL_GHOST_BONE
+        bone.roughness = 0.6
+        _javelin.material_override = bone
         add_child(_javelin)
+        # دستِ خاکستریِ گیرنده‌ی نیزه (مرجع)
+        GhostLook.add_hand(self, Vector3(0.21, 0.42, 0.13))
 
         # گام ۶R — مشعل روشن در دست دیگر (سمت چپ مدل)
         _torch_in_hand = MeshInstance3D.new()
@@ -122,7 +112,7 @@ func _throw_anim() -> void:
 
 
 func _javelin_back() -> void:
-        _javelin.position = Vector3(0.2, 0.45, 0.12)
+        _javelin.position = Vector3(0.22, 0.44, 0.12)
 
 
 # ---------------- گام ۶R — ژست اختصاصی پرتاب مشعل ----------------

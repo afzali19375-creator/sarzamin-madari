@@ -3,6 +3,7 @@ extends EnemyBase
 ## هوپلیت سنگین (§۶): کند، جانِ زیاد، «کمان را خنثی می‌کند — فقط از پشت/پهلو آسیب».
 ## سپر بزرگ رو به مدلِ +Z؛ تیر/پرتابی که از مخروطِ پیش‌رو بیاید روی سپر می‌شکند
 ## (جرقه‌ی سفید، بدون آسیب). ضربه‌ی تن‌به‌تن و پرتاب از پهلو-پشت معمولی اثر می‌کند.
+## گام ۶R8 — بصری: شبحِ بنفشِ عمیق + سپرِ لبه‌استخوانی — بدونِ کلاه‌خود (مرجعِ شبح)
 
 var deflects := 0          # شمار تیرهای خنثی‌شده — برای تست خودکار
 var _shield: MeshInstance3D
@@ -22,7 +23,7 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_ROCK_DARK
+        return GameConstants.COL_GHOST_HEAVY
 
 
 func _build_gear() -> void:
@@ -36,38 +37,22 @@ func _build_gear() -> void:
         _shield.mesh = sm
         _shield.position = Vector3(-0.04, 0.36, 0.3)
         var shield_mat := StandardMaterial3D.new()
-        shield_mat.albedo_color = GameConstants.COL_FIRETEMPLE
+        shield_mat.albedo_color = GameConstants.COL_GHOST_SHIELD
         shield_mat.roughness = 0.55
         _shield.material_override = shield_mat
         add_child(_shield)
 
-        # لبه‌ی برنزی سپر
+        # لبه‌ی استخوانی سپر — گام ۶R8 (به‌جای برنزِ طلایی، هماهنگ با مرجعِ شبح)
         var rim := MeshInstance3D.new()
         var rm := BoxMesh.new()
         rm.size = Vector3(0.6, 0.06, 0.07)
         rim.mesh = rm
         rim.position = Vector3(-0.04, 0.67, 0.3)
         var rim_mat := StandardMaterial3D.new()
-        rim_mat.albedo_color = GameConstants.COL_GOLD
-        rim_mat.metallic = 0.5
-        rim_mat.roughness = 0.4
+        rim_mat.albedo_color = GameConstants.COL_GHOST_BONE
+        rim_mat.roughness = 0.5
         rim.material_override = rim_mat
         add_child(rim)
-
-        # کلاه‌خود کریت‌سپر
-        var helm := MeshInstance3D.new()
-        var hm := CylinderMesh.new()
-        hm.top_radius = 0.02
-        hm.bottom_radius = 0.13
-        hm.height = 0.16
-        helm.mesh = hm
-        helm.position.y = 0.92
-        var hmat := StandardMaterial3D.new()
-        hmat.albedo_color = GameConstants.COL_GOLD
-        hmat.metallic = 0.5
-        hmat.roughness = 0.4
-        helm.material_override = hmat
-        add_child(helm)
 
 
 ## آیا این پرتابه در مخروط سپر پیش‌رو است؟ (سپر روی +Z مدل با heading فعلی)

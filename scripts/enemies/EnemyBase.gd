@@ -13,7 +13,7 @@ extends Node3D
 ##      نزدیک می‌شوند و از آن‌جا مشعل پرتاب می‌کنند؛ نزدیک‌تر از حدِ ایمن عقب
 ##      می‌روند. غارت نمایشیِ گام ۶ حذف شد.
 ##
-## رنگ‌ها فقط از پالت هخامنشی (برنز COL_ROCK، سرخ COL_CRIMSON، شن).
+## رنگ‌ها فقط از پالتِ شبح (COL_GHOST_* — تصویرِ مرجعِ کاربر گام ۶R8).
 ## صفر عدد و نوار سلامت روی صفحه (§۱۰) — فلش سفید ضربه + افتادن هنگام مرگ.
 ## قانون §۷: مرگ دائمی است.
 
@@ -98,16 +98,15 @@ func _ready() -> void:
         _heading = rotation.y
         _channel = GameConstants.ENEMY_CHANNEL_BASE + raid_group
         _body_color = _default_color()
-        # گام ۶R۷ — بدنه‌ی چینیِ اشکی با گرادیان (هم‌سبک با یونیت‌های خودی)
-        _mat = ChibiLook.shader_mat(_body_color)
+        # گام ۶R8 — بدنه‌ی شبحِ شنل‌پوش (تصویرِ مرجعِ کاربر) — بدونِ پا، شناور
+        _mat = GhostLook.shader_mat(_body_color)
 
         _body = MeshInstance3D.new()
-        _body.mesh = ChibiLook.body_mesh()
+        _body.mesh = GhostLook.body_mesh()
         _body.position.y = 0.0
         _body.material_override = _mat
         add_child(_body)
-        ChibiLook.add_face(_body)
-        ChibiLook.add_legs(self, _body_color)
+        GhostLook.add_face(_body)
 
         # تجهیزات اختصاصی کلاس (کلاه‌خود/سپر/نیزه‌ی پرتاب)
         _build_gear()
@@ -120,7 +119,7 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_ROCK
+        return GameConstants.COL_GHOST_LIGHT
 
 
 func _build_gear() -> void:
@@ -491,15 +490,17 @@ func _turn_to(target: float, delta: float) -> void:
 
 
 func _bob_visual(moving: bool) -> void:
-        var target := absf(sin(_bob_t * 9.0)) * 0.05 if moving else 0.0
+        # گام ۶R8 — شناوریِ شبح: ایست = شنایِ آهسته دورِ ۰٫۰۶؛ حرکت = بُبِ گام
+        var target := 0.06 + (absf(sin(_bob_t * 7.0)) * 0.05 if moving \
+                        else sin(_bob_t * 2.1) * 0.02)
         var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
         _body.position.y = lerpf(_body.position.y, target, k)
 
 
-## رنگ پایه‌ی بدنه (گرادیانِ چینی از همین مشتق می‌شود)
+## رنگ پایه‌ی بدنه (گرادیانِ شبح از همین مشتق می‌شود)
 func _set_color(c: Color) -> void:
         _body_color = c
-        ChibiLook.set_base(_mat, c)
+        GhostLook.set_base(_mat, c)
 
 
 ## یورش کوتاه به جلو هنگام ضربه/پرتاب
@@ -515,7 +516,7 @@ func _tick_flash(delta: float) -> void:
         _flash_t += delta
         if _flash_t >= 0.12:
                 _flashing = false
-                ChibiLook.set_flash(_mat, 0.0)
+                GhostLook.set_flash(_mat, 0.0)
                 _set_color(_flash_restore)
 
 
@@ -575,7 +576,7 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
                 return
         hp -= dmg
         _flash_restore = _body_color
-        ChibiLook.set_flash(_mat, 1.0)
+        GhostLook.set_flash(_mat, 1.0)
         _flash_t = 0.0
         _flashing = true
         _knockback(from_dir)
@@ -616,8 +617,8 @@ func die() -> void:
         tw.set_parallel(true)
         tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
         tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
-        # گام ۶R۷ — محوِ مرگ روی همه‌ی مش‌ها (شیدر Opaque می‌ماند)
-        for p in ChibiLook.fade_parts(self):
+        # گام ۶R۸ — محوِ مرگ روی همه‌ی مش‌ها (شیدر Opaque می‌ماند)
+        for p in GhostLook.fade_parts(self):
                 tw.tween_property(p, "transparency", 1.0,
                                 GameConstants.DEATH_FADE_SECONDS).set_delay(0.35)
         tw.chain().tween_callback(queue_free)

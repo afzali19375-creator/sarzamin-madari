@@ -242,6 +242,15 @@ const COL_DOOR_WOOD := Color("6b4a2e")        # در چوبی
 const COL_WINDCATCHER := Color("d4b483")      # بادگیر
 const COL_FIRETEMPLE := Color("c4b5a0")       # آتشکده (سنگ)
 
+# --- گام ۶R8 — پالتِ شبحِ مهاجم (تصویرِ مرجعِ کاربر — سربازِ شنل‌پوشِ مرگ) ---
+const COL_GHOST_LIGHT := Color("3a2440")      # شبحِ سبک — بنفش
+const COL_GHOST_HEAVY := Color("241428")      # شبحِ سنگین — بنفشِ عمیق
+const COL_GHOST_PELTAST := Color("3c1f33")    # شبحِ پرتابگر — آلوی گرم
+const COL_GHOST_BONE := Color("d8d8c4")       # ماسکِ استخوانی
+const COL_GHOST_BLADE := Color("dff0e0")      # تیغه‌ی کم‌رنگِ سبز-سفید (مرجع)
+const COL_GHOST_HAND := Color("8a8088")       # دستِ خاکستری (مرجع)
+const COL_GHOST_SHIELD := Color("2a1a30")     # سپرِ شبحِ سنگین
+
 const UNIT_PALETTE: Array[Color] = [
         Color("e0d6b8"), # عاجی
         Color("2f8f83"), # فیروزه‌ای
