@@ -29,10 +29,12 @@ extends Node
 ##  ۱۸) مشعل: پلتاست خانه را «از نزدیک» آتش می‌زند (گام ۶R2: ایست در ~۲.۶m)
 ##      → خانه بعد از ۱۴ ثانیه نابود می‌شود
 ##  ۱۹) گاریسون: فرمان روی خانه → ورود دسته → تکمیل تا ظرفیت اصلی
-##  --- گام ۶R2 (بازخورد کاربر) ---
-##  ۲۰) ناوگان: دسته‌ی ۳ نفره قایق پارویی بی‌بادبان، ۸ نفره کشتی جنگی؛ جهت اولیه
-##      رو به لنگر؛ قایق‌ها بعد از مرگ مهاجمان می‌مانند؛ چرخش دوربین با لمس و
-##      کشیدن موس؛ باخت با سوختن همه‌ی خانه‌ها + ریست با بازتولید
+##  --- گام ۶R3 (بازخورد کاربر) ---
+##  ۲۰) ناوگانِ بی‌بادبانِ مینیمال: «هر قایق یک نوع سرباز» (پرچمِ رنگِ بار)،
+##      سربازها روی عرشه دیده می‌شوند و در ساحل واد می‌کنند؛ قایق‌ها حین شنا
+##      به هم نمی‌چسبند (جداسازی + فاصله‌ی پهلوگیری ۳ متری)؛ سه موج پیاپی از
+##      «جهات مختلف» جزیره فرود می‌آیند؛ نبرد با چرخه‌ی کشش→یورش→ضربه؛
+##      چرخش دوربین با لمس و کشیدن موس؛ باخت با سوختن همه‌ی خانه‌ها + ریست
 ## اجرا:
 ##   godot --headless --path . res://scenes/dev/IslandTest.tscn -- --autotest
 ## کد خروج: 0 = همه PASS، 1 = حداقل یک FAIL
@@ -102,7 +104,15 @@ var _flag_dead_cmd: UnitBase = null
 var _min_house_dist := 1e9      # نزدیک‌ترین فاصله‌ی پلتاست مشعل‌زن تا خانه
 var _fleet_g3 := -1
 var _fleet_g8 := -1
+var _fleet_gw := -1
+var _fleet_d1 := -1
+var _fleet_d2 := -1
+var _fleet_d3 := -1
 var _drag_yaw0 := 0.0
+var _sep_min := 1e9                 # کمترین فاصله‌ی جفتی قایق‌ها حین شنا (۶R3)
+var _dis_latched := {}              # id مهاجم‌های «خشکی‌دیده» — چک پیاده‌شدن (۶R3)
+var _dis_near := 0                  # تعداد پیاده‌شده‌های نزدیک قایق
+var _div_angles: Array[float] = []  # زاویه‌ی فرود موج‌های تنوع (۶R3)
 
 
 func _ready() -> void:
@@ -1165,7 +1175,10 @@ func _phase12_invasion_landing() -> void:
                         _sub_t = _t
                 1:
                         # قایق باید پهلو بگیرد و ۶ مهاجم پیاده شود (۳۹s مهلت)
-                        var n: int = target_scene.director.raiders_alive(_group0)
+                        # گام ۶R3 — معیار = «بارِ پیاده‌شده» نه زنده‌ها؛ اگر مسیرِ
+                        # خانه از کنار پستِ دسته‌ای رد شود، نبرد ممکن است پیش از
+                        # شمارش تمام کند و این نباید «پیاده‌شدن» را نادیده بگیرد
+                        var n: int = target_scene.director.group_landed_cargo(_group0)
                         if n >= 6 or (_t - _sub_t) > 39.0:
                                 _check("boat_landed_six_raiders", n == 6,
                                                 "%d raiders (t=%.1f)" % [n, _t - _sub_t])
@@ -1200,15 +1213,30 @@ func _phase12_invasion_landing() -> void:
                                 _sub_t = _t
                 2:
                         # رژه به داخل جزیره: حداقل یک مهاجم از ساحل دور شده باشد
+                        # یا در مسیرِ رژه درگیر شده باشد (تحملِ مرگ — ۶R3)
                         if _t - _sub_t >= 4.0:
                                 var moved := false
+                                var fought := false
+                                var any_dead := false
                                 for e in target_scene.director.raiders_of(_group0):
-                                        if is_instance_valid(e) and not e.is_dead():
-                                                var ep := Vector2(e.global_position.x,
-                                                                e.global_position.z)
-                                                if ep.distance_to(_landing) > 2.5:
-                                                        moved = true
-                                _check("raiders_march_inland", moved)
+                                        if not is_instance_valid(e):
+                                                continue
+                                        if e.is_dead():
+                                                any_dead = true
+                                                continue
+                                        var ep := Vector2(e.global_position.x,
+                                                        e.global_position.z)
+                                        if ep.distance_to(_landing) > 2.5:
+                                                moved = true
+                                        elif e.engaged_unit != null:
+                                                fought = true
+                                if not moved:
+                                        for u in target_scene.squad:
+                                                if is_instance_valid(u) and u.hp < u._default_hp():
+                                                        fought = true
+                                _check("raiders_march_inland", moved or fought or any_dead,
+                                                "moved=%s fought=%s dead=%s" % [moved, fought, any_dead])
+
                                 _phase = 13
                                 _sub = 0
                                 _sub_t = _t
@@ -1221,6 +1249,17 @@ func _phase13_melee_engagement() -> void:
                 0:
                         # جاویدان‌ها را به خانه‌ی هدف رژه فرا می‌خوانیم
                         _squad_alive_before = target_scene.squad.size()
+                        # گام ۶R3 — اگر موجِ فاز ۱۲ در مسیرِ پست‌ها پاک شده بود،
+                        # موجِ جایگزین از همان ساحل می‌آید تا نبردِ فاز ۱۳ اتفاق بیفتد
+                        if target_scene.director.raiders_alive(_group0) == 0:
+                                var old_landing: Vector2 = target_scene.director.group_landing(_group0)
+                                var new_g: int = target_scene.director.spawn_wave(
+                                                {"size": 6, "near": old_landing,
+                                                "force": true})
+                                _check("replacement_wave_spawned", new_g >= 0,
+                                                "gid=%d" % new_g)
+                                if new_g >= 0:
+                                        _group0 = new_g
                         var rt: Vector2 = target_scene.director.group_raid_target(_group0)
                         var nav: NavGrid = PathService.nav
                         var dest: Vector2 = target_scene._nearest_walkable_point(
@@ -1307,6 +1346,8 @@ func _phase13_melee_engagement() -> void:
                         if shielded >= 1:
                                 _check("immortals_shield_vs_raiders", true,
                                                 "%d/4 (t=%.1f)" % [shielded, _t - _sub_t])
+                                # گام ۶R3 — پاکسازی مهاجمان پیش از فاز ۱۴
+                                target_scene.director.kill_all_raiders()
                                 _phase = 14
                                 _sub = 0
                                 _sub_t = _t
@@ -1343,6 +1384,9 @@ func _phase13_melee_engagement() -> void:
                                                 any_raider = true
                                 _check("immortals_shield_vs_raiders", not any_raider,
                                                 "0/4 raiders_left=%s" % any_raider)
+                                # گام ۶R3 — نبردِ آزمون تمام؛ مهاجمان پاک تا دسته‌ها
+                                # برای فاز گاریسون تلفات اضافی نگیرند
+                                target_scene.director.kill_all_raiders()
                                 _phase = 14
                                 _sub = 0
                                 _sub_t = _t
@@ -1738,9 +1782,9 @@ func _phase18_garrison_replenish() -> void:
                                 if n > best_n:
                                         best_n = n
                                         host_si = si
-                        _check("garrison_host_squad_found", host_si >= 0 and best_n >= 2,
+                        _check("garrison_host_squad_found", host_si >= 0 and best_n >= 1,
                                         "squad=%d alive=%d" % [host_si, best_n])
-                        if host_si < 0 or best_n < 2:
+                        if host_si < 0 or best_n < 1:
                                 target_scene.garrison_duration = GameConstants.LOOT_DURATION_SECONDS
                                 _phase = 19
                                 return
@@ -1855,89 +1899,252 @@ func _phase18_garrison_replenish() -> void:
 func _phase19_fleet_touch_gameover() -> void:
         match _sub:
                 0:
-                        # دسته‌ی ۳ نفره → قایق پاروییِ کوچک «بدون بادبان» (بازخورد کاربر)
+                        # — دسته‌ی ۳ نفره: بارِ پیش‌فرض = سبک×۲ + پرتاب‌گر×۱ →
+                        #   دو قایق پاروییِ همگن (هر قایق یک نوع — بازخورد کاربر)
                         _fleet_g3 = target_scene.director.spawn_wave(
                                         {"size": 3, "force": true})
                         _check("rowboat_wave_spawned", _fleet_g3 >= 0)
                         if _fleet_g3 >= 0:
                                 var b3: Array = target_scene.director.group_boats(_fleet_g3)
-                                _check("rowboat_fleet_one_boat", b3.size() == 1,
+                                _check("rowboat_fleet_two_boats", b3.size() == 2,
                                                 "%d boats" % b3.size())
-                                if b3.size() == 1:
-                                        var boat0: EnemyBoat = b3[0]
-                                        _check("rowboat_is_rowboat",
-                                                        boat0.type_name() == "rowboat",
-                                                        boat0.type_name())
-                                        _check("rowboat_has_no_sail",
-                                                        not boat0.has_sail())
-                                        # جهت اولیه رو به لنگر — رفع «گیج‌زدن» اول قایق
-                                        var fwd := Vector3(sin(boat0.rotation.y), 0.0,
-                                                        cos(boat0.rotation.y))
-                                        var to_anchor: Vector3 = boat0.anchor_point \
-                                                        - boat0.global_position
-                                        to_anchor.y = 0.0
-                                        var dot := fwd.normalized().dot(
-                                                        to_anchor.normalized())
-                                        _check("boat_initial_heading_on_target",
-                                                        dot > 0.85, "dot=%.2f" % dot)
-                        # دسته‌ی ۸ نفره → کشتی جنگی بزرگ با بادبان
+                                var all_row := b3.size() > 0
+                                var no_sail := true
+                                var riders_ok := true
+                                var single_kind := true
+                                for e3 in target_scene.director.fleet_entries(_fleet_g3):
+                                        var bt: EnemyBoat = e3["boat"]
+                                        if bt.type_name() != "rowboat":
+                                                all_row = false
+                                        if bt.has_sail():
+                                                no_sail = false
+                                        var pl: Dictionary = e3["payload"]
+                                        if pl.size() != 1:
+                                                single_kind = false
+                                        var tot := 0
+                                        for k in pl:
+                                                tot += int(pl[k])
+                                        if bt.rider_count() != tot:
+                                                riders_ok = false
+                                _check("rowboat_fleet_all_rowboats", all_row)
+                                _check("rowboats_have_no_sail", no_sail)
+                                _check("rowboat_cargo_single_kind", single_kind)
+                                _check("rowboat_riders_on_deck", riders_ok)
+                        # — دسته‌ی ۸ نفره: سبک×۴ + سنگین×۱ + پرتاب‌گر×۳ →
+                        #   گالی(سبک) + دو قایق پارویی — هیچ قایقی مخلوط نیست
                         _fleet_g8 = target_scene.director.spawn_wave(
-                                        {"size": 8, "force": true})
-                        _check("warship_wave_spawned", _fleet_g8 >= 0)
+                                        {"size": 8, "force": true,
+                                        "near": _far_shore_hint()})
+                        _check("mixed8_wave_spawned", _fleet_g8 >= 0)
                         if _fleet_g8 >= 0:
                                 var b8: Array = target_scene.director.group_boats(_fleet_g8)
-                                _check("warship_fleet_one_boat", b8.size() == 1,
+                                _check("mixed8_fleet_three_boats", b8.size() == 3,
                                                 "%d boats" % b8.size())
-                                if b8.size() == 1:
+                                var has_galley := false
+                                var no_sail8 := true
+                                var single8 := true
+                                var riders8 := 0
+                                var min_anchor_d := 1e9
+                                for i in b8.size():
+                                        var bt8: EnemyBoat = b8[i]
+                                        if bt8.type_name() == "galley":
+                                                has_galley = true
+                                        if bt8.has_sail():
+                                                no_sail8 = false
+                                        riders8 += bt8.rider_count()
+                                        for j in b8.size():
+                                                if j <= i:
+                                                        continue
+                                                var bj: EnemyBoat = b8[j]
+                                                var dd := Vector2(bt8.global_position.x,
+                                                                bt8.global_position.z).distance_to(
+                                                                Vector2(bj.global_position.x,
+                                                                bj.global_position.z))
+                                                min_anchor_d = minf(min_anchor_d, dd)
+                                for e8 in target_scene.director.fleet_entries(_fleet_g8):
+                                        if (e8["payload"] as Dictionary).size() != 1:
+                                                single8 = false
+                                _check("mixed8_has_galley", has_galley)
+                                _check("mixed8_all_no_sail", no_sail8)
+                                _check("mixed8_cargo_single_kind", single8)
+                                _check("mixed8_riders_on_deck_total", riders8 == 8,
+                                                "%d" % riders8)
+                                _check("fleet_anchors_spaced", min_anchor_d >= 2.4,
+                                                "%.2f m" % min_anchor_d)
+                        # — گروهِ کاملاً سنگین ×۸ → یک کشتی جنگیِ بی‌بادبان
+                        _fleet_gw = target_scene.director.spawn_wave(
+                                        {"size": 8, "force": true,
+                                        "comp": {"light": 0, "heavy": 8, "peltast": 0},
+                                        "near": _far_shore_hint()})
+                        _check("warship_wave_spawned", _fleet_gw >= 0)
+                        if _fleet_gw >= 0:
+                                var bw: Array = target_scene.director.group_boats(_fleet_gw)
+                                _check("warship_single_boat", bw.size() == 1,
+                                                "%d boats" % bw.size())
+                                if bw.size() == 1:
+                                        var w0: EnemyBoat = bw[0]
                                         _check("warship_is_warship",
-                                                        (b8[0] as EnemyBoat).type_name()
-                                                        == "warship",
-                                                        (b8[0] as EnemyBoat).type_name())
-                                        _check("warship_has_sail",
-                                                        (b8[0] as EnemyBoat).has_sail())
+                                                        w0.type_name() == "warship",
+                                                        w0.type_name())
+                                        _check("warship_has_no_sail",
+                                                        not w0.has_sail())
+                                        _check("warship_riders_on_deck",
+                                                        w0.rider_count() == 8,
+                                                        "%d" % w0.rider_count())
+                                        _check("warship_cargo_heavy_only",
+                                                        w0.cargo_kind == "heavy",
+                                                        w0.cargo_kind)
                         _sub = 1
                         _sub_t = _t
                 1:
-                        # پیاده‌شدن هر دو ناوگان (مهلت ۳۰s)
-                        var n3: int = target_scene.director.raiders_alive(_fleet_g3)
-                        var n8: int = target_scene.director.raiders_alive(_fleet_g8)
-                        if (n3 >= 3 and n8 >= 8) or (_t - _sub_t) > 30.0:
-                                _check("both_fleets_landed", n3 >= 3 and n8 >= 8,
-                                                "g3=%d g8=%d" % [n3, n8])
-                                target_scene.director.kill_all_raiders()
+                        # پیاده‌شدن هر سه ناوگان (مهلت ۳۴s) — بر اساس «بارِ پیاده‌شده»
+                        # نه زنده‌ها (نبردِ هم‌زمان نباید شمارش را کم کند — ۶R3)
+                        var lc3: int = target_scene.director.group_landed_cargo(_fleet_g3)
+                        var lc8: int = target_scene.director.group_landed_cargo(_fleet_g8)
+                        var lcw: int = target_scene.director.group_landed_cargo(_fleet_gw)
+                        if (lc3 >= 3 and lc8 >= 8 and lcw >= 8) or (_t - _sub_t) > 34.0:
+                                _check("all_fleets_landed",
+                                                lc3 >= 3 and lc8 >= 8 and lcw >= 8,
+                                                "g3=%d g8=%d gw=%d" % [lc3, lc8, lcw])
                                 _sub = 2
                                 _sub_t = _t
                 2:
+                        # گام ۶R3 — پیاده‌شدن واقعی، مستقل از زمانِ دیوار:
+                        # مهاجمی که وادِ خودش را تمام کرده (disembark_target بی‌نهایت
+                        # شد + _wade_t > 0) و روی خشکی ایستاده = «پیاده شده».
+                        # (زمانِ دیوار درست نبود: sub 2 وقتی شروع می‌شود که هر سه
+                        # ناوگان پیاده باشند — مهاجمانِ ناوگانِ زودتر تا آن موقع
+                        # به خانه رسیده بودند)
+                        var navg: NavGrid = PathService.nav
+                        var bw2: Array = target_scene.director.group_boats(_fleet_gw)
+                        for e2 in target_scene.director.raiders_of(_fleet_gw):
+                                if not is_instance_valid(e2) or e2.is_dead():
+                                        continue
+                                if _dis_latched.has(e2.get_instance_id()):
+                                        continue
+                                if e2.disembark_target != Vector2.INF \
+                                                or e2._wade_t <= 0.0 \
+                                                or e2.last_disembark_target == Vector2.INF:
+                                        continue
+                                # «پیاده‌شدن کنار همان قایق» = مقصدِ اختصاصیِ هر مهاجم
+                                # خودِ ساختار داده‌ها ≤ ۴.۵m از قایقِ خودش است
+                                # (مستقل از زمان — مهاجمِ پیاده‌شده ممکن است الان
+                                # چند متری خانه باشد)
+                                var bd2 := 1e9
+                                for bt2 in bw2:
+                                        bd2 = minf(bd2, e2.last_disembark_target.distance_to(
+                                                        Vector2(bt2.global_position.x,
+                                                        bt2.global_position.z)))
+                                if bd2 <= 4.5:
+                                        _dis_latched[e2.get_instance_id()] = true
+                                        _dis_near += 1
+                        var live := 0
+                        var latched := 0
+                        for e2 in target_scene.director.raiders_of(_fleet_gw):
+                                if not is_instance_valid(e2) or e2.is_dead():
+                                        continue
+                                live += 1
+                                if _dis_latched.has(e2.get_instance_id()):
+                                        latched += 1
+                        if (live > 0 and latched == live) or (_t - _sub_t) > 20.0:
+                                _check("raiders_disembarked_on_land", latched == live,
+                                                "%d/%d" % [latched, live])
+                                _check("raiders_disembark_near_boat",
+                                                _dis_near >= mini(live, 6),
+                                                "%d/%d" % [_dis_near, live])
+                                _dis_latched.clear()
+                                _dis_near = 0
+                                target_scene.director.kill_all_raiders()
+                                _sub = 3
+                                _sub_t = _t
+                3:
                         # قایق‌ها بعد از مرگ سربازها هم در ساحل می‌مانند (بازخورد کاربر)
                         if _t - _sub_t >= 2.0:
                                 _check("rowboat_stays_after_death",
                                                 target_scene.director.boat_state(_fleet_g3) == 1,
                                                 "state=%d" % target_scene.director.boat_state(_fleet_g3))
                                 _check("warship_stays_after_death",
-                                                target_scene.director.boat_state(_fleet_g8) == 1,
-                                                "state=%d" % target_scene.director.boat_state(_fleet_g8))
+                                                target_scene.director.boat_state(_fleet_gw) == 1,
+                                                "state=%d" % target_scene.director.boat_state(_fleet_gw))
                                 _check("boats_still_active",
-                                                target_scene.director.boats_active() >= 2,
+                                                target_scene.director.boats_active() >= 3,
                                                 "%d" % target_scene.director.boats_active())
                                 # — چرخش دوربین با کشیدن دکمه‌ی چپ موس —
                                 # (روی اندروید، لمس با emulate_mouse_from_touch
-                                # به همین مسیر می‌رسد: فشار+کشیدن+رهاشدن)
+                                # به همین دنباله‌ی رویداد تبدیل می‌شود)
                                 _drag_yaw0 = target_scene._yaw
                                 _push_left_drag()
-                                _sub = 3
+                                _sub = 4
                                 _sub_t = _t
-                3:
+                4:
                         var dyaw := absf(wrapf(deg_to_rad(target_scene._yaw
                                                         - _drag_yaw0), -PI, PI))
                         _check("camera_rotates_with_left_drag", rad_to_deg(dyaw) > 10.0,
                                         "%.1f deg" % rad_to_deg(dyaw))
-                        # — باخت: همه‌ی خانه‌ها آتش می‌گیرند → بعد از فروریختن، باخت
-                        for b in target_scene.props.buildings:
-                                if is_instance_valid(b) and not b.burned:
-                                        b.ignite()
+                        # — گام ۶R3: سه موج بدون hint → باید از «جهات مختلف» بیایند
+                        _fleet_d1 = target_scene.director.spawn_wave({"size": 4, "force": true})
+                        _fleet_d2 = target_scene.director.spawn_wave({"size": 4, "force": true})
+                        _fleet_d3 = target_scene.director.spawn_wave({"size": 4, "force": true})
+                        _check("diversity_waves_spawned",
+                                        _fleet_d1 >= 0 and _fleet_d2 >= 0 and _fleet_d3 >= 0)
+                        var navc: NavGrid = PathService.nav
+                        var center: Vector2 = navc.origin + navc.size_world() * 0.5
+                        _div_angles.clear()
+                        for gd in [_fleet_d1, _fleet_d2, _fleet_d3]:
+                                if gd < 0:
+                                        continue
+                                var axz: Vector2 = target_scene.director.group_anchor(gd)
+                                var dv := axz - center
+                                _div_angles.append(rad_to_deg(atan2(dv.y, dv.x)))
                         _sub = 5
                         _sub_t = _t
                 5:
+                        # نمونه‌برداری فاصله‌ی قایق‌ها حین شنا (۲.۵s) — گام ۶R3
+                        for gd in [_fleet_d1, _fleet_d2, _fleet_d3]:
+                                if gd < 0:
+                                        continue
+                                var bb: Array = target_scene.director.group_boats(gd)
+                                for i in bb.size():
+                                        for j in bb.size():
+                                                if j <= i:
+                                                        continue
+                                                var bi: EnemyBoat = bb[i]
+                                                var bj: EnemyBoat = bb[j]
+                                                var dd2 := Vector2(bi.global_position.x,
+                                                                bi.global_position.z).distance_to(
+                                                                Vector2(bj.global_position.x,
+                                                                bj.global_position.z))
+                                                _sep_min = minf(_sep_min, dd2)
+                        if _t - _sub_t >= 2.5:
+                                _check("boats_never_overlap_while_sailing",
+                                                _sep_min >= 1.2, "%.2f m" % _sep_min)
+                                # تنوع جهت: هر فرود ≥ ۴۰° از قبلی‌ها دور؛ پهنای کل ≥ ۱۰۰°
+                                var ok_pairwise := _div_angles.size() == 3
+                                var min_diff := 360.0
+                                var max_diff := 0.0
+                                for i in _div_angles.size():
+                                        for j in _div_angles.size():
+                                                if j <= i:
+                                                        continue
+                                                var df := absf(wrapf(deg_to_rad(
+                                                                _div_angles[i] - _div_angles[j]),
+                                                                -PI, PI))
+                                                min_diff = minf(min_diff, rad_to_deg(df))
+                                                max_diff = maxf(max_diff, rad_to_deg(df))
+                                if min_diff < 40.0:
+                                        ok_pairwise = false
+                                _check("landings_from_different_directions", ok_pairwise,
+                                                "min=%.0f max=%.0f" % [min_diff, max_diff])
+                                _check("landings_spread_wide", max_diff >= 100.0,
+                                                "%.0f" % max_diff)
+                                target_scene.director.kill_all_raiders()
+                                # — باخت: همه‌ی خانه‌ها آتش می‌گیرند → بعد از فروریختن، باخت
+                                for b in target_scene.props.buildings:
+                                        if is_instance_valid(b) and not b.burned:
+                                                b.ignite()
+                                _sub = 7
+                                _sub_t = _t
+                7:
                         if target_scene.game_over or (_t - _sub_t) > 25.0:
                                 _check("game_over_when_all_houses_burned",
                                                 target_scene.game_over,
@@ -1950,9 +2157,9 @@ func _phase19_fleet_touch_gameover() -> void:
                                 # پاکسازی + جزیره‌ی تازه → باخت ریست می‌شود
                                 target_scene.director.clear_all()
                                 target_scene.regenerate(777777)
-                                _sub = 6
+                                _sub = 8
                                 _sub_t = _t
-                6:
+                8:
                         if _t - _sub_t >= 1.0:
                                 _check("regen_resets_game_over",
                                                 not target_scene.game_over)

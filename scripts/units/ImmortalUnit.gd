@@ -75,10 +75,11 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
                         GameConstants.SPEED_BASE * speed_mult * 0.9):
                 return
         # گام ۶ — ضربه‌ی تن‌به‌تن در فاصله‌ی نبرد نزدیک
+        # گام ۶R3 — یورش (_lunge) در لحظه‌ی ضربه داخل چرخه‌ی _strike_impact_fx
         if _dist_xz_to(hostile) <= GameConstants.IMMORTAL_ENGAGE_RANGE:
-                if _try_strike(delta, GameConstants.IMMORTAL_STRIKE_COOLDOWN, hostile):
+                if _try_strike(delta, GameConstants.IMMORTAL_STRIKE_COOLDOWN,
+                                hostile, 1, GameConstants.IMMORTAL_ENGAGE_RANGE):
                         strikes_done += 1
-                        _lunge()
 
 
 func _combat_end() -> void:
@@ -92,3 +93,8 @@ func _lunge() -> void:
         var tw := create_tween()
         tw.tween_property(_body, "position:z", 0.14, 0.08).set_ease(Tween.EASE_OUT)
         tw.tween_property(_body, "position:z", 0.0, 0.14)
+
+
+## گام ۶R3 — ژست ضربه در اوجِ یورش
+func _strike_impact_fx() -> void:
+        _lunge()

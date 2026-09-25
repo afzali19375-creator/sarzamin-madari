@@ -64,10 +64,11 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
         _brace_k = move_toward(_brace_k, 1.0, 3.0 * delta)
         _spear_pivot.rotation_degrees.x = lerpf(-SPEAR_UP_DEG, -SPEAR_BRACE_DEG, _brace_k)
         # گام ۶ — ضربه‌ی نیزه، فقط در آماده‌باش و در برد نیزه (قانون آهنین کلاس)
+        # گام ۶R3 — ضربه‌ی نیزه داخل چرخه‌ی کشش→یورش→ضربه (reach قطعی پاس می‌شود)
         if _brace_k > 0.85 and _dist_xz_to(hostile) <= GameConstants.SPEARMAN_REACH:
-                if _try_strike(delta, GameConstants.SPEARMAN_STRIKE_COOLDOWN, hostile):
+                if _try_strike(delta, GameConstants.SPEARMAN_STRIKE_COOLDOWN,
+                                hostile, 1, GameConstants.SPEARMAN_REACH):
                         strikes_done += 1
-                        _thrust()
 
 
 func _combat_end() -> void:
@@ -82,6 +83,11 @@ func _thrust() -> void:
         var tw := create_tween()
         tw.tween_property(_spear, "position:z", z0 + 0.55, 0.09).set_ease(Tween.EASE_OUT)
         tw.tween_property(_spear, "position:z", z0, 0.16)
+
+
+## گام ۶R3 — ژست نیزه در لحظه‌ی ضربه
+func _strike_impact_fx() -> void:
+        _thrust()
 
 
 ## هنگام شروع حرکت نیزه باید بالا برگردد (لایه ۱ آماده‌ی سفر)

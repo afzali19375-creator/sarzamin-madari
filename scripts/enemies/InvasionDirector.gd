@@ -8,8 +8,16 @@ extends Node
 ##   * گام ۶R2 — «هر دسته با قایق‌های مختلف خودش می‌آید؛ بعضی کوچک‌تر و بدون
 ##     بادبان، بعضی بزرگ‌تر»: هر گروه = یک «ناوگان» — دسته‌های کوچک با قایق
 ##     پاروییِ بی‌بادبان، متوسط با گالی، بزرگ با کشتی جنگی (گاهی + قایق همراه)
-##   * گام ۶R2 — قایق‌ها از دل افق دریا (۳۲ متری) ظاهر می‌شوند و سمت ساحلِ
-##     رو به دوربین شنا می‌کنند تا «از گوشه‌ی صفحه» وارد شوند
+##   * گام ۶R2 — قایق‌ها از دل افق دریا (۳۲ متری) ظاهر می‌شوند
+##   * گام ۶R3 — «هر قایق یک نوع سرباز؛ مدیریت راحت‌تر»: هر قایق فقط یک نوع
+##     مهاجم حمل می‌کند و نوع قایق با بارش معنا می‌گیرد (سبک=قایق پارویی،
+##     سنگین‌های زیاد=کشتی جنگی...) — پرچمِ پُپِ قایق رنگِ نوعِ بار را نشان می‌دهد
+##   * گام ۶R3 — «قایق‌ها روی هم میرن»: ظهور پلکانی از افق + جداسازی حین شنا
+##     + فاصله‌ی پهلوگیری ۳ متری
+##   * گام ۶R3 — «از جهات مختلف جزیره بیایند»: انتخاب ساحل با تنوع زاویه‌ای —
+##     هر موج از جهتی ≥ ۵۵° دورتر از ۳ فرودِ آخر (بایاسِ «رو به دوربین» حذف شد)
+##   * گام ۶R3 — «سربازها روی قایق باشند و در ساحل پیاده شوند»: مهاجم روی عرشه‌ی
+##     همان قایق ظاهر می‌شود و تا نقطه‌ی پیاده‌شدنِ خودش (نزدیک همان قایق) واد می‌کند
 ##   * گام ۶R2 — قایق‌ها هرگز برنمی‌گردند: چه مهاجمان زنده بمانند چه کشته شوند،
 ##     ناوگان پارک‌شده در ساحل می‌ماند
 ##   * هر گروه کانال FlowField خودش را دارد (۴..۷)؛ هدف = نزدیک‌ترین خانه‌ی زنده به فرود
@@ -23,8 +31,8 @@ signal wave_cleared(group_id: int)
 var ground: IslandGround
 var props: IslandProps
 var posts: Array[Vector2] = []          # پست دسته‌ها — برای انتخاب ساحل دور
-## موقعیت دوربین (XZ جهانی) — ساحلِ «رو به دوربین» انتخاب می‌شود تا قایق از
-## گوشه‌ی دید وارد شود (گام ۶R2 — صحنه این Callable را وصل می‌کند)
+## موقعیت دوربین (XZ جهانی) — گام ۶R3: بایاس «رو به دوربین» حذف شد؛ این Callable
+## فقط برای سازگاری صحنه نگه داشته شده است
 var cam_xz_provider: Callable = Callable()
 
 var auto_waves := true
@@ -43,6 +51,8 @@ var _next_group := 0
 var _rng := RandomNumberGenerator.new()
 var _wave_accum := 0.0
 var _check_accum := 0.0
+## گام ۶R3 — زاویه‌ی فرود موج‌های اخیر (نسبت به مرکز جزیره) برای تنوع جهت حمله
+var _recent_angles: Array[float] = []
 
 const KIND_LIGHT := "light"
 const KIND_HEAVY := "heavy"
@@ -130,15 +140,25 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                 boat.boat_type = btype
                 boat.capacity = _capacity_of(btype)
                 boat.anchor_point = Vector3(anchor.x, 0, anchor.y)
-                # گام ۶R2 — ظهور از افق: ۳۲ متر دورتر در دریای باز؛ کروز تند تا
-                # نزدیکی ساحل و ترمز نرم برای پهلوگیری
-                boat.global_position = Vector3(
-                                anchor.x + outward.x * GameConstants.BOAT_SPAWN_DIST,
-                                0, anchor.y + outward.y * GameConstants.BOAT_SPAWN_DIST)
+                # گام ۶R3 — «هر قایق یک نوع سرباز»: بار قایق = یک نوع + پرچم رنگی
+                boat.cargo_kind = spec["kind"]
+                boat.cargo_count = int(spec["load"])
+                # گام ۶R2 — ظهور از افق + گام ۶R3 — «قایق‌ها روی هم میرن»:
+                # ظهور پلکانی — قایق i چند متر عقب‌تر از قایق قبلی ظاهر می‌شود
+                # تا خط شنا از همان اول جدا باشد
+                var spawn_d := GameConstants.BOAT_SPAWN_DIST \
+                                + float(bi) * GameConstants.FLEET_SPAWN_STAGGER
+                # position (نه global_position) — نود هنوز در درخت نیست
+                boat.position = Vector3(
+                                anchor.x + outward.x * spawn_d,
+                                0, anchor.y + outward.y * spawn_d)
                 boats_root.add_child(boat)
                 fleet.append({"boat": boat, "payload": spec["payload"],
                                 "landed": false})
                 boat.landed.connect(_on_boat_landed.bind(gid))
+
+        # گام ۶R3 — ثبت جهت فرود برای تنوع زاویه‌ای موج‌های بعدی
+        _remember_shore_angle(center, water_xz)
 
         _groups[gid] = {
                 "fleet": fleet,
@@ -168,54 +188,38 @@ func _default_comp(size: int) -> Dictionary:
         return {KIND_LIGHT: light, KIND_HEAVY: heavy, KIND_PELTAST: pelt}
 
 
-## ساخت ناوگان از روی اندازه‌ی گروه — قایق بزرگ‌تر برای دسته‌ی بزرگ‌تر
-## (بازخورد کاربر گام ۶R2: «چند نوع قایق؛ بعضی کوچک‌تر و بدون بادبان»)
-## خروجی: [{"type": BoatType, "load": int, "payload": {kind: n}}]
+## ساخت ناوگان از روی اندازه‌ی گروه — گام ۶R3 (بازخورد کاربر):
+## «دشمن ها در هر قایق یک نوع باشند ... برای کاربر راحت تر هست مدیرتش»
+## → هر قایق فقط «یک نوع» حمل می‌کند؛ نوع قایق از اندازه‌ی بارش درمی‌آید:
+##   ۱..۳ → قایق پارویی | ۴..۶ → گالی | ۷..۸ → کشتی جنگی
+## خروجی: [{"type": BoatType, "kind": String, "load": int, "payload": {kind: n}}]
 func _build_fleet(size: int, comp: Dictionary) -> Array:
-        # لیست سربازها به‌صورت مخلوط (سبک/سنگین/پلتاست در همه‌ی قایق‌ها پخش شوند)
-        var counts := {
-                KIND_LIGHT: int(comp.get(KIND_LIGHT, 0)),
-                KIND_HEAVY: int(comp.get(KIND_HEAVY, 0)),
-                KIND_PELTAST: int(comp.get(KIND_PELTAST, 0)),
-        }
-        var roster: Array = []
-        var guard := 0
-        while roster.size() < size and guard < 200:
-                guard += 1
-                for kind in [KIND_LIGHT, KIND_HEAVY, KIND_PELTAST]:
-                        if int(counts[kind]) > 0:
-                                roster.append(kind)
-                                counts[kind] -= 1
-        # انتخاب قایق‌ها: ≥۹ → کشتی جنگی + قایق همراه | ۷..۸ → کشتی جنگی |
-        # ۴..۶ → گالی | ۱..۳ → قایق پارویی کوچک (بدون بادبان)
         var boats_spec: Array = []
-        var remaining := roster.size()
-        while remaining > 0:
-                if remaining >= 9:
-                        boats_spec.append({"type": EnemyBoat.BoatType.WARSHIP,
-                                        "load": 6})
-                        remaining -= 6
-                elif remaining >= 7:
-                        boats_spec.append({"type": EnemyBoat.BoatType.WARSHIP,
-                                        "load": remaining})
-                        remaining = 0
-                elif remaining >= 4:
-                        boats_spec.append({"type": EnemyBoat.BoatType.GALLEY,
-                                        "load": remaining})
-                        remaining = 0
-                else:
-                        boats_spec.append({"type": EnemyBoat.BoatType.ROWBOAT,
-                                        "load": remaining})
-                        remaining = 0
-        # توزیع سربازها بین قایق‌های ناوگان (به ترتیب لیست مخلوط)
-        var idx := 0
-        for bi in boats_spec.size():
-                var payload := {}
-                for li in int(boats_spec[bi]["load"]):
-                        var kind: String = roster[idx]
-                        idx += 1
-                        payload[kind] = int(payload.get(kind, 0)) + 1
-                boats_spec[bi]["payload"] = payload
+        var remaining := size
+        for kind in [KIND_LIGHT, KIND_HEAVY, KIND_PELTAST]:
+                var n := mini(int(comp.get(kind, 0)), remaining)
+                remaining -= n
+                # شکستنِ «همین نوع» به قایق‌های همگن
+                while n > 0:
+                        var load: int
+                        var btype: EnemyBoat.BoatType
+                        if n >= 7:
+                                btype = EnemyBoat.BoatType.WARSHIP
+                                load = mini(n, GameConstants.CAP_WARSHIP)
+                        elif n >= 4:
+                                btype = EnemyBoat.BoatType.GALLEY
+                                load = mini(n, GameConstants.CAP_GALLEY)
+                        else:
+                                btype = EnemyBoat.BoatType.ROWBOAT
+                                load = mini(n, GameConstants.CAP_ROWBOAT)
+                        boats_spec.append({"type": btype, "kind": kind,
+                                        "load": load, "payload": {kind: load}})
+                        n -= load
+        # پشتیبان: اگر comp کمتر از size بود، باقی با سبک پر می‌شود
+        if remaining > 0:
+                boats_spec.append({"type": EnemyBoat.BoatType.ROWBOAT,
+                                "kind": KIND_LIGHT, "load": remaining,
+                                "payload": {KIND_LIGHT: remaining}})
         return boats_spec
 
 
@@ -251,24 +255,45 @@ func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
         if entry.is_empty() or entry["landed"]:
                 return
         entry["landed"] = true
-        # سربازهای هر قایق نزدیک همان قایق پیاده می‌شوند — هر قایق حلقه‌ی خودش
-        var landing: Vector2 = g["landing"]
+        # گام ۶R3 — «سربازهای دشمن روی قایق باشند و وقتی قایق لبه‌ی ساحل می‌رسد
+        # از آن پیاده بشن»: مهاجمان روی «عرشه‌ی همان قایق» ظاهر می‌شوند؛ هر یک
+        # نقطه‌ی پیاده‌شدنِ خودش را در ساحلِ کنارِ همان قایق می‌گیرد و واد می‌کند.
+        # بعد از پیاده‌شدن، میدانِ گروه خودش را به خانه می‌برد (EnemyBase).
         var payload: Dictionary = entry["payload"]
         var need := 0
         for k in payload:
                 need += int(payload[k])
-        var cells := _walkable_cells_near(landing,
-                        2.0 + 1.5 * float(_landed_count(g)), need + 6)
+        var boat_xz := Vector2(boat.global_position.x, boat.global_position.z)
+        # شعاع = offset لنگر (تا ۱.۸m برای کشتی جنگی) + یک سلول ساحل + حاشیه
+        var cells := _walkable_cells_near(boat_xz, 3.8, need + 4)
+        # گام ۶R3 — spawn پخش‌شده روی عرشه (عمود بر جهت قایق): ۸ مهاجم روی
+        # «یک نقطه» جداسازی را منفجر می‌کند و پیاده‌شدن را به‌هم می‌ریزد
+        var head := boat.rotation.y
+        var right := Vector2(cos(head), -sin(head))
         var k2 := 0
         for kind in [KIND_LIGHT, KIND_HEAVY, KIND_PELTAST]:
                 for i in int(payload.get(kind, 0)):
-                        var at: Vector2 = landing
+                        # نقطه‌ی پیاده‌شدنِ اختصاصی (هر کدام یک سلول؛ اگر تمام شد
+                        # نزدیک‌ترین سلول ساحلیِ همان قایق)
+                        var spot: Vector2 = boat_xz
                         if k2 < cells.size():
-                                at = cells[k2]
+                                spot = cells[k2]
+                        var spread_xz: Vector2 = boat_xz + right \
+                                        * ((float(k2) - float(need - 1) * 0.5) * 0.34)
                         k2 += 1
-                        var e2 := spawn_enemy(kind, at, gid)
+                        var e2 := spawn_enemy_on_boat(boat, kind, spot, gid, spread_xz)
                         if e2 != null:
                                 g["raiders"].append(e2)
+
+
+## گام ۶R3 — spawn مهاجم «روی عرشه‌ی قایق» با مقصد پیاده‌شدن مشخص
+## (position باید قبل از add_child ست شود تا _y_smooth ارتفاع عرشه را بگیرد)
+func spawn_enemy_on_boat(boat: EnemyBoat, kind: String, disembark_at: Vector2,
+                group: int, spawn_xz: Vector2 = Vector2.INF) -> EnemyBase:
+        var at := spawn_xz
+        if at == Vector2.INF:
+                at = Vector2(boat.global_position.x, boat.global_position.z)
+        return spawn_enemy(kind, at, group, boat.deck_world_y(), disembark_at)
 
 
 func _landed_count(g: Dictionary) -> int:
@@ -280,7 +305,9 @@ func _landed_count(g: Dictionary) -> int:
 
 
 ## ساخت یک مهاجم در نقطه (برای کارگردان و تست) — group < 0 = گروه آزمایشی مستقل
-func spawn_enemy(kind: String, at: Vector2, group: int = -1) -> EnemyBase:
+## گام ۶R3: at_y ≥ 0 = ارتفاع اولیه (عرشه‌ی قایق) + disembark = مقصد پیاده‌شدن
+func spawn_enemy(kind: String, at: Vector2, group: int = -1,
+                at_y: float = -1.0, disembark: Vector2 = Vector2.INF) -> EnemyBase:
         var script: GDScript = null
         match kind:
                 KIND_LIGHT:
@@ -293,7 +320,8 @@ func spawn_enemy(kind: String, at: Vector2, group: int = -1) -> EnemyBase:
                         return null
         var nav := PathService.nav
         var pos := at
-        if nav != null and not nav.is_walkable(nav.world_to_cell(at)):
+        if nav != null and at_y < 0.0 \
+                        and not nav.is_walkable(nav.world_to_cell(at)):
                 pos = nav.cell_center(_nearest_walkable_cell(at))
         var e: EnemyBase = script.new()
         e.raid_group = group % 4 if group >= 0 else 3
@@ -304,11 +332,16 @@ func spawn_enemy(kind: String, at: Vector2, group: int = -1) -> EnemyBase:
         else:
                 raid = pos  # گروه آزمایشی: همان‌جا می‌ماند و واکنش می‌دهد
         e.raid_target = raid
+        var y0 := 0.0
+        if at_y >= 0.0:
+                y0 = at_y
+        elif ground != null:
+                y0 = ground.height_at_world(pos)
         if ground != null:
                 e.ground_provider = Callable(ground, "height_at_world")
-                e.position = Vector3(pos.x, ground.height_at_world(pos), pos.y)
-        else:
-                e.position = Vector3(pos.x, 0.0, pos.y)
+        e.position = Vector3(pos.x, y0, pos.y)
+        if disembark != Vector2.INF:
+                e.disembark_target = disembark
         raiders_root.add_child(e)
         if group >= 0 and _groups.has(group):
                 PathService.set_goal_for(_groups[group]["channel"], raid)
@@ -319,9 +352,10 @@ func spawn_enemy(kind: String, at: Vector2, group: int = -1) -> EnemyBase:
 
 ## سلول ساحلیِ واقعی: قابل‌عبور با همسایه‌ی «آب» (نه صخره/خانه!).
 ## خروجی: {"landing": مرکز سلول ساحلی, "water": مرکز سلول آبِ همسایه}
-## دورترین به پست‌ها یا نزدیک‌ترین به hint
-## گام ۶R2 — در حالت خودکار، ساحلِ «رو به دوربین» ترجیح دارد تا قایق از
-## افقِ پیدای صفحه وارد شود (بازخورد کاربر: «از گوشه صفحه وارد بشوند»)
+## گام ۶R3 — «باید از جهت ها مختلف جزیره بیایند»: انتخاب با «تنوع زاویه‌ای» —
+## هر فرود باید ≥ SHORE_DIVERSITY_MIN_DEG از زاویه‌ی ۳ فرودِ آخر فاصله داشته
+## باشد؛ در میان واجدها، دورتر از پست‌ها ترجیح دارد. بایاسِ «رو به دوربین»
+## حذف شد (ریشه‌ی «همه از یک طرف می‌آیند» همین بود).
 func _pick_shore(hint: Vector2 = Vector2.INF) -> Dictionary:
         var nav := PathService.nav
         var center := nav.origin + nav.size_world() * 0.5
@@ -338,8 +372,8 @@ func _pick_shore(hint: Vector2 = Vector2.INF) -> Dictionary:
                 # جزیره‌ی بدون ساحل آب (عملاً غیرممکن) — رفتار قدیمی به‌عنوان پشتیبان
                 var mid := Vector2i(nav.width / 2, nav.height / 2)
                 return {"landing": nav.cell_center(mid), "water": nav.cell_center(mid)}
-        var best: Array = shores[0]
         if hint != Vector2.INF:
+                var best: Array = shores[0]
                 var best_d := 1e9
                 for s in shores:
                         var d: float = nav.cell_center(s[0]).distance_to(hint)
@@ -348,35 +382,55 @@ func _pick_shore(hint: Vector2 = Vector2.INF) -> Dictionary:
                                 best = s
                 return {"landing": nav.cell_center(best[0]),
                                 "water": nav.cell_center(best[1])}
-        # کاندیداهای دورتر از همه‌ی پست‌ها → ۶ تای برتر → انتخاب rng
+        # امتیاز هر ساحل: (دوربودن از پست‌ها، تنوع زاویه‌ای با موج‌های اخیر)
         var scored: Array = []
         for s in shores:
                 var cc := nav.cell_center(s[0])
                 var min_d := 1e9
                 for p in posts:
                         min_d = minf(min_d, cc.distance_to(p))
-                scored.append([min_d, s])
-        scored.sort_custom(func(a, b): return a[0] > b[0])
-        var top := scored.slice(0, mini(6, scored.size()))
-        var pick: Array = top[_rng.randi_range(0, top.size() - 1)][1]
-        # گام ۶R2 — بین ۶ کاندیدای برتر، ساحل‌هایی که «رو به دوربین»اند
-        # (جهت دریای پشت جزیره از دید دوربین) اولویت دارند
-        if cam_xz_provider.is_valid():
-                var cam_xz: Vector2 = cam_xz_provider.call()
-                var view_dir := center - cam_xz
-                if view_dir.length() > 1.0:
-                        view_dir = view_dir.normalized()
-                        var visible: Array = []
-                        for t in top:
-                                var s: Array = t[1]
-                                var oc := (nav.cell_center(s[1]) - center).normalized()
-                                if oc.dot(view_dir) > 0.3:
-                                        visible.append(t)
-                        if not visible.is_empty():
-                                pick = visible[_rng.randi_range(0,
-                                                visible.size() - 1)][1]
-        return {"landing": nav.cell_center(pick[0]),
-                        "water": nav.cell_center(pick[1])}
+                var ang := _shore_angle_deg(center, nav.cell_center(s[1]))
+                var div := 180.0
+                for ra in _recent_angles:
+                        div = minf(div, absf(wrapf(ang - ra, -180.0, 180.0)))
+                scored.append({"far": min_d, "div": div, "s": s})
+        # اول واجدهای تنوع ≥ حداقل؛ اگر هیچ، بیشترین تنوع
+        var eligible: Array = []
+        for sc in scored:
+                if sc["div"] >= GameConstants.SHORE_DIVERSITY_MIN_DEG:
+                        eligible.append(sc)
+        if eligible.is_empty():
+                scored.sort_custom(func(a, b): return a["div"] > b["div"])
+                var div_top: float = scored[0]["div"]
+                for sc in scored:
+                        if sc["div"] >= div_top - 1.0:
+                                eligible.append(sc)
+        # در میان واجدها: دورتر از پست‌ها → ۵ تای برتر → انتخاب rng
+        eligible.sort_custom(func(a, b): return a["far"] > b["far"])
+        var top := eligible.slice(0, mini(5, eligible.size()))
+        var pick: Dictionary = top[_rng.randi_range(0, top.size() - 1)]
+        return {"landing": nav.cell_center(pick["s"][0]),
+                        "water": nav.cell_center(pick["s"][1])}
+
+
+## زاویه‌ی ساحل نسبت به مرکز جزیره (درجه، −۱۸۰..۱۸۰)
+func _shore_angle_deg(center: Vector2, at: Vector2) -> float:
+        var d := at - center
+        if d.length() < 0.001:
+                return 0.0
+        return rad_to_deg(atan2(d.y, d.x))
+
+
+## ثبت جهت فرود موج (حافظه‌ی ۳ موجِ آخر — SHORE_RECENT_MAX)
+func _remember_shore_angle(center: Vector2, water_xz: Vector2) -> void:
+        _recent_angles.append(_shore_angle_deg(center, water_xz))
+        while _recent_angles.size() > GameConstants.SHORE_RECENT_MAX:
+                _recent_angles.pop_front()
+
+
+## برای تست: زاویه‌های فرود اخیر
+func recent_shore_angles() -> Array[float]:
+        return _recent_angles.duplicate()
 
 
 ## همسایه‌ی آبِ واقعی سلول (با نام ماژول آب — نه هر غیرقابل‌عبوری)
@@ -544,6 +598,28 @@ func group_boats(gid: int) -> Array:
         if not _groups.has(gid):
                 return []
         return _live_fleet(_groups[gid])
+
+
+## گام ۶R3 — بارِ هر قایقِ زنده‌ی گروه: [{"boat", "payload", "landed"}]
+## برای تستِ «هر قایق یک نوع سرباز»
+func fleet_entries(gid: int) -> Array:
+        if not _groups.has(gid):
+                return []
+        return _groups[gid]["fleet"]
+
+
+## گام ۶R3 — بارِ پیاده‌شده‌ی گروه (مجموع payload قایق‌های پهلوگرفته) —
+## برخلاف raiders_alive با مرگِ مهاجمان کم نمی‌شود؛ برای تستِ «همه پیاده شدند»
+func group_landed_cargo(gid: int) -> int:
+        if not _groups.has(gid):
+                return 0
+        var n := 0
+        for e in _groups[gid]["fleet"]:
+                if e["landed"]:
+                        var pl: Dictionary = e["payload"]
+                        for k in pl:
+                                n += int(pl[k])
+        return n
 
 
 ## وضعیت قایق گروه (قایق اول ناوگان): 0=در حال شنا 1=لنگر -1=بدون قایق

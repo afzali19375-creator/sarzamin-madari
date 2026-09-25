@@ -102,7 +102,10 @@ func _combat_tick(delta: float) -> void:
         _face_toward(up, delta)
         _bob_visual(false)
         if _atk_cd <= 0.0 and d <= GameConstants.PELTAST_RANGE and _los_clear(up):
-                _atk_cd = attack_cooldown
+                # گام ۶R3 — آهنگ پرتاب هم ±۱۵٪ پراکنده می‌شود (ضربه‌های ماشینی نه)
+                _atk_cd = attack_cooldown \
+                                * (1.0 + randf_range(-GameConstants.CADENCE_VARIANCE,
+                                GameConstants.CADENCE_VARIANCE))
                 javelins_thrown += 1
                 _throw_anim()
                 JavelinProjectile.fire(get_parent(),

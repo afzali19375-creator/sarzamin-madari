@@ -37,6 +37,14 @@ var raid_group := 0
 var raid_target := Vector2.ZERO
 var ground_provider: Callable = Callable()
 
+## گام ۶R3 — «وقتی قایق لبه‌ی ساحل می‌رسد از آن پیاده بشن»: مقصد پیاده‌شدن
+## (نزدیک همان قایق)؛ تا رسیدن به آن، واد می‌کند و بعد نبرد/مشعل عادی شروع می‌شود
+var disembark_target := Vector2.INF
+## آخرین مقصد پیاده‌شدنِ محقق‌شده — برای تست «پیاده‌شدن کنار همان قایق» (۶R3)
+var last_disembark_target := Vector2.INF
+var _wading := false                      # در حال پیاده‌شدن از قایق (کف آب)
+var _wade_t := 0.0                        # مدت پیاده‌شدن — مهلت ایمنی ۴s (۶R3)
+
 var dead := false
 var engaged_unit: Node3D = null     # سربازِ درگیر (برای تست/کارگردان)
 ## بنای هدف برای مشعل — کارگردان ست می‌کند (گام ۶R)
@@ -50,6 +58,7 @@ var _chase_t := 0.0
 var _channel := 4
 var _scan_accum := 0.0
 var _atk_cd := 0.0
+var _striking := false                    # در چرخه‌ی ضربه (آماده‌گیری→یورش→بازگشت)
 var _heading := 0.0
 var _bob_t := 0.0
 var _y_smooth := 0.0
@@ -135,6 +144,10 @@ func _process(delta: float) -> void:
                 return
         engaged_unit = null
 
+        # ---- گام ۶R3: پیاده‌شدن از قایق (واد تا نقطه‌ی اختصاصی در ساحل) ----
+        if _disembark_tick(Vector2(global_position.x, global_position.z), delta):
+                return
+
         # ---- لایه ۱/۴: نزدیک‌شدن به خانه و پرتاب مشعل از فاصله (گام ۶R) ----
         ## بازخورد کاربر: «نیازی نیست خانه را اشغال کنند؛ فقط آتش بزنند» —
         ## همه‌ی مهاجمان تا فاصله‌ی ایست جلو می‌روند و از آن‌جا مشعل می‌زنند.
@@ -143,9 +156,13 @@ func _process(delta: float) -> void:
         _march_tick(delta)
 
 
-# ---------------- نبرد (لایه ۳) ----------------
+# ---------------- نبرد (لایه ۳) — گام ۶R3: چرخه‌ی ضربه‌ی کامل ----------------
 
 ## نبرد تن‌به‌تن پایه — Peltast override می‌کند (پرتاب + عقب‌نشینی)
+## گام ۶R3 (بازخورد: «نبرد بین جنگجوها اصلا جالب نیست و خیلی ابتداییه»):
+##   * ضربه = آماده‌گیری (کشش به عقب) → یورش → لحظه‌ی ضربه → بازگشت
+##   * آهنگ ضربه ±۱۵٪ پراکنده → ضربه‌ها هم‌زمان و ماشینی نمی‌شوند
+##   * در حین چرخه‌ی ضربه ایست می‌شود (بدون لغزش عجیب)
 func _combat_tick(delta: float) -> void:
         var up := Vector2(engaged_unit.global_position.x, engaged_unit.global_position.z)
         var pos := Vector2(global_position.x, global_position.z)
@@ -155,15 +172,70 @@ func _combat_tick(delta: float) -> void:
                 return
         _face_toward(up, delta)
         _bob_visual(false)
+        if _striking:
+                return
         if _atk_cd <= 0.0:
-                _atk_cd = attack_cooldown
-                _strike_anim()
-                if engaged_unit.has_method("take_hit"):
-                        var dir3 := engaged_unit.global_position - global_position
-                        dir3.y = 0.0
-                        engaged_unit.take_hit(attack_dmg,
-                                        dir3.normalized() if dir3.length() > 0.001
-                                        else Vector3.ZERO)
+                _perform_strike(engaged_unit)
+
+
+## چرخه‌ی ضربه: کشش → یورش → ضربه در اوج → بازگشت
+func _perform_strike(target: Node3D) -> void:
+        _striking = true
+        _atk_cd = attack_cooldown \
+                        * (1.0 + randf_range(-GameConstants.CADENCE_VARIANCE,
+                        GameConstants.CADENCE_VARIANCE))
+        var tw := create_tween()
+        tw.tween_property(_body, "position:z", -0.1,
+                        GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
+        tw.tween_property(_body, "position:z", 0.17,
+                        GameConstants.STRIKE_LUNGE).set_ease(Tween.EASE_IN)
+        # weakref — هدفِ آزادشده bind را نمی‌شکند و _striking گیر نمی‌کند
+        var wr: WeakRef = weakref(target)
+        tw.tween_callback(_strike_impact.bind(wr))
+        tw.tween_property(_body, "position:z", 0.0, GameConstants.STRIKE_RECOVER)
+        tw.tween_callback(func() -> void: _striking = false)
+
+
+## لحظه‌ی ضربه — هدف در اوجِ یورش اعتبارسنجی می‌شود (فراری تا بردِ کشیده می‌خورد)
+func _strike_impact(wr: WeakRef) -> void:
+        var target: Node3D = null
+        if wr != null:
+                target = wr.get_ref() as Node3D
+        if target == null or not is_instance_valid(target):
+                return
+        if _unit_dead(target):
+                return
+        var d := Vector2(global_position.x, global_position.z).distance_to(
+                        Vector2(target.global_position.x, target.global_position.z))
+        if d > engage_range + 0.6:
+                return
+        if not target.has_method("take_hit"):
+                return
+        var dir3 := target.global_position - global_position
+        dir3.y = 0.0
+        target.take_hit(attack_dmg,
+                        dir3.normalized() if dir3.length() > 0.001 else Vector3.ZERO,
+                        self)
+
+
+## گام ۶R3 — پیاده‌شدن از قایق: واد تا نقطه‌ی اختصاصی؛ true = مشغول
+func _disembark_tick(pos: Vector2, delta: float) -> bool:
+        if disembark_target == Vector2.INF:
+                _wading = false
+                return false
+        _wade_t += delta
+        var d := pos.distance_to(disembark_target)
+        if d <= 0.35 or _wade_t > 4.0:
+                # مهلت ایمنی: مهاجم هرگز در حلقه‌ی پیاده‌شدن گیر نمی‌کند
+                last_disembark_target = disembark_target
+                disembark_target = Vector2.INF
+                _wading = false
+                return false
+        _wading = true
+        var dir := (disembark_target - pos).normalized()
+        if dir != Vector2.ZERO:
+                _move_with(dir, delta, move_speed)
+        return true
 
 
 func _rescan_units() -> void:
@@ -259,7 +331,23 @@ func _move_with(dir: Vector2, delta: float, speed: float) -> void:
         var next := pos + dir * speed * delta
         var nav := PathService.nav
         if nav != null:
-                if not nav.is_walkable(nav.world_to_cell(next)):
+                var cur_ok := nav.is_walkable(nav.world_to_cell(pos))
+                if not cur_ok:
+                        # گام ۶R3 — فرار از سلول بسته (خانه/صخره/آب): به‌جای یخ‌زدن
+                        # ابدی، حرکتِ بی‌گارد به سمت مقصد امن:
+                        #   * وادکننده → سلولِ پیاده‌شدنِ «خودش» (پخش‌شده در ساحل —
+                        #     نه ازدحام همگی روی نزدیک‌ترین سلول)
+                        #   * بقیه → نزدیک‌ترین سلولِ قابل‌عبور
+                        var esc_point: Vector2
+                        if disembark_target != Vector2.INF:
+                                esc_point = disembark_target
+                        else:
+                                esc_point = nav.cell_center(
+                                                _nearest_walkable_cell_esc(pos))
+                        var to_esc := esc_point - pos
+                        if to_esc.length() > 0.05:
+                                next = pos + to_esc.normalized() * speed * delta
+                elif not nav.is_walkable(nav.world_to_cell(next)):
                         var slide1 := Vector2(next.x, pos.y)
                         var slide2 := Vector2(pos.x, next.y)
                         if nav.is_walkable(nav.world_to_cell(slide1)):
@@ -269,14 +357,42 @@ func _move_with(dir: Vector2, delta: float, speed: float) -> void:
                         else:
                                 next = pos
                 next = nav.clamp_to_grid(next)
-        pos = _separate(next)
+        # گام ۶R3 — وادکننده از جداسازی معاف است: فشارِ ۸ مهاجمِ هم‌زمان روی
+        # ساحل، پیاده‌شدن را چندمتری جابه‌جا می‌کرد؛ هم‌پوشانیِ موقتِ فرود طبیعی است
+        pos = next
+        if not _wading:
+                pos = _separate(next)
+                # جداسازی هیچ‌کس را به سلول بسته نمی‌اندازد (فشار ازدحام
+                # ساحل/پشت خانه نباید مهاجم را در صخره یا آبِ عمیق دفن کند)
+                if nav != null and not nav.is_walkable(nav.world_to_cell(pos)):
+                        pos = next
         var gy := 0.0
         if ground_provider.is_valid():
                 gy = ground_provider.call(pos)
+        # گام ۶R3 — هنگام پیاده‌شدن، کف آب (نه بستر دریا)
+        if _wading:
+                gy = maxf(gy, GameConstants.WADE_Y)
         _y_smooth = lerpf(_y_smooth, gy, clampf(10.0 * delta, 0.0, 1.0))
         global_position = Vector3(pos.x, _y_smooth, pos.y)
         _turn_to(atan2(dir.x, dir.y), delta)
         _bob_visual(true)
+
+
+## نزدیک‌ترین سلول قابل‌عبور (مارپیچ کوچک) — برای فرار از سلول بسته (گام ۶R3)
+func _nearest_walkable_cell_esc(from: Vector2) -> Vector2i:
+        var nav := PathService.nav
+        if nav == null:
+                return Vector2i.ZERO
+        var base := nav.world_to_cell(from)
+        if nav.is_walkable(base):
+                return base
+        for r in range(1, 8):
+                for dy in range(-r, r + 1):
+                        for dx in range(-r, r + 1):
+                                var c := base + Vector2i(dx, dy)
+                                if nav.is_walkable(c):
+                                        return c
+        return base
 
 
 func _separate(pos: Vector2) -> Vector2:
@@ -292,6 +408,12 @@ func _separate(pos: Vector2) -> Vector2:
                 var d := diff.length()
                 if d > 0.001 and d < SEPARATION_DIST:
                         out += (diff / d) * (SEPARATION_DIST - d) * 0.5
+        # گام ۶R3 — سقف نرم: جداسازی «هل دادن» است نه تله‌پورت؛ ۸ مهاجم روی
+        # یک نقطه نباید در یک فریم به چند متری پرت شوند
+        var corr := out - pos
+        if corr.length() > 0.14:
+                corr = corr.normalized() * 0.14
+                out = pos + corr
         return out
 
 
@@ -344,7 +466,8 @@ func is_alive() -> bool:
 
 ## ضربه (تیر/ضربه‌ی تن‌به‌تن) — گام ۶R2: اگر «attacker» شناخته باشد، مهاجم
 ## به شلیک‌کننده تلافی می‌کند (تعقیبِ کوتاه حتی بیرون شعاع توجه)
-func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO,
+## گام ۶R3: پس‌زنی کوتاه در جهت ضربه — حس جسمِ درگیری
+func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
                 attacker: Node3D = null) -> void:
         if dead:
                 return
@@ -353,6 +476,7 @@ func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO,
         _mat.albedo_color = Color(1, 1, 1, 1)
         _flash_t = 0.0
         _flashing = true
+        _knockback(from_dir)
         if attacker != null and is_instance_valid(attacker) \
                         and attacker.is_in_group("units") \
                         and not _unit_dead(attacker):
@@ -361,6 +485,20 @@ func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO,
                 _chase_t = GameConstants.ENEMY_CHASE_SECONDS
         if hp <= 0:
                 die()
+
+
+## پس‌زنی — فقط روی زمینِ قابل‌عبور (ضربه به داخل آب نمی‌برد)
+func _knockback(from_dir: Vector3) -> void:
+        if from_dir.length() < 0.01:
+                return
+        var k2 := Vector2(from_dir.x, from_dir.z).normalized() \
+                        * GameConstants.MELEE_KNOCKBACK
+        var np := Vector2(global_position.x, global_position.z) + k2
+        var nav := PathService.nav
+        if nav != null and not nav.is_walkable(nav.world_to_cell(np)):
+                return
+        global_position.x = np.x
+        global_position.z = np.y
 
 
 func die() -> void:

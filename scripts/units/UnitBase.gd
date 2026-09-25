@@ -60,6 +60,7 @@ var _combat_target: Node3D = null
 var _in_combat := false      # فلگ صریح — freed == null در Godot 4 گول نمی‌زند
 var _shoot_cooldown := 0.0
 var _strike_cd := 0.0
+var _striking := false       # گام ۶R3 — در چرخه‌ی ضربه (کشش→یورش→ضربه)
 
 ## ---------------- سلامت و مرگ (گام ۶ — قانون آهنین §۷: مرگ دائمی) ----------------
 ## صفر عدد و نوار سلامت روی صفحه (§۱۰) — فقط فلش سفیدِ ضربه و افتادن هنگام مرگ
@@ -225,21 +226,70 @@ func die() -> void:
         tw.chain().tween_callback(queue_free)
 
 
-## ضربه‌ی تن‌به‌تن — true = ضربه زده شد (خنک‌شدن تمام). جهتِ ضربه به هدف می‌رود
+## ضربه‌ی تن‌به‌تن — true = ضربه آغاز شد (خنک‌شدن تمام). جهتِ ضربه به هدف می‌رود
 ## گام ۶R2 — شلیک‌کننده هم پاس می‌شود تا دشمنِ تلافی‌گر بداند چه کسی زده
-func _try_strike(delta: float, cooldown: float, hostile: Node3D, dmg: int = 1) -> bool:
+## گام ۶R3 (بازخورد: «نبرد خیلی ابتداییه») — چرخه‌ی ضربه‌ی خوانا:
+##   کشش به عقب (STRIKE_WINDUP) → یورش (STRIKE_LUNGE) → لحظه‌ی ضربه → بازگشت
+##   + آهنگ ضربه ±۱۵٪ پراکنده تا ضربه‌ها هم‌زمان و ماشینی نشوند
+func _try_strike(delta: float, cooldown: float, hostile: Node3D, dmg: int = 1,
+                reach: float = -1.0) -> bool:
         _strike_cd = maxf(0.0, _strike_cd - delta)
-        if _strike_cd > 0.0:
+        if _strike_cd > 0.0 or _striking:
                 return false
         if not hostile.has_method("take_hit") or (hostile.has_method("is_dead") \
                         and hostile.is_dead()):
                 return false
-        _strike_cd = cooldown
+        _strike_cd = cooldown \
+                        * (1.0 + randf_range(-GameConstants.CADENCE_VARIANCE,
+                        GameConstants.CADENCE_VARIANCE))
+        var r := reach
+        if r < 0.0:
+                r = _dist_xz_to(hostile)
+        _striking = true
+        _strike_windup_fx()
+        # گام ۶R3 — weakref: اگر هدف تا لحظه‌ی ضربه آزاد شود، bind خطا نمی‌دهد
+        # و _striking گیر نمی‌کند (باگ فاز ۱۳: «Cannot convert argument 1»)
+        var wr: WeakRef = weakref(hostile)
+        var tw := create_tween()
+        tw.tween_interval(GameConstants.STRIKE_WINDUP + GameConstants.STRIKE_LUNGE)
+        tw.tween_callback(_strike_land.bind(wr, dmg, r))
+        return true
+
+
+## لحظه‌ی ضربه — هدف و برد در اوجِ یورش اعتبارسنجی می‌شوند
+func _strike_land(wr: WeakRef, dmg: int, reach: float) -> void:
+        _striking = false
+        var hostile: Node3D = null
+        if wr != null:
+                hostile = wr.get_ref() as Node3D
+        if hostile == null or not is_instance_valid(hostile):
+                return
+        if hostile.has_method("is_dead") and hostile.is_dead():
+                return
+        if _dist_xz_to(hostile) > reach + 0.8:
+                return
         var dir := hostile.global_position - global_position
         dir.y = 0.0
         hostile.take_hit(dmg,
                         dir.normalized() if dir.length() > 0.001 else Vector3.ZERO, self)
-        return true
+        _strike_impact_fx()
+
+
+## ژست کشش ضربه (پیش‌فرض: بدنه کمی عقب) — زیرکلاس می‌تواند override کند
+func _strike_windup_fx() -> void:
+        if _body == null:
+                return
+        var tw := create_tween()
+        tw.tween_property(_body, "position:z", -0.09,
+                        GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
+
+
+## ژست لحظه‌ی ضربه (پیش‌فرض: بازگشت بدنه) — جاویدان: _lunge، نیزه‌دار: _thrust
+func _strike_impact_fx() -> void:
+        if _body == null:
+                return
+        var tw := create_tween()
+        tw.tween_property(_body, "position:z", 0.0, GameConstants.STRIKE_RECOVER)
 
 
 ## گام ۶R2 — حرکت در حین نبرد به سمت هدف تا فاصله‌ی stop_at.
@@ -258,6 +308,9 @@ func _combat_move_toward(delta: float, hostile: Node3D, stop_at: float,
         var step := dir * speed * delta
         var next := _avoid_step(pos, step, dir, delta)
         next = _separate(next)
+        # گام ۶R3 — جداسازی نباید واحدِ تعقیب‌گر را به سلول بسته (خانه/صخره/آب)
+        # بیندازد؛ فشار ازدحامِ نبرد جلوی خانه این را واقعاً اتفاق می‌انداخت
+        next = _slide_walkable(pos, next)
         next = PathService.clamp_to_grid(next)
         var gy := 0.0
         if ground_provider.is_valid():
