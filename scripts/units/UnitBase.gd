@@ -44,6 +44,15 @@ var _arrived := false
 var _bob_t := 0.0
 var _heading := 0.0
 
+## گام ۶R4 — پادزهرِ گیرِ گوشهٔ مقعر: ساعتِ بی‌پیشرفتیِ خالص + پیروی از دیوار
+var _stuck_t := 0.0
+var _best_gd := 1e9       # بهترین فاصله تا هدف از آخرین ریست — لرزشِ خُرد، پیشرفت نیست
+var _near_latch := false  # وارد حبابِ هدایتِ مستقیم شده → تا رسیدن/دوریِ زیاد مستقیم
+var _wf_active := false   # پیروی از دیوار فعال (bug-style) — دورزدنِ متعهدِ برآمدگی
+var _wf_side := 1         # سمتِ دورزدن؛ در انتخابِ اول، هر دو سمت سنجیده می‌شوند
+var _wf_t := 0.0          # عمرِ دورزدنِ فعلی (s)
+var _wf_best_gd := 1e9    # بهترین فاصله در طولِ دورزدن — معیارِ خروج
+
 # ---------------- لایه ۲: Fidget ----------------
 var fidget_enabled := true
 var _fidget_timer := 0.0
@@ -185,14 +194,32 @@ func is_dead() -> bool:
 
 ## ضربه (تیر/نیزه/پرتاب) — فلش سفید کوتاه؛ مرگ فقط با رسیدن صفر
 ## گام ۶R2 — پارامتر «attacker» برای هم‌امایی با EnemyBase (تلافی دشمن)
-func take_hit(dmg: int = 1, _from_dir: Vector3 = Vector3.ZERO,
+## گام ۶R4 — لگدِ کوچکِ ضربه‌خوردگی (حسِ برخوردِ تن‌به‌تن)
+func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
                 _attacker: Node3D = null) -> void:
         if dead:
                 return
         hp -= dmg
         _flash_hit()
+        _knockback(from_dir)
         if hp <= 0:
                 die()
+
+
+## گام ۶R4 — پس‌زنی کوتاه در جهت ضربه؛ فقط اگر سلول بعدی قابل‌عبور باشد
+## (ضدِ پرتاب به آب/صخره — الگوی پس‌زنیِ EnemyBase در گام ۶R3)
+func _knockback(from_dir: Vector3) -> void:
+        if from_dir.length() < 0.01:
+                return
+        var nav := PathService.nav
+        if nav == null:
+                return
+        var np := Vector2(position.x, position.z) \
+                        + Vector2(from_dir.x, from_dir.z).normalized() \
+                        * GameConstants.MELEE_KNOCKBACK
+        if nav.is_walkable(nav.world_to_cell(np)):
+                position.x = np.x
+                position.z = np.y
 
 
 func _flash_hit() -> void:
@@ -273,14 +300,48 @@ func _strike_land(wr: WeakRef, dmg: int, reach: float) -> void:
         hostile.take_hit(dmg,
                         dir.normalized() if dir.length() > 0.001 else Vector3.ZERO, self)
         _strike_impact_fx()
+        # گام ۶R4 — جرقه‌ی برخورد در نقطه‌ی میانی (حسِ ضربه خواناتر می‌شود)
+        _spawn_hit_spark((hostile.global_position + global_position) * 0.5 \
+                        + Vector3(0.0, 0.5, 0.0))
 
 
-## ژست کشش ضربه (پیش‌فرض: بدنه کمی عقب) — زیرکلاس می‌تواند override کند
+## گام ۶R4 — جرقه‌ی کوتاهِ لحظه‌ی ضربه (هسته‌ی درخشان، بزرگ‌شونده-محو)
+func _spawn_hit_spark(at: Vector3) -> void:
+        var parent := get_parent()
+        if parent == null or not is_inside_tree():
+                return
+        var m := MeshInstance3D.new()
+        var sm := SphereMesh.new()
+        sm.radius = 0.09
+        sm.height = 0.18
+        m.mesh = sm
+        var mat := StandardMaterial3D.new()
+        mat.albedo_color = Color(1.0, 0.92, 0.6, 0.95)
+        mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+        mat.emission_enabled = true
+        mat.emission = Color(1.0, 0.78, 0.32)
+        mat.emission_energy_multiplier = 2.0
+        mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+        m.material_override = mat
+        parent.add_child(m)
+        m.global_position = at
+        var tw := m.create_tween()
+        tw.set_parallel(true)
+        tw.tween_property(m, "scale", Vector3(2.2, 2.2, 2.2), 0.14) \
+                        .set_ease(Tween.EASE_OUT)
+        tw.tween_property(mat, "albedo_color:a", 0.0, 0.14)
+        tw.chain().tween_callback(m.queue_free)
+
+
+## ژست کشش ضربه (پیش‌فرض: بدنه کمی عقب + چرخش کوتاه پهلو) — زیرکلاس می‌تواند override کند
 func _strike_windup_fx() -> void:
         if _body == null:
                 return
         var tw := create_tween()
+        tw.set_parallel(true)
         tw.tween_property(_body, "position:z", -0.09,
+                        GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
+        tw.tween_property(_body, "rotation:y", -0.22,
                         GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
 
 
@@ -289,7 +350,9 @@ func _strike_impact_fx() -> void:
         if _body == null:
                 return
         var tw := create_tween()
+        tw.set_parallel(true)
         tw.tween_property(_body, "position:z", 0.0, GameConstants.STRIKE_RECOVER)
+        tw.tween_property(_body, "rotation:y", 0.0, GameConstants.STRIKE_RECOVER)
 
 
 ## گام ۶R2 — حرکت در حین نبرد به سمت هدف تا فاصله‌ی stop_at.
@@ -352,6 +415,12 @@ func set_slot(world_xz: Vector2) -> void:
         # فرمان تازه: وول‌خوردنِ در جریان باطل — وگرنه فیدجتِ باقی‌مانده با اسلاتِ
         # کهنه ادامه می‌یافت و واحد به موقعیت قدیم «تله‌پورت» می‌شد
         _fidget_state = 0
+        # گام ۶R4 — ساعتِ بی‌پیشرفتی و دورزدن هم برای مقصدِ نو صفر می‌شوند
+        _stuck_t = 0.0
+        _best_gd = 1e9
+        _near_latch = false
+        _wf_active = false
+        _wf_t = 0.0
         if _arrived:
                 _arrived = false
                 _set_color(_spawn_color)
@@ -434,10 +503,53 @@ func _process(delta: float) -> void:
                 _set_color(GameConstants.COL_ARRIVED)  # سرخ روشن = رسیده به هدف
                 return
 
-        # نزدیک اسلات/هدف، جریان صفر می‌شود → هدایت مستقیم (رفع باگ «یخ زدن»)
+        # گام ۶R4 — حرکتِ دوحالته با «چسبندگی»: داخلِ حبابِ هدایتِ مستقیم، اسلات
+        # مرجع است و میدان کاری‌اش ندارد (هدفِ میدان «پستِ» دسته است نه اسلاتِ
+        # واحد؛ میدان هرگز نمی‌تواند واحد را «دورِ» برآمدگیِ جلوی اسلات ببرد چون
+        # گرادیانش فقط به‌سمتِ پست است). مرزِ حباب با هیسترزیسِ ۱ متری —
+        # پینگ‌پنگِ مرز (میرفت بیرون، میدان برمی‌گرداند، دوباره مستقیم...) بود.
         var steer_r := SLOT_STEER_RADIUS if _has_slot else DIRECT_STEER_RADIUS
-        var dir := to_goal.normalized() if to_goal.length() < steer_r \
-                        else PathService.sample_direction(pos, squad_id)
+        var gd := to_goal.length()
+        if gd < steer_r:
+                _near_latch = true
+        elif gd > steer_r + 1.0:
+                _near_latch = false
+                _wf_active = false
+        # ساعتِ «بی‌پیشرفتیِ خالص»: سنجش نسبت به بهترینِ فاصله — لرزشِ خُردِ
+        # جلو-عقبِ سرِ گوشه (±۰٫۰۲m) پیشرفت حساب نمی‌شود و ساعت می‌خواند.
+        if gd < _best_gd - 0.01:
+                _best_gd = gd
+                _stuck_t = 0.0
+        else:
+                _stuck_t += delta
+        # پیروی از دیوار (الگوی bug): هدایتِ مستقیم و میدان در گوشه‌ی مقعر
+        # (L-shape) هر دو پین می‌شوند — ~۶۶° در یک سمتِ «متعهد» می‌چرخیم و
+        # دورِ برآمدگی می‌رویم؛ چون فاصله ۰٫۳m از ابتدای دورزدن کمتر شد
+        # (یا مهلت/دوریِ زیاد) → خروج به حالت عادی؛ اشتباهِ سمت با معکوس‌کردن.
+        if _wf_active:
+                _wf_t += delta
+                _wf_best_gd = minf(_wf_best_gd, gd)
+                if gd <= _wf_best_gd - 0.3:
+                        _wf_active = false
+                        _best_gd = gd
+                        _stuck_t = 0.0
+                elif _wf_t > 7.0 or gd > _wf_best_gd + 5.0:
+                        _wf_active = false
+                        _wf_side = -_wf_side
+                        _best_gd = gd
+                        _stuck_t = 0.0
+        elif _stuck_t > 1.2:
+                _wf_active = true
+                _wf_t = 0.0
+                _wf_best_gd = gd
+                _stuck_t = 0.0
+                _wf_pick_side(to_goal)
+
+        # نزدیک اسلات/هدف، جریان صفر می‌شود → هدایت مستقیم (رفع باگ «یخ زدن»)
+        var flow_d := PathService.sample_direction(pos, squad_id)
+        var dir := to_goal.normalized() if _near_latch else flow_d
+        if _wf_active:
+                dir = to_goal.normalized().rotated(float(_wf_side) * 1.15)
         if dir == Vector2.ZERO:
                 # گام ۶R — میدان روی «سلول هدفِ تغییرمسیر» (خانه/مانعِ وسط مسیر)
                 # صفر است؛ ایستِ مطلق اینجا یخ‌زدگی دائمی می‌سازد (باگ گاریسون).
@@ -457,6 +569,10 @@ func _process(delta: float) -> void:
         # مانع پیچ بخورد — رفع یخ‌زدگیِ «اسلات پشت خانه».
         pos = _avoid_step(pos, _vel * delta, dir, delta)
         pos = _separate(pos)
+        # گام ۶R4 — فشار جداسازی (۱۹ سرباز خودی + ازدحام نبرد ساحل) هیچ‌کس را
+        # به سلول بسته (آب/صخره/خانه) نمی‌فرستد — الگوی گاردِ EnemyBase ۶R3.
+        # ریشه‌ی «واحدی انتهای فاز در آب بود» همین جداسازیِ بی‌گارد بود.
+        pos = _slide_walkable(Vector2(global_position.x, global_position.z), pos)
         pos = PathService.clamp_to_grid(pos)
         # ایستادن روی زمین هموار (اگر provider وصل باشد) — هموارشده تا نپَرد
         var gy := 0.0
@@ -673,6 +789,23 @@ func _separate(pos: Vector2) -> Vector2:
                 if d > 0.001 and d < SEPARATION_DIST:
                         pos += (diff / d) * (SEPARATION_DIST - d) * 0.5
         return pos
+
+
+## گام ۶R4 — انتخابِ سمتِ دورزدن: سمتی که قدمِ اولش بازتر است (۶۶° چرخیده)؛
+## اگر هر دو سمت یکسان بود، سمت عوض می‌شود تا از تکرارِ مسیرِ شکست‌خورده بگریزد.
+func _wf_pick_side(to_goal: Vector2) -> void:
+        var tg := to_goal.normalized()
+        var here := Vector2(global_position.x, global_position.z)
+        var s_pos := _slide_walkable(here, here + tg.rotated(1.15) * 0.6)
+        var s_neg := _slide_walkable(here, here + tg.rotated(-1.15) * 0.6)
+        var d_pos := s_pos.distance_to(here)
+        var d_neg := s_neg.distance_to(here)
+        if d_pos > d_neg + 0.01:
+                _wf_side = 1
+        elif d_neg > d_pos + 0.01:
+                _wf_side = -1
+        else:
+                _wf_side = -_wf_side
 
 
 ## گام ۶R — گارد لغزش: قدم بعدی روی سلول بلاک (خانه/آب/صخره) نمی‌افتد.

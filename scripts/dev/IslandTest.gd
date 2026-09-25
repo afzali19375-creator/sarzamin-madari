@@ -3,7 +3,8 @@ extends Node3D
 ##
 ## گام ۵ روی بازخوردهای گام ۴ می‌سازد (زمین صاف + هاله‌ی سفید + ایستادن روی سلول):
 ##   * سه دسته از سه کلاس واحد — دسته ۱: جاویدان ×۴ | دسته ۲: نیزه‌دار ×۴ | دسته ۳: کماندار ×۳
-##   * انتخاب: کلیک چپ روی هر سرباز → دسته‌ی «او» انتخاب می‌شود؛ یا کلیدهای 1..3
+##   * انتخاب: کلیک چپ روی هر سرباز → دسته‌ی «او» انتخاب می‌شود؛ یا کلیدهای 1..5
+##     (گام ۶R4: «تعداد دسته‌های خودی خیلی کم هست» → ۳ دسته به ۵ دسته رسید)
 ##   * فرمان per-squad: هر دسته هدف و میدان جریانِ خودش را دارد (کانال = squad_id)
 ##   * لایه ۳ روی صحنه: کوله‌ی تمرین (T) → جاویدان سپر می‌گیرد، نیزه‌دار فقط در ایست
 ##     آماده‌باش می‌شود، کماندار تیر می‌اندازد (بدون آسیب دوستانه، مسیر باز)
@@ -30,10 +31,14 @@ const SELECT_PICK_WORLD := 1.15
 const WP_REACH_FRACTION := 0.8   # ≥۸۰٪ دسته رسیده → waypoint بعدی
 const SLOT_MAX_RING := 3
 ## تعریف دسته‌ها — رنگ از پالت UNIT_PALETTE (طلایی برای UI نگه داشته شده)
+## گام ۶R4 — «تعداد دسته‌های سرباز های خودی خیلی کم هست. باید بیشتر بشه»:
+## ۳ دسته (۱۱ سرباز) → ۵ دسته (۱۹ سرباز): گارد جاویدان دوم + نیزه‌دار دوم
 const SQUAD_DEFS := [
         {"fa": "جاویدان", "en": "Immortal", "script": "res://scripts/units/ImmortalUnit.gd", "count": 4, "color": 0},
         {"fa": "نیزه‌دار", "en": "Spearman", "script": "res://scripts/units/SpearmanUnit.gd", "count": 4, "color": 1},
         {"fa": "کماندار", "en": "Archer", "script": "res://scripts/units/ArcherUnit.gd", "count": 3, "color": 3},
+        {"fa": "گارد جاویدان", "en": "Immortal Guard", "script": "res://scripts/units/ImmortalUnit.gd", "count": 4, "color": 2},
+        {"fa": "نیزه‌دار ارغوانی", "en": "Purple Spearman", "script": "res://scripts/units/SpearmanUnit.gd", "count": 4, "color": 4},
 ]
 
 var mode := Mode.IDLE
@@ -254,7 +259,7 @@ func _pick_cluster_cells() -> Array[Vector2]:
                         best_d = d
                         first = p
         var picked: Array[Vector2] = [first]
-        while picked.size() < mini(SQUAD_DEFS.size(), 3):
+        while picked.size() < SQUAD_DEFS.size():
                 var far := first
                 var far_score := -1.0
                 for p in pts:
@@ -756,8 +761,8 @@ func _input(event: InputEvent) -> void:
                                         _regenerate(randi(), true)
                                 KEY_G:
                                         _regenerate(_island_seed, true)
-                                KEY_1, KEY_2, KEY_3, KEY_4:
-                                        # §۲.۱ — میان‌بر انتخاب دسته 1..4 (الگوی Bad North)
+                                KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
+                                        # §۲.۱ — میان‌بر انتخاب دسته 1..5 — گام ۶R4: ۵ دسته
                                         var idx := int(event.physical_keycode) - int(KEY_1)
                                         if idx == selected:
                                                 _deselect()  # کلید تکراری = لغو
@@ -798,7 +803,7 @@ func _on_left_tap(screen: Vector2, shift: bool) -> void:
         var hit := ground.ray_pick(cam, screen)
         if mode != Mode.COMMAND:
                 _last_input_msg = "tap: no squad selected"
-                _toast_msg("اول یک دسته را انتخاب کن (کلید ۱-۳ یا کلیک روی سرباز)\nFirst select a squad (keys 1-3 or click a soldier)")
+                _toast_msg("اول یک دسته را انتخاب کن (کلید ۱-۵ یا کلیک روی سرباز)\nFirst select a squad (keys 1-5 or click a soldier)")
                 return
         if hit.is_empty() or not bool(hit["in_island"]):
                 _deselect()
@@ -828,7 +833,7 @@ func _on_right_click(event: InputEventMouseButton) -> void:
                         _select_squad(_squad_index_of(u))
                 else:
                         _last_input_msg = "right-click: no squad selected"
-                        _toast_msg("اول یک دسته را انتخاب کن (کلید ۱-۳ یا کلیک روی سرباز)\nFirst select a squad (keys 1-3 or click a soldier)")
+                        _toast_msg("اول یک دسته را انتخاب کن (کلید ۱-۵ یا کلیک روی سرباز)\nFirst select a squad (keys 1-5 or click a soldier)")
                 return
         var cam := get_viewport().get_camera_3d()
         var hit := ground.ray_pick(cam, event.position)

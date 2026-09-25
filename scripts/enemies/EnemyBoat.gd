@@ -40,6 +40,8 @@ var _heading := 0.0
 var _speed_now := GameConstants.BOAT_CRUISE_SPEED
 var _deck_top := 0.3
 var _rider_nodes: Array[Node3D] = []      # سربازهای روی عرشه — برای شمارش تست
+var _stuck_t := 0.0                       # گام ۶R4 — ساعتیِ «بی‌پیشرفتی» پهلوگیری
+var _last_dist := 1e9
 
 # ابعاد بدنه بر اساس نوع — طول در راستای +Z (جلو = +Z)
 var _hull_sz := Vector3(0.95, 0.42, 2.2)
@@ -271,6 +273,25 @@ func _process(delta: float) -> void:
                         _speed_now = lerpf(_speed_now, want, clampf(1.5 * delta, 0.0, 1.0))
                         _sail_toward(anchor_point, delta)
                         _separate_from_boats(delta)
+                        # گام ۶R4 — ضد قفل‌شدن پهلوگیری: دو موجِ هم‌ساحل (انتخاب
+                        # ساحل رندوم) ممکن است قایقی را که به لنگر خودش می‌رسد
+                        # با جداسازی بیرون برانند و هرگز به REACH_EPS نرسد.
+                        # اگر نزدیک لنگر است و ۳ ثانیه پیشرفتی نکرد → همان‌جا
+                        # لنگر می‌اندازد تا پیاده‌شدن قفل نشود.
+                        if dist <= GameConstants.BOAT_DOCK_ZONE * 2.2:
+                                if absf(dist - _last_dist) < 0.06:
+                                        _stuck_t += delta
+                                else:
+                                        _stuck_t = 0.0
+                                _last_dist = dist
+                                if _stuck_t > 3.0 \
+                                                and dist <= GameConstants.BOAT_SEP_PARKED + 0.7:
+                                        state = BoatState.ANCHORED
+                                        landed.emit(self)
+                                        return
+                        else:
+                                _stuck_t = 0.0
+                                _last_dist = dist
                         if dist <= REACH_EPS:
                                 state = BoatState.ANCHORED
                                 landed.emit(self)

@@ -95,6 +95,7 @@ func _lunge() -> void:
         tw.tween_property(_body, "position:z", 0.0, 0.14)
 
 
-## گام ۶R3 — ژست ضربه در اوجِ یورش
+## گام ۶R3 — ژست ضربه در اوجِ یورش + گام ۶R4 — بازگشت چرخشِ کششِ ضربه
 func _strike_impact_fx() -> void:
         _lunge()
+        _body.rotation.y = 0.0

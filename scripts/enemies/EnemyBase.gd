@@ -138,15 +138,21 @@ func _process(delta: float) -> void:
                 _scan_accum = 0.0
                 _rescan_units()
 
+        # ---- گام ۶R3: پیاده‌شدن از قایق (واد تا نقطه‌ی اختصاصی در ساحل) ----
+        # گام ۶R4 — «اول پیاده، بعد نبرد»: با لنگرِ رندومِ ساحلی (۶R4)، موجی
+        # می‌تواند کنار پستِ خودی فرود بیاید؛ مهاجمِ در حال واد که لایه‌ی نبرد
+        # جلویش را می‌گرفت هرگز disembark_target را تمام نمی‌کرد (در آب گیر
+        # می‌کرد و نبردِ دوطرفه هم شکل نمی‌گرفت). واد تا سلولِ خودش یا مهلت
+        # ۴ ثانیه‌ای همیشه اول تمام می‌شود؛ درگیری بلافاصله بعدش از سر گرفته
+        # می‌شود (engaged_unit پاک نمی‌شود).
+        if _disembark_tick(Vector2(global_position.x, global_position.z), delta):
+                return
+
         # ---- لایه ۳: درگیری با سرباز ----
         if is_instance_valid(engaged_unit) and not _unit_dead(engaged_unit):
                 _combat_tick(delta)
                 return
         engaged_unit = null
-
-        # ---- گام ۶R3: پیاده‌شدن از قایق (واد تا نقطه‌ی اختصاصی در ساحل) ----
-        if _disembark_tick(Vector2(global_position.x, global_position.z), delta):
-                return
 
         # ---- لایه ۱/۴: نزدیک‌شدن به خانه و پرتاب مشعل از فاصله (گام ۶R) ----
         ## بازخورد کاربر: «نیازی نیست خانه را اشغال کنند؛ فقط آتش بزنند» —

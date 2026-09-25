@@ -11,7 +11,7 @@ extends Node
 ##   ۶) ایستادن واقعی روی سلول: اسلات‌ها + مرکز جرم + زمین هموار
 ##   ۷) Shift+کلیک → Waypoint در صف؛ فرمان ساده → صف پاک
 ##   ۸) بازتولید R → همه‌چیز از نو و سازگار
-##   ۹) کلیدهای 1..4: انتخاب دسته‌ها + حلقه‌ی سفید فقط روی دسته‌ی انتخابی + toggle
+##   ۹) کلیدهای 1..5: انتخاب دسته‌ها + حلقه‌ی سفید فقط روی دسته‌ی انتخابی + toggle
 ##  ۱۰) جداسازی کانال‌ها: فرمان به دسته ۱ → دسته‌های ۰/۲ منجمد؛ نیزه‌دار در حرکت آماده‌باش نمی‌شود
 ##  ۱۱) لایه ۳ روی کوله‌ی تمرین: جاویدان سپر، کماندار تیر (بدون آسیب دوستانه)،
 ##      نیزه‌دار فقط در ایست آماده‌باش؛ پاک‌کردن کوله = پایان نبرد
@@ -298,14 +298,16 @@ func _phase0_island_ready() -> void:
         _check("command_cells_enough", target_scene.cmd_grid.cell_count >= 20,
                         "%d cells" % target_scene.cmd_grid.cell_count)
 
-        # --- گام ۵: سه دسته، ترکیب و کلاس‌ها ---
-        _check("squad_count_3", target_scene.squads.size() == 3,
+        # --- گام ۵: دسته‌ها، ترکیب و کلاس‌ها (گام ۶R4: ۳→۵ دسته) ---
+        _check("squad_count_5", target_scene.squads.size() == 5,
                         "%d" % target_scene.squads.size())
-        _check("unit_count_is_11", _units().size() == 11, "n=%d" % _units().size())
-        var comp := "%d/%d/%d" % [target_scene.squads[0].size(), target_scene.squads[1].size(),
-                        target_scene.squads[2].size()]
-        _check("squad_composition_4_4_3", target_scene.squads[0].size() == 4
-                        and target_scene.squads[1].size() == 4 and target_scene.squads[2].size() == 3,
+        _check("unit_count_is_19", _units().size() == 19, "n=%d" % _units().size())
+        var comp := "%d/%d/%d/%d/%d" % [target_scene.squads[0].size(),
+                        target_scene.squads[1].size(), target_scene.squads[2].size(),
+                        target_scene.squads[3].size(), target_scene.squads[4].size()]
+        _check("squad_composition_4_4_3_4_4", target_scene.squads[0].size() == 4
+                        and target_scene.squads[1].size() == 4 and target_scene.squads[2].size() == 3
+                        and target_scene.squads[3].size() == 4 and target_scene.squads[4].size() == 4,
                         comp)
         var class_ok := true
         for u in target_scene.squads[0]:
@@ -317,9 +319,15 @@ func _phase0_island_ready() -> void:
         for u in target_scene.squads[2]:
                 if not (u is ArcherUnit):
                         class_ok = false
+        for u in target_scene.squads[3]:
+                if not (u is ImmortalUnit):
+                        class_ok = false
+        for u in target_scene.squads[4]:
+                if not (u is SpearmanUnit):
+                        class_ok = false
         _check("unit_classes_correct", class_ok)
         var colors_ok := true
-        for si in 3:
+        for si in target_scene.squads.size():
                 var c0: Color = target_scene.squads[si][0].spawn_color()
                 if not (c0 in GameConstants.UNIT_PALETTE):
                         colors_ok = false
@@ -335,7 +343,7 @@ func _phase0_island_ready() -> void:
                         var p: Vector3 = u.global_position
                         if nav.is_walkable(nav.world_to_cell(Vector2(p.x, p.z))):
                                 on_walkable += 1
-        _check("units_spawned_on_walkable", on_walkable == 11, "%d/11" % on_walkable)
+        _check("units_spawned_on_walkable", on_walkable == 19, "%d/19" % on_walkable)
 
         # --- گام ۶R: فرمانده = اولین عضو زنده با پرچم رنگِ دسته ---
         var cmd_ok := true
@@ -575,8 +583,52 @@ func _phase3_wait_posts_then_select() -> void:
                         # سه دسته باید اول روی پست‌هایشان بنشینند (میدان چندکاناله)
                         var arrived_n := _arrived_in(_units())
                         if _all_arrived() or (_t - _sub_t) > 60.0:
+                                # گام ۶R4 — تشخیص: کدام واحد نرسیده و کجاست
+                                var dbg := ""
+                                for u in _units():
+                                        if is_instance_valid(u) and not u.is_arrived():
+                                                var up2: Vector2 = _xz(u)
+                                                var sl: Vector2 = u.slot_pos()
+                                                var navx: NavGrid = PathService.nav
+                                                var cx := navx.world_to_cell(up2)
+                                                dbg += " pos=(%.2f,%.2f) slot=(%.1f,%.1f) d=%.2f cmb=%s cell=%s walk=%s flow=%s brain=%s vel=%s latch=%s stuck=%.1f wf=%s/%d" % [
+                                                                up2.x, up2.y, sl.x, sl.y,
+                                                                up2.distance_to(sl),
+                                                                str(u.combat_target() != null),
+                                                                str(cx), str(navx.is_walkable(cx)),
+                                                                str(PathService.sample_direction(
+                                                                up2, u.squad_id)),
+                                                                u.brain_state(), str(u.get("_vel")),
+                                                                str(u.get("_near_latch")),
+                                                                float(u.get("_stuck_t")),
+                                                                str(u.get("_wf_active")),
+                                                                int(u.get("_wf_side"))]
+                                                # نقشه‌ی ۷×۷ قابل‌عبور اطراف واحد گیرکرده + بردار میدان
+                                                for dy in range(-3, 4):
+                                                        var row := ""
+                                                        for dx in range(-3, 4):
+                                                                var tc := cx + Vector2i(dx, dy)
+                                                                if not navx.is_walkable(tc):
+                                                                        row += "#"
+                                                                        continue
+                                                                if tc == cx:
+                                                                        row += "@"
+                                                                        continue
+                                                                var fw: Vector2 = PathService.sample_direction(
+                                                                                navx.cell_center(tc),
+                                                                                u.squad_id)
+                                                                if fw.length() < 0.01:
+                                                                        row += "o"      # میدان صفر
+                                                                elif absf(fw.x) > absf(fw.y):
+                                                                        row += ">" if fw.x > 0.0 else "<"
+                                                                else:
+                                                                        row += "v" if fw.y > 0.0 else "^"
+                                                        dbg += "\n[M] %s" % row
+                                                dbg += " squad_goal=%s" % str(PathService.goal_for(
+                                                                u.squad_id))
                                 _check("all_squads_reach_initial_posts", _all_arrived(),
-                                                "%d/11 in %.1fs" % [arrived_n, _t - _sub_t])
+                                                "%d/%d in %.1fs%s" % [arrived_n,
+                                                _units().size(), _t - _sub_t, dbg])
                                 # حالا که همه ایستاده‌اند، سلول‌های هدفِ «کلیک تمیز» انتخاب می‌شوند
                                 _pick_target_cells()
                                 _check("far_targets_found", _cell_b != Vector2.ZERO
@@ -831,7 +883,8 @@ func _phase7_regenerate() -> void:
                                                 var p: Vector3 = u.global_position
                                                 if nav.is_walkable(nav.world_to_cell(Vector2(p.x, p.z))):
                                                         on_walkable += 1
-                                _check("regen_units_respawned", _units().size() == 11 and on_walkable == 11,
+                                # گام ۶R4 — ۵ دسته = ۱۹ سرباز
+                                _check("regen_units_respawned", _units().size() == 19 and on_walkable == 19,
                                                 "%d units, %d on walkable" % [_units().size(), on_walkable])
                                 _check("regen_state_reset", target_scene.mode == 0
                                                 and target_scene.selected_squad() == -1
@@ -851,7 +904,7 @@ func _phase7_regenerate() -> void:
                                 _sub_t = _t
 
 
-# ---------------- فاز ۸: کلیدهای 1..4 + حلقه‌ی انتخاب ----------------
+# ---------------- فاز ۸: کلیدهای 1..5 + حلقه‌ی انتخاب ----------------
 
 func _phase8_hotkeys_and_rings() -> void:
         match _sub:
@@ -859,7 +912,7 @@ func _phase8_hotkeys_and_rings() -> void:
                         # بعد از بازتولید، سه دسته باید دوباره روی پست بنشینند
                         if _all_arrived() or (_t - _sub_t) > 60.0:
                                 _check("regen_posts_reached", _all_arrived(),
-                                                "%d/11" % _arrived_in(_units()))
+                                                "%d/19" % _arrived_in(_units()))
                                 _push_key(KEY_2)
                                 _sub = 1
                                 _sub_t = _t
@@ -895,14 +948,31 @@ func _phase8_hotkeys_and_rings() -> void:
                                 _sub = 3
                                 _sub_t = _t
                 3:
+                        # گام ۶R4 — کلید ۴ حالا «گارد جاویدان» (دسته‌ی ۳) را انتخاب می‌کند
                         if _t - _sub_t >= 0.7:
-                                _check("key4_not_recruited_keeps_selection",
-                                                target_scene.selected_squad() == 2,
+                                _check("key4_selects_immortal_guard_squad",
+                                                target_scene.selected_squad() == 3,
                                                 "sel=%d" % target_scene.selected_squad())
-                                _push_key(KEY_3)  # کلید تکراری = لغو انتخاب
+                                _push_key(KEY_5)
                                 _sub = 4
                                 _sub_t = _t
                 4:
+                        if _t - _sub_t >= 0.7:
+                                _check("key5_selects_purple_spearman_squad",
+                                                target_scene.selected_squad() == 4,
+                                                "sel=%d" % target_scene.selected_squad())
+                                _push_key(KEY_6)
+                                _sub = 5
+                                _sub_t = _t
+                5:
+                        if _t - _sub_t >= 0.7:
+                                _check("key6_not_recruited_keeps_selection",
+                                                target_scene.selected_squad() == 4,
+                                                "sel=%d" % target_scene.selected_squad())
+                                _push_key(KEY_5)  # کلید تکراری = لغو انتخاب
+                                _sub = 6
+                                _sub_t = _t
+                6:
                         if _t - _sub_t >= 0.7:
                                 _check("same_key_toggles_deselect",
                                                 target_scene.selected_squad() == -1
@@ -931,6 +1001,11 @@ func _phase9_channel_isolation() -> void:
                                 for u in target_scene.squads[0]:
                                         _others_snapshot.append(_xz(u))
                                 for u in target_scene.squads[2]:
+                                        _others_snapshot.append(_xz(u))
+                                # گام ۶R4 — دسته‌های ۳ و ۴ هم نباید تکان بخورند
+                                for u in target_scene.squads[3]:
+                                        _others_snapshot.append(_xz(u))
+                                for u in target_scene.squads[4]:
                                         _others_snapshot.append(_xz(u))
                                 _push_click(MOUSE_BUTTON_LEFT, _screen_of(Vector3(_cell_e.x,
                                                 target_scene.ground.height_at_world(_cell_e) + 0.1,
@@ -971,6 +1046,14 @@ func _phase9_channel_isolation() -> void:
                                                 drift_ok = false
                                         i2 += 1
                                 for u in target_scene.squads[2]:
+                                        if _xz(u).distance_to(_others_snapshot[i2]) > 1.2:
+                                                drift_ok = false
+                                        i2 += 1
+                                for u in target_scene.squads[3]:
+                                        if _xz(u).distance_to(_others_snapshot[i2]) > 1.2:
+                                                drift_ok = false
+                                        i2 += 1
+                                for u in target_scene.squads[4]:
                                         if _xz(u).distance_to(_others_snapshot[i2]) > 1.2:
                                                 drift_ok = false
                                         i2 += 1
@@ -1404,28 +1487,37 @@ func _point_near_units(center: Vector2, want_dist: float, lo: float, hi: float,
         for u in target_scene.squad:
                 if is_instance_valid(u) and not u.is_dead():
                         alive.append(u)
+        # گام ۶R4 — جست‌وجوی سلولی: با ۵ دسته (۱۹ سرباز) جست‌وجوی زاویه‌ایِ
+        # ۱۲تایی اغلب هیچ نقطه‌ی واجد پیدا نمی‌کند و به fallbackِ بدون تضمین
+        # فاصله می‌افتاد (پلتاستِ چسبیده به سرباز → صفر پرتاب). سلول‌های فرمان
+        # همه‌ی قابل‌عبورند → جست‌وجوی قطعی با تضمین فاصله + دیدِ زمینی.
         var best := Vector2.INF
         var best_err := 1e9
-        for k in 12:
-                var ang := TAU * float(k) / 12.0
-                var cand := center + Vector2(cos(ang), sin(ang)) * want_dist
-                var w: Vector2 = target_scene._nearest_walkable_point(nav, cand, 1.2)
-                if w == Vector2.INF:
-                        continue
-                if not _los_ground_clear(w, center):
-                        continue
-                var min_u := 1e9
-                for u in alive:
-                        min_u = minf(min_u, w.distance_to(_xz(u)))
-                if min_u < lo or min_u > hi:
-                        continue
-                if absf(min_u - want_dist) < best_err:
-                        best_err = absf(min_u - want_dist)
-                        best = w
-        if best == Vector2.INF:
-                best = target_scene._nearest_walkable_point(nav,
-                                center + Vector2(want_dist, 0.0), 3.0)
-        return best
+        for r_max in [9.0, 16.0]:
+                for i in target_scene.cmd_grid.cell_count:
+                        var info: Dictionary = target_scene.cmd_grid.cell_info(i)
+                        var w: Vector2 = info["center"]
+                        if w.distance_to(center) > r_max:
+                                continue
+                        var min_u := 1e9
+                        var nu := Vector2.INF
+                        for u in alive:
+                                var du := w.distance_to(_xz(u))
+                                if du < min_u:
+                                        min_u = du
+                                        nu = _xz(u)
+                        if min_u < lo or min_u > hi:
+                                continue
+                        if not _los_ground_clear(w, nu):
+                                continue
+                        var err := absf(min_u - want_dist)
+                        if err < best_err:
+                                best_err = err
+                                best = w
+                if best != Vector2.INF:
+                        return best
+        return target_scene._nearest_walkable_point(nav,
+                        center + Vector2(want_dist, 0.0), 3.0)
 
 
 ## گام ۶R — LOS زمینی: ارتفاع زمین روی پاره‌خط نباید از بیشینه‌ی دو سر +۰.۶
@@ -1455,9 +1547,10 @@ func _phase14_shield_and_peltast() -> void:
                         _heavy_test = target_scene.director.spawn_enemy("heavy", ph, -1)
                         # پلتاست: نزدیک دسته‌ی «غیرکماندارِ» زنده می‌نشینیم تا تیرهای
                         # خودی پیش از اولین پرتاب آن را نکشند (دیباگ: مرگ در t<1s)
+                        # گام ۶R4 — دسته‌های ۳ و ۴ هم غیرکماندارند
                         var host_si := -1
                         var best_n := 0
-                        for si in [0, 1]:
+                        for si in [0, 1, 3, 4]:
                                 var n := 0
                                 for u in target_scene.squads[si]:
                                         if is_instance_valid(u) and not u.is_dead():
@@ -1569,6 +1662,7 @@ func _phase15_permanence_and_clear() -> void:
                                                 "state=%d" % target_scene.director.boat_state(_group0))
                                 # سلامت نهایی: زنده‌ها روی سلول قابل‌عبور + زمان نرمال
                                 var all_ok := true
+                                var bad_info := ""
                                 var nav: NavGrid = PathService.nav
                                 for u in target_scene.squad:
                                         if not is_instance_valid(u) or u.is_dead():
@@ -1576,7 +1670,12 @@ func _phase15_permanence_and_clear() -> void:
                                         if not nav.is_walkable(
                                                         nav.world_to_cell(_xz(u))):
                                                 all_ok = false
-                                _check("alive_units_on_walkable_at_end", all_ok)
+                                                var p3: Vector3 = u.global_position
+                                                bad_info += " %s(%.2f,%.2f)" % [
+                                                                u.get_class(),
+                                                                p3.x, p3.z]
+                                _check("alive_units_on_walkable_at_end", all_ok,
+                                                bad_info)
                                 _check("time_back_to_normal_after_invasion",
                                                 absf(Engine.time_scale - 1.0) < 0.06,
                                                 "time=%.2f" % Engine.time_scale)
@@ -1899,6 +1998,43 @@ func _phase18_garrison_replenish() -> void:
 func _phase19_fleet_touch_gameover() -> void:
         match _sub:
                 0:
+                        # — گام ۶R4: ۵ دسته + شمشیرزن قوی‌تر + قایقِ کند + بلوک
+                        #   مستطیلی با پرتو نور + دشواری صعودی —
+                        _check("squads_expanded_to_five", target_scene.squads.size() == 5,
+                                        "%d" % target_scene.squads.size())
+                        var dposts := {}
+                        for p2 in target_scene._squad_posts:
+                                dposts[p2] = true
+                        _check("squad_posts_are_distinct", dposts.size() >= 4,
+                                        "%d posts" % dposts.size())
+                        _check("immortal_hp_buffed", GameConstants.PLAYER_HP_IMMORTAL == 6,
+                                        "%d" % GameConstants.PLAYER_HP_IMMORTAL)
+                        _check("boats_slowed_for_planning",
+                                        GameConstants.BOAT_CRUISE_SPEED <= 3.0 \
+                                        and GameConstants.BOAT_SPEED <= 1.6,
+                                        "cruise=%.1f dock=%.1f" % [GameConstants.BOAT_CRUISE_SPEED,
+                                        GameConstants.BOAT_SPEED])
+                        var a0: Dictionary = target_scene.director.ascend_spec(0)
+                        _check("ascend_first_wave_small_pure",
+                                        int(a0["size"]) == 4 and int(a0["comp"]["heavy"]) == 0
+                                        and int(a0["comp"]["peltast"]) == 0, str(a0))
+                        _check("ascend_first_rounds_solo",
+                                        target_scene.director.max_concurrent_waves(0) == 1
+                                        and target_scene.director.max_concurrent_waves(1) == 1
+                                        and target_scene.director.max_concurrent_waves(2) == 2,
+                                        "solo→2")
+                        var ccg: int = target_scene.cmd_grid.cell_count
+                        _check("command_cells_exist", ccg > 0, "%d" % ccg)
+                        _check("command_beams_built",
+                                        target_scene.cmd_grid.beam_instance_count() == ccg,
+                                        "beams=%d cells=%d" % [
+                                        target_scene.cmd_grid.beam_instance_count(), ccg])
+                        target_scene.cmd_grid.set_command_mode(true)
+                        _check("command_beams_visible_in_command_mode",
+                                        target_scene.cmd_grid.beams_visible())
+                        target_scene.cmd_grid.set_command_mode(false)
+                        _check("command_beams_hidden_after",
+                                        not target_scene.cmd_grid.beams_visible())
                         # — دسته‌ی ۳ نفره: بارِ پیش‌فرض = سبک×۲ + پرتاب‌گر×۱ →
                         #   دو قایق پاروییِ همگن (هر قایق یک نوع — بازخورد کاربر)
                         _fleet_g3 = target_scene.director.spawn_wave(
@@ -1997,12 +2133,13 @@ func _phase19_fleet_touch_gameover() -> void:
                         _sub = 1
                         _sub_t = _t
                 1:
-                        # پیاده‌شدن هر سه ناوگان (مهلت ۳۴s) — بر اساس «بارِ پیاده‌شده»
-                        # نه زنده‌ها (نبردِ هم‌زمان نباید شمارش را کم کند — ۶R3)
+                        # پیاده‌شدن هر سه ناوگان (مهلت ۴۶s — گام ۶R4 قایق‌ها کندترند)
+                        # بر اساس «بارِ پیاده‌شده» نه زنده‌ها (نبردِ هم‌زمان نباید
+                        # شمارش را کم کند — ۶R3)
                         var lc3: int = target_scene.director.group_landed_cargo(_fleet_g3)
                         var lc8: int = target_scene.director.group_landed_cargo(_fleet_g8)
                         var lcw: int = target_scene.director.group_landed_cargo(_fleet_gw)
-                        if (lc3 >= 3 and lc8 >= 8 and lcw >= 8) or (_t - _sub_t) > 34.0:
+                        if (lc3 >= 3 and lc8 >= 8 and lcw >= 8) or (_t - _sub_t) > 46.0:
                                 _check("all_fleets_landed",
                                                 lc3 >= 3 and lc8 >= 8 and lcw >= 8,
                                                 "g3=%d g8=%d gw=%d" % [lc3, lc8, lcw])
@@ -2040,15 +2177,27 @@ func _phase19_fleet_touch_gameover() -> void:
                                         _dis_near += 1
                         var live := 0
                         var latched := 0
+                        var dbg_d := ""
                         for e2 in target_scene.director.raiders_of(_fleet_gw):
                                 if not is_instance_valid(e2) or e2.is_dead():
                                         continue
                                 live += 1
                                 if _dis_latched.has(e2.get_instance_id()):
                                         latched += 1
+                                else:
+                                        var ep2: Vector2 = Vector2(
+                                                        e2.global_position.x,
+                                                        e2.global_position.z)
+                                        dbg_d += " [dt=%s wade=%.1f last=%s pos=(%.1f,%.1f)]" % [
+                                                        "INF" if e2.disembark_target
+                                                        == Vector2.INF else "set",
+                                                        e2._wade_t,
+                                                        "INF" if e2.last_disembark_target
+                                                        == Vector2.INF else "set",
+                                                        ep2.x, ep2.y]
                         if (live > 0 and latched == live) or (_t - _sub_t) > 20.0:
                                 _check("raiders_disembarked_on_land", latched == live,
-                                                "%d/%d" % [latched, live])
+                                                "%d/%d%s" % [latched, live, dbg_d])
                                 _check("raiders_disembark_near_boat",
                                                 _dis_near >= mini(live, 6),
                                                 "%d/%d" % [_dis_near, live])

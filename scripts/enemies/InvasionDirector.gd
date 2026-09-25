@@ -18,6 +18,13 @@ extends Node
 ##     هر موج از جهتی ≥ ۵۵° دورتر از ۳ فرودِ آخر (بایاسِ «رو به دوربین» حذف شد)
 ##   * گام ۶R3 — «سربازها روی قایق باشند و در ساحل پیاده شوند»: مهاجم روی عرشه‌ی
 ##     همان قایق ظاهر می‌شود و تا نقطه‌ی پیاده‌شدنِ خودش (نزدیک همان قایق) واد می‌کند
+##   * گام ۶R4 — «هر مرحله از آسان به سخت؛ در دورهای اول دسته‌های دشمن با هم
+##     نیایند»: ترکیب/اندازه‌ی موج صعودی است (ascend_spec) و سقفِ گروهِ هم‌زمان
+##     دورهای اول ۱ است (max_concurrent_waves)
+##   * گام ۶R4 — «کشتی‌ها در مکان‌های مختلف به صورت رندوم کنار ساحل برسند»:
+##     در میان واجدهای تنوع زاویه‌ای، ساحل «تصادفی» انتخاب می‌شود (نه دورترین)
+##   * گام ۶R4 — قایق‌ها آهسته‌تر می‌آیند (BOAT_CRUISE_SPEED/BOAT_SPEED کم شد)
+##     تا کاربر فرصت چیدن استراتژی داشته باشد
 ##   * گام ۶R2 — قایق‌ها هرگز برنمی‌گردند: چه مهاجمان زنده بمانند چه کشته شوند،
 ##     ناوگان پارک‌شده در ساحل می‌ماند
 ##   * هر گروه کانال FlowField خودش را دارد (۴..۷)؛ هدف = نزدیک‌ترین خانه‌ی زنده به فرود
@@ -92,15 +99,28 @@ func _process(delta: float) -> void:
 
 ## گزینه‌ها: {"size": int, "near": Vector2, "comp": {"light": n, "heavy": m,
 ##          "peltast": k}, "force": bool} → group_id (-1 = نشد)
+## گام ۶R4 — اگر نه size و نه comp داده شود، موجِ «صعودی» بر اساس شماره‌ی موج
+## (waves_spawned) ساخته می‌شود: دورهای اول کوچکِ تک‌نوعه و تنها گروهِ فعال.
 func spawn_wave(opts: Dictionary = {}) -> int:
         var force := bool(opts.get("force", false))
-        if not force and waves_active() >= GameConstants.WAVE_MAX_CONCURRENT:
+        var max_c := max_concurrent_waves(waves_spawned)
+        if not force and waves_active() >= max_c:
                 return -1
         if ground == null or props == null:
                 return -1
-        var size: int = opts.get("size",
-                        _rng.randi_range(GameConstants.WAVE_SIZE_MIN,
-                        GameConstants.WAVE_SIZE_MAX))
+        var size: int = 0
+        var comp: Dictionary
+        if opts.has("size"):
+                size = int(opts["size"])
+                comp = opts.get("comp", _default_comp(size))
+        elif opts.has("comp"):
+                comp = opts["comp"]
+                size = int(comp.get(KIND_LIGHT, 0)) + int(comp.get(KIND_HEAVY, 0)) \
+                                + int(comp.get(KIND_PELTAST, 0))
+        else:
+                var asc := ascend_spec(waves_spawned)
+                size = int(asc["size"])
+                comp = asc["comp"]
         var hint: Vector2 = opts.get("near", Vector2.INF)
         var shore := _pick_shore(hint)
         var landing: Vector2 = shore["landing"]
@@ -119,7 +139,6 @@ func spawn_wave(opts: Dictionary = {}) -> int:
         if outward == Vector2.ZERO:
                 outward = Vector2.RIGHT
         var tangent := Vector2(-outward.y, outward.x)
-        var comp: Dictionary = opts.get("comp", _default_comp(size))
         var fleet_spec := _build_fleet(size, comp)
         var n_boats := fleet_spec.size()
         var gid := _next_group
@@ -134,6 +153,13 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                 var side := (float(bi) - float(n_boats - 1) * 0.5) \
                                 * GameConstants.FLEET_BOAT_GAP
                 var anchor := water_xz + outward * off + tangent * side
+                # گام ۶R4fix — لنگر باید روی آب بماند: جابه‌جاییِ مماسیِ ناوگان
+                # روی ساحلِ خمیده می‌تواند لنگر را روی شن بیندازد (با offset
+                # کمِ ۶R4 واقعی شد)؛ کمی به بیرون سُر می‌دهیم تا سلولِ آب شود.
+                var wtries := 0
+                while wtries < 8 and nav.is_walkable(nav.world_to_cell(anchor)):
+                        anchor += outward * 0.3
+                        wtries += 1
                 if bi == 0:
                         anchor0 = anchor
                 var boat := EnemyBoat.new()
@@ -188,6 +214,46 @@ func _default_comp(size: int) -> Dictionary:
         return {KIND_LIGHT: light, KIND_HEAVY: heavy, KIND_PELTAST: pelt}
 
 
+## گام ۶R4 — دشواری صعودی (بازخورد کاربر: «هر مرحله از آسان به سخت باشد و
+## ترجیحا در دورهای اول نباید دسته‌های سرباز دشمن با هم بیایند»):
+##   موج ۰ → ۴ سبکِ خالص (یک قایق پارویی؛ یک دسته‌ی منفرد)
+##   موج ۱ → ۵ نفر (سبک + ۲ پرتاب‌گر)
+##   موج ۲ → ۶ نفر (+ اولین سنگین)
+##   موج ۳ → ۷ نفر (۲ سنگین)
+##   موج ۴ → ۸ نفر (مختلط کامل)
+##   موج ۵+ → ترکیب پیش‌فرض در اندازه‌ی کامل (WAVE_SIZE_MAX)
+func ascend_spec(idx: int) -> Dictionary:
+        var sz: int
+        var comp: Dictionary
+        if idx <= 0:
+                sz = 4
+                comp = {KIND_LIGHT: 4, KIND_HEAVY: 0, KIND_PELTAST: 0}
+        elif idx == 1:
+                sz = 5
+                comp = {KIND_LIGHT: 3, KIND_HEAVY: 0, KIND_PELTAST: 2}
+        elif idx == 2:
+                sz = 6
+                comp = {KIND_LIGHT: 4, KIND_HEAVY: 1, KIND_PELTAST: 1}
+        elif idx == 3:
+                sz = 7
+                comp = {KIND_LIGHT: 4, KIND_HEAVY: 2, KIND_PELTAST: 1}
+        elif idx == 4:
+                sz = 8
+                comp = {KIND_LIGHT: 4, KIND_HEAVY: 2, KIND_PELTAST: 2}
+        else:
+                sz = GameConstants.WAVE_SIZE_MAX
+                comp = _default_comp(sz)
+        return {"size": sz, "comp": comp}
+
+
+## گام ۶R4 — سقف گروه‌های هم‌زمان هم صعودی است: دورهای اول «فقط یک دسته»
+## در صحنه باشد (تا موج قبلی پاک/پیاده نشود بعدی نمی‌آید)؛ بعداً ۲ گروه.
+func max_concurrent_waves(idx: int) -> int:
+        if idx <= 1:
+                return 1
+        return GameConstants.WAVE_MAX_CONCURRENT
+
+
 ## ساخت ناوگان از روی اندازه‌ی گروه — گام ۶R3 (بازخورد کاربر):
 ## «دشمن ها در هر قایق یک نوع باشند ... برای کاربر راحت تر هست مدیرتش»
 ## → هر قایق فقط «یک نوع» حمل می‌کند؛ نوع قایق از اندازه‌ی بارش درمی‌آید:
@@ -234,13 +300,17 @@ func _capacity_of(btype: EnemyBoat.BoatType) -> int:
 
 
 func _anchor_offset_of(btype: EnemyBoat.BoatType) -> float:
+        # گام ۶R4fix — قایق‌ها چسبیده‌تر به لبه‌ی ساحل پهلو می‌گیرند: با لنگرِ
+        # رندومِ ساحلی، offset قبلی (۱.۱-۱.۸m به سمت آب) سلول‌های پیاده‌شدنِ
+        # ۳.۸m را آب‌دار می‌کرد و مهاجمِ دُمِ صف چند متر دورتر از قایقِ خودش
+        # فرود می‌آمد. بدنه‌ها کم‌ارتفاع‌اند و پهلوگیریِ نزدیک طبیعی‌تر است.
         match btype:
                 EnemyBoat.BoatType.ROWBOAT:
-                        return 1.1
+                        return 0.4
                 EnemyBoat.BoatType.WARSHIP:
-                        return 1.8
+                        return 0.9
                 _:
-                        return 1.4
+                        return 0.65
 
 
 func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
@@ -265,7 +335,16 @@ func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
                 need += int(payload[k])
         var boat_xz := Vector2(boat.global_position.x, boat.global_position.z)
         # شعاع = offset لنگر (تا ۱.۸m برای کشتی جنگی) + یک سلول ساحل + حاشیه
-        var cells := _walkable_cells_near(boat_xz, 3.8, need + 4)
+        # گام ۶R4 — اگر قایقِ ضدقفل کمی دورتر لنگر انداخته باشد، شعاع پیاده‌شدن
+        # پویا باز می‌شود تا همیشه سلول ساحلیِ کافی پیدا شود.
+        # (۶R4fix) بافرِ «+۴» حذف شد: ۸ مهاجم فقط ۸ سلول می‌خواهند؛ خواستنِ ۱۲
+        # سلولِ نزدیک، سواحلِ مرزی را به فال‌بکِ ۶.۵m می‌برد و مهاجمِ دُمِ صف
+        # دور از قایقِ خودش فرود می‌آمد. سلول‌ها «نزدیک‌ترین‌به‌قایق» مرتب‌اند.
+        var cells := _walkable_cells_near(boat_xz, 3.8, need)
+        if cells.size() < need:
+                cells = _walkable_cells_near(boat_xz, 5.5, need)
+        if cells.size() < need:
+                cells = _walkable_cells_near(boat_xz, 8.0, need)
         # گام ۶R3 — spawn پخش‌شده روی عرشه (عمود بر جهت قایق): ۸ مهاجم روی
         # «یک نقطه» جداسازی را منفجر می‌کند و پیاده‌شدن را به‌هم می‌ریزد
         var head := boat.rotation.y
@@ -380,6 +459,33 @@ func _pick_shore(hint: Vector2 = Vector2.INF) -> Dictionary:
                         if d < best_d:
                                 best_d = d
                                 best = s
+                # گام ۶R4 — ساحلِ زیرِ قایق‌های موجود اشغال است؛ نزدیک‌ترین ساحلِ
+                # «آزاد» به hint ترجیح دارد تا دو ناوگان روی یک نقطه نریزند
+                # + گام ۶R4 — فیلتر «ساحل پهن»: spit یک‌سلولی پیاده‌شدنِ ۸ نفره
+                # را به شعاع ۶.۵m می‌برد (مهاجم دور از قایق خودش فرود می‌آید).
+                # بین ساحل‌های آزادِ پهن، نزدیک‌ترین به hint.
+                var free_wide_best: Array = []
+                var free_wide_d := 1e9
+                var free_best: Array = []
+                var free_d := 1e9
+                for s in shores:
+                        if _shore_taken(s):
+                                continue
+                        var df: float = nav.cell_center(s[0]).distance_to(hint)
+                        if df < free_d:
+                                free_d = df
+                                free_best = s
+                        if _shore_capacity(s[0]) < SHORE_MIN_CELLS:
+                                continue
+                        if df < free_wide_d:
+                                free_wide_d = df
+                                free_wide_best = s
+                if not free_wide_best.is_empty():
+                        return {"landing": nav.cell_center(free_wide_best[0]),
+                                        "water": nav.cell_center(free_wide_best[1])}
+                if not free_best.is_empty():
+                        return {"landing": nav.cell_center(free_best[0]),
+                                        "water": nav.cell_center(free_best[1])}
                 return {"landing": nav.cell_center(best[0]),
                                 "water": nav.cell_center(best[1])}
         # امتیاز هر ساحل: (دوربودن از پست‌ها، تنوع زاویه‌ای با موج‌های اخیر)
@@ -405,12 +511,62 @@ func _pick_shore(hint: Vector2 = Vector2.INF) -> Dictionary:
                 for sc in scored:
                         if sc["div"] >= div_top - 1.0:
                                 eligible.append(sc)
-        # در میان واجدها: دورتر از پست‌ها → ۵ تای برتر → انتخاب rng
-        eligible.sort_custom(func(a, b): return a["far"] > b["far"])
-        var top := eligible.slice(0, mini(5, eligible.size()))
-        var pick: Dictionary = top[_rng.randi_range(0, top.size() - 1)]
+        # گام ۶R4 — «کشتی‌ها باید در مکان های مختلف به صورت رندوم کنار ساحل
+        # برسند»: در میان واجدهای تنوع زاویه‌ای، «انتخاب کاملاً تصادفی» (قبلاً
+        # دورترین‌ها به پست‌ها ترجیح داشتند و نقاط فرود تکراری می‌شد)
+        # + ساحلِ اشغال‌شده‌ی قایق‌های موجود کنار گذاشته می‌شود
+        # + فیلتر «ساحل پهن» (ظرفیت پیاده‌شدن نزدیک قایق) — اگر ساحلِ پهنی
+        #   در میان واجدها بود، spitهای باریک کنار گذاشته می‌شوند
+        var free_eligible: Array = []
+        for sc in eligible:
+                if not _shore_taken(sc["s"]):
+                        free_eligible.append(sc)
+        if not free_eligible.is_empty():
+                eligible = free_eligible
+        var wide_eligible: Array = []
+        for sc in eligible:
+                if _shore_capacity(sc["s"][0]) >= SHORE_MIN_CELLS:
+                        wide_eligible.append(sc)
+        if not wide_eligible.is_empty():
+                eligible = wide_eligible
+        var pick: Dictionary = eligible[_rng.randi_range(0, eligible.size() - 1)]
         return {"landing": nav.cell_center(pick["s"][0]),
                         "water": nav.cell_center(pick["s"][1])}
+
+
+## گام ۶R4 — ظرفیت پیاده‌شدن ساحل: تعداد سلول‌های قابل‌عبور در ۴mِ سلولِ فرود.
+## ساحلِ پهن = ۸ مهاجمِ کشتی جنگی می‌توانند در ۳.۸mِ قایق پخش شوند.
+const SHORE_MIN_CELLS := 10
+
+func _shore_capacity(c: Vector2i) -> int:
+        var nav := PathService.nav
+        var cc := nav.cell_center(c)
+        var n := 0
+        for dy in range(-5, 6):
+                for dx in range(-5, 6):
+                        var t := c + Vector2i(dx, dy)
+                        if nav.is_walkable(t) \
+                                        and nav.cell_center(t).distance_to(cc) <= 4.0:
+                                n += 1
+        return n
+
+
+## گام ۶R4 — آیا این ساحل در تصرف قایقی هست (پارک‌شده یا در راه)؟
+## ریشه‌ی «دو ناوگان روی یک ساحل»: انتخاب رندوم بدون اطلاع از اشغال فعلی
+func _shore_taken(s: Array) -> bool:
+        var nav := PathService.nav
+        var cc := nav.cell_center(s[0])
+        for b in get_tree().get_nodes_in_group("enemy_boats"):
+                var ob := b as EnemyBoat
+                if ob == null or not ob.is_inside_tree():
+                        continue
+                if Vector2(ob.global_position.x, ob.global_position.z) \
+                                .distance_to(cc) < GameConstants.SHORE_OCCUPY_RADIUS:
+                        return true
+                if Vector2(ob.anchor_point.x, ob.anchor_point.z) \
+                                .distance_to(cc) < GameConstants.SHORE_OCCUPY_RADIUS:
+                        return true
+        return false
 
 
 ## زاویه‌ی ساحل نسبت به مرکز جزیره (درجه، −۱۸۰..۱۸۰)

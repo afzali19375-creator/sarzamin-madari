@@ -85,9 +85,10 @@ func _thrust() -> void:
         tw.tween_property(_spear, "position:z", z0, 0.16)
 
 
-## گام ۶R3 — ژست نیزه در لحظه‌ی ضربه
+## گام ۶R3 — ژست نیزه در لحظه‌ی ضربه + گام ۶R4 — بازگشت چرخشِ کششِ ضربه
 func _strike_impact_fx() -> void:
         _thrust()
+        _body.rotation.y = 0.0
 
 
 ## هنگام شروع حرکت نیزه باید بالا برگردد (لایه ۱ آماده‌ی سفر)
