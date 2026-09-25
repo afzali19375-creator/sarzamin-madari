@@ -480,7 +480,7 @@ func _process(delta: float) -> void:
                 # ⚠️ در حین Fidget اعمال نمی‌شود (قدم وول تا 0.8m قانونی است)
                 if _has_slot and _fidget_state == 0 \
                                 and Vector2(global_position.x, global_position.z).distance_to(_slot) \
-                                > SLOT_ARRIVE_RADIUS + 0.25:
+                                > SLOT_ARRIVE_RADIUS + 0.10:
                         _arrived = false
                         _vel = Vector2.ZERO
                         _set_color(_spawn_color)

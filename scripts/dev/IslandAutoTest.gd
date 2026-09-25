@@ -735,7 +735,9 @@ func _phase5_wait_arrival_on_cell() -> void:
                 _check("units_stand_ON_their_slots", on_slot >= 3, "%d/%d" % [on_slot, n])
                 _check("slots_in_formation_radius", slot_in_cell >= 3, "%d/%d" % [slot_in_cell, n])
                 var centroid := centroid_acc / float(maxi(centroid_n, 1))
-                _check("squad_centered_on_cell", centroid.distance_to(_cell_b) <= 1.4,
+                # گام ۶R5 — آرایش روی «شبکه‌ی بلوک‌های ۲متری» می‌نشیند؛ مرکز جرم
+                # دسته می‌تواند تا ~۲ متر از سلولِ فرمان جابه‌جا باشد (تایل‌های آزاد)
+                _check("squad_centered_on_cell", centroid.distance_to(_cell_b) <= 2.0,
                                 "centroid=(%.1f,%.1f) cell=(%.1f,%.1f)" % [centroid.x, centroid.y, _cell_b.x, _cell_b.y])
                 _check("units_stand_on_smooth_ground", on_ground >= 3, "%d/%d" % [on_ground, n])
                 _check("units_parked_on_walkable", on_walkable >= 3, "%d/%d" % [on_walkable, n])
@@ -837,6 +839,10 @@ func _pick_phase6_cells() -> void:
                         if cam.is_position_behind(wp):
                                 continue
                         min_px = minf(min_px, cam.unproject_position(wp).distance_to(click_sp))
+                        # گام ۶R5 — آرایشِ تایل‌خورده پهن‌تر شده (بلوک‌های ۲متری)؛
+                        # گارد جهانی تا فیدجت هم کلیک را نگیرد
+                        if _xz(u).distance_to(center) < 2.7:
+                                min_px = 0.0
                 if min_px > 70.0:
                         cands.append(center)
         if cands.size() < 2:
@@ -1085,6 +1091,9 @@ func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
                         if cam.is_position_behind(wp):
                                 continue
                         min_px = minf(min_px, cam.unproject_position(wp).distance_to(click_sp))
+                        # گام ۶R5 — گارد جهانی ۲٫۷ متری (آرایش تایل‌خورده + فیدجت)
+                        if _xz(u).distance_to(center) < 2.7:
+                                min_px = 0.0
                 if min_px < 70.0:
                         continue
                 if d > best_d:
@@ -2025,16 +2034,57 @@ func _phase19_fleet_touch_gameover() -> void:
                                         "solo→2")
                         var ccg: int = target_scene.cmd_grid.cell_count
                         _check("command_cells_exist", ccg > 0, "%d" % ccg)
-                        _check("command_beams_built",
+                        # — گام ۶R5: تایل‌های نرم سراسری — همیشه نمایان، خانه در یک
+                        #   بلوک، سرباز آیدل داخل بلوک خودش، هاله فقط از اضلاع —
+                        _check("command_tiles_built",
                                         target_scene.cmd_grid.beam_instance_count() == ccg,
-                                        "beams=%d cells=%d" % [
+                                        "tiles=%d cells=%d" % [
                                         target_scene.cmd_grid.beam_instance_count(), ccg])
+                        _check("command_tiles_always_visible",
+                                        target_scene.cmd_grid.tiles_visible())
+                        # خانه‌ها دقیقاً وسط بلوکِ خودشان (یک سهم از شبکه)
+                        var house_on_tile := true
+                        var house_dbg := ""
+                        for hp3 in target_scene.props.house_positions:
+                                var hxz3 := Vector2(hp3.x, hp3.z)
+                                var hi3: Dictionary = target_scene.cmd_grid \
+                                                .cell_at_world(hxz3)
+                                if not bool(hi3.get("ok", false)):
+                                        house_on_tile = false
+                                        house_dbg = "no tile @ %s" % hxz3
+                                        break
+                                var hd3: float = hxz3.distance_to(hi3["center"])
+                                if hd3 > 0.06:
+                                        house_on_tile = false
+                                        house_dbg = "off %.2fm" % hd3
+                                        break
+                        _check("houses_centered_on_tiles", house_on_tile, house_dbg)
+                        # سربازهای آیدل داخل بلوکِ خودشان ایستاده‌اند
+                        var in_tiles := 0
+                        var idle_n := 0
+                        for u19 in target_scene.squad:
+                                if not is_instance_valid(u19) or u19.is_dead() \
+                                                or u19.garrisoned:
+                                        continue
+                                if u19.brain_state() != &"idle":
+                                        continue
+                                idle_n += 1
+                                var uxz3 := Vector2(u19.global_position.x,
+                                                u19.global_position.z)
+                                var ui3: Dictionary = target_scene.cmd_grid \
+                                                .cell_at_world(uxz3)
+                                if bool(ui3.get("ok", false)) \
+                                                and uxz3.distance_to(ui3["center"]) < 0.55:
+                                        in_tiles += 1
+                        _check("idle_units_stand_in_tiles",
+                                        idle_n == 0 or in_tiles * 10 >= idle_n * 6,
+                                        "%d/%d" % [in_tiles, idle_n])
                         target_scene.cmd_grid.set_command_mode(true)
-                        _check("command_beams_visible_in_command_mode",
-                                        target_scene.cmd_grid.beams_visible())
+                        _check("command_mode_flag_on",
+                                        target_scene.cmd_grid.is_command_mode())
                         target_scene.cmd_grid.set_command_mode(false)
-                        _check("command_beams_hidden_after",
-                                        not target_scene.cmd_grid.beams_visible())
+                        _check("command_mode_flag_off",
+                                        not target_scene.cmd_grid.is_command_mode())
                         # — دسته‌ی ۳ نفره: بارِ پیش‌فرض = سبک×۲ + پرتاب‌گر×۱ →
                         #   دو قایق پاروییِ همگن (هر قایق یک نوع — بازخورد کاربر)
                         _fleet_g3 = target_scene.director.spawn_wave(

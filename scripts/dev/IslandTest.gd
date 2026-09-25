@@ -163,7 +163,8 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         if cmd_grid == null:
                 cmd_grid = CommandGrid.new()
                 add_child(cmd_grid)
-        cmd_grid.rebuild(ground, nav)
+        # گام ۶R5 — تایلِ زیر هر خانه هم در شبکه هست (خانه = یک بلوک کامل)
+        cmd_grid.rebuild(ground, nav, props.house_sites)
         # ریست وضعیت فرمان و گاریسون (خانه‌های تازه = بناهای تازه)
         squad_garrison.clear()
         for wq in squad_waypoints:
@@ -225,6 +226,9 @@ func _clear_units() -> void:
         squad_waypoints.clear()
         squad_garrison.clear()
         _squad_posts.clear()
+        # گام ۶R5 — همه‌ی تایل‌های اشغال‌شده‌ی سربازان آزاد می‌شوند (خانه‌ها باقی‌اند)
+        if cmd_grid != null:
+                cmd_grid.release_all_claims()
         if _units_root == null:
                 _units_root = Node3D.new()
                 _units_root.name = "Units"
@@ -327,6 +331,15 @@ func _make_commander(u: UnitBase, squad_col: Color) -> void:
         var flag := SquadFlag.new()
         u.add_child(flag)
         flag.set_color(squad_col)   # بعد از add_child — ماتریال در _ready ساخته می‌شود
+
+
+## گام ۶R5 — اسلاتِ سرباز روی «مرکزِ یک بلوکِ آزاد» می‌نشیند:
+## «وقتی سربازها آیدل ایستاده‌اند باید در یک بلوک مستطیلی قرار بگیرند» —
+## هر سرباز دقیقاً یک تایل را تصاحب می‌کند (ثبتِ یکتا در CommandGrid)
+func _tile_slot(u: UnitBase, xz: Vector2) -> Vector2:
+        if cmd_grid == null:
+                return xz
+        return cmd_grid.claim_unique_tile(xz, u.get_instance_id())
 
 
 func _walkable_cells_near(center: Vector2, radius: float, want: int) -> Array[Vector2]:
@@ -1071,7 +1084,7 @@ func _emerge_from_house(idx: int, g: Dictionary, refill: bool) -> void:
                 var at: Vector2 = spots[mini(k, spots.size() - 1)]
                 k += 1
                 u.exit_house(Vector3(at.x, ground.height_at_world(at), at.y))
-                u.set_slot(at)
+                u.set_slot(_tile_slot(u, at))   # گام ۶R5 — خروج روی بلوکِ آزاد
         if not refill:
                 return
         # تکمیل دسته: سرباز تازه از خانه بیرون می‌آید تا ظرفیت اصلی
@@ -1083,7 +1096,7 @@ func _emerge_from_house(idx: int, g: Dictionary, refill: bool) -> void:
                 var at: Vector2 = spots[mini(k, spots.size() - 1)]
                 k += 1
                 var nu := _make_unit(def, idx, at, rng)
-                nu.set_slot(at)
+                nu.set_slot(_tile_slot(nu, at))   # گام ۶R5
                 squads[idx].append(nu)
                 squad.append(nu)
                 added += 1
@@ -1187,7 +1200,8 @@ func _assign_slots(center: Vector2, idx: int) -> void:
                 var np := _nearest_walkable_point(nav, center + Vector2(cos(ang), sin(ang)) * rr, 1.6)
                 slots.append(np if np != Vector2.INF else center)
                 guard += 1
-        # اختصاص حریصانه: هر اسلات به نزدیک‌ترین سربازِ آزاد
+        # اختصاص حریصانه: هر اسلات به نزدیک‌ترین سربازِ آزاد — اسلات روی مرکزِ
+        # بلوکِ آزاد می‌نشیند (گام ۶R5) تا سربازِ آیدل داخل تایل خودش باشد
         var used := {}
         for s in slots:
                 var best := -1
@@ -1200,7 +1214,7 @@ func _assign_slots(center: Vector2, idx: int) -> void:
                                 best_d = d
                                 best = i
                 if best >= 0:
-                        members[best].set_slot(s)
+                        members[best].set_slot(_tile_slot(members[best], s))
                         used[best] = true
 
 
@@ -1381,6 +1395,9 @@ func _on_unit_died(u: Node) -> void:
         for si in squads.size():
                 squads[si].erase(u)
         squad.erase(u)
+        # گام ۶R5 — تایلِ سربازِ ازدست‌رفته آزاد می‌شود
+        if cmd_grid != null and u is UnitBase:
+                cmd_grid.release_owner(u.get_instance_id())
         if u is UnitBase:
                 _transfer_flag_if_commander(u)   # گام ۶R — پرچم به عضو زنده‌ی بعدی
         if selected >= 0 and (selected >= squads.size() or squads[selected].is_empty()):

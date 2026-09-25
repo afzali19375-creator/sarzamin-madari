@@ -66,6 +66,14 @@ var _flash_t := 10.0
 var _flashing := false
 var _flash_restore := Color.WHITE
 
+# گام ۶R5 — ضدِ گیرِ پیشروی (الگوی پیروی از دیوارِ UnitBase ۶R4):
+# مهاجمی که میدانِ کانال ندارد و مستقیم می‌رود، در گوشه‌ی مقعر (خانه+صخره)
+# با گاردِ لغزشِ تک‌محوره پین می‌شد — ریشه‌ی «مشعل هرگز پرتاب نشد»
+var _march_stall_t := 0.0         # ساعتِ بی‌پیشرفتی نسبت به بهترین فاصله
+var _march_best_gd := 1e9         # بهترین فاصله تا هدف از آخرین ریست
+var _march_avoid_side := 0        # ‎+۱‎ پادساعتگرد / ‎−۱‎ ساعتگرد — تعهد سمت
+var _march_avoid_hold := 0.0      # ثانیه‌ی باقی‌مانده‌ی تعهد
+
 var _mat: StandardMaterial3D
 var _body: MeshInstance3D
 var _body_color: Color
@@ -321,14 +329,64 @@ func _torch_throw_anim() -> void:
 func _march_tick(delta: float) -> void:
         var pos := Vector2(global_position.x, global_position.z)
         var to_goal := raid_target - pos
-        var dir := to_goal.normalized() if to_goal.length() < DIRECT_STEER_RADIUS \
+        var gd := to_goal.length()
+        var dir := to_goal.normalized() if gd < DIRECT_STEER_RADIUS \
                         else PathService.sample_direction(pos, _channel)
         if dir == Vector2.ZERO:
                 dir = to_goal.normalized()  # میدان هنوز منتشر نشده — مستقیم
         if dir != Vector2.ZERO:
+                # گام ۶R5 — دورزدنِ متعهد: در حال تعهد، جهت ~۶۰° چرخیده اعمال می‌شود
+                if _march_avoid_hold > 0.0:
+                        _march_avoid_hold -= delta
+                        dir = dir.rotated(float(_march_avoid_side) * 1.05)
+                        # پیشرفتِ واقعی در حین دورزدن → خروج زودهنگام
+                        if gd <= _march_best_gd - 0.3:
+                                _march_avoid_hold = 0.0
+                                _march_stall_t = 0.0
+                var before := pos
                 _move_with(dir, delta, move_speed)
+                # ساعتِ بی‌پیشرفتی: لرزشِ خُرد پیشرفت نیست
+                if gd < _march_best_gd - 0.01:
+                        _march_best_gd = gd
+                        _march_stall_t = 0.0
+                else:
+                        _march_stall_t += delta
+                if _march_avoid_hold <= 0.0 \
+                                and (_march_stall_t > 1.0 or moved_now(before) < 0.02):
+                        if _march_avoid_side != 0:
+                                _march_avoid_side = -_march_avoid_side  # سمت قبلی شکست خورد
+                        else:
+                                _march_avoid_side = _march_pick_side(pos, to_goal.normalized())
+                        _march_avoid_hold = 1.2
+                        _march_stall_t = 0.0
+                        _march_best_gd = minf(_march_best_gd, gd)
         else:
                 _bob_visual(false)
+
+
+## پیشرویِ همین فریم (متر) — صفر بودن یعنی گاردِ لغزش قدم را بلعید
+func moved_now(before: Vector2) -> float:
+        return Vector2(global_position.x, global_position.z).distance_to(before)
+
+
+## انتخاب سمتِ دورزدن: سمتی که قدمِ چرخیده‌ی اولش بازتر است (الگوی _wf_pick_side)
+func _march_pick_side(from: Vector2, to_dir: Vector2) -> int:
+        var nav := PathService.nav
+        if nav == null:
+                return 1
+        var best := 1
+        var best_d := -1.0
+        for side in [1, -1]:
+                var cand := from + to_dir.rotated(float(side) * 1.05) * 0.6
+                var d := from.distance_to(cand) if nav.is_walkable(nav.world_to_cell(cand)) \
+                                else 0.0
+                if d > best_d:
+                        best_d = d
+                        best = side
+        # هر دو سمت یکسان بود → سمت عوض شود تا از تکرارِ مسیرِ شکست‌خورده بگریزد
+        if best_d <= 0.0:
+                best = -_march_avoid_side if _march_avoid_side != 0 else 1
+        return best
 
 
 ## حرکت با گاردِ سلول غیرقابل‌عبور (آب/خانه/بیرون شبکه) + لغزش تک‌محوره

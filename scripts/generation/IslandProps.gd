@@ -13,6 +13,9 @@ const HOUSE_SITES := 4          # ۳ خانه‌ی گنبددار + ۱ آتشک�
 const SITE_MIN_DIST := 4.6      # فاصله‌ی حداقلی بین خانه‌ها (§۹.۱: ≥ 2 متر)
 const SITE_HALF := 1            # نیم‌اندازه‌ی سایت: ۲×۲ سلول NavGrid
 
+## گام ۶R5 — سایت‌ها هم‌ترازِ شبکه‌ی فرمان‌اند (مبدا زوج) تا هر خانه دقیقاً
+## «یک واحد بلوک مستطیلی» را پر کند (مرکز خانه = مرکز تایل) — بازخورد کاربر
+var house_sites: Array[Vector2i] = []
 var house_positions: Array[Vector3] = []
 var blocked_cells: Array[Vector2i] = []
 ## همه‌ی بناهای جان‌دار (خانه‌ها + آتشکده) — گروه «buildings» هم می‌شوند
@@ -26,6 +29,7 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
         for c in get_children():
                 c.free()
         house_positions.clear()
+        house_sites.clear()
         blocked_cells.clear()
         buildings.clear()
         _rng.seed = hash("props:%d" % seed_value)
@@ -33,6 +37,7 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
         var sites := _pick_house_sites(ground, nav)
         for i in sites.size():
                 var cell00 := sites[i]
+                house_sites.append(cell00)
                 _stamp_site_blocked(nav, cell00)
                 var center := nav.origin + (Vector2(cell00) + Vector2(1.0, 1.0)) * nav.cell_size
                 var y := ground.height_at_world(center) - 0.03
@@ -64,8 +69,10 @@ func nearest_alive_house_xz(from: Vector2) -> Vector2:
 
 func _pick_house_sites(ground: IslandGround, nav: NavGrid) -> Array[Vector2i]:
         var cands: Array[Vector2i] = []
-        for cy in range(SITE_HALF, ground.size - SITE_HALF - 1, 2):
-                for cx in range(SITE_HALF, ground.size - SITE_HALF - 1, 2):
+        # گام ۶R5 — مبدا زوج (هم‌ترازی با تایل‌های ۲×۲ شبکه‌ی فرمان):
+        # ۴ سلولِ سایت = دقیقاً یک تایل؛ مرکز خانه = مرکز بلوک
+        for cy in range(0, ground.size - 2, 2):
+                for cx in range(0, ground.size - 2, 2):
                         var ok := true
                         for d: Vector2i in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
                                 var c2 := Vector2i(cx, cy) + d
@@ -110,11 +117,12 @@ func _stamp_site_blocked(nav: NavGrid, cell00: Vector2i) -> void:
 func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         var root := _make_building(pos)
 
-        # بدنه‌ی استوانه‌ای با دیوار گچی
+        # بدنه‌ی استوانه‌ای با دیوار گچی — گام ۶R5: شعاع ≤ ۰٫۸۸ تا خانه کاملاً
+        # داخل بلوکِ ۲×۲ خودش بنشیند (لبه‌ی تایل + شکاف را نپوشاند)
         var wall := MeshInstance3D.new()
         var wm := CylinderMesh.new()
-        wm.top_radius = 0.95
-        wm.bottom_radius = 1.05
+        wm.top_radius = 0.8
+        wm.bottom_radius = 0.88
         wm.height = 0.85
         wall.mesh = wm
         wall.position.y = 0.42
@@ -124,10 +132,10 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         # گنبد کاشی فیروزه‌ای
         var dome := MeshInstance3D.new()
         var dm := SphereMesh.new()
-        dm.radius = 0.95
-        dm.height = 0.85
+        dm.radius = 0.82
+        dm.height = 0.82
         dome.mesh = dm
-        dome.position.y = 0.85
+        dome.position.y = 0.84
         dome.material_override = _building_mat(root, GameConstants.COL_DOME_TILE)
         root.add_child(dome)
 
@@ -137,7 +145,7 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         tm.radius = 0.07
         tm.height = 0.14
         tip.mesh = tm
-        tip.position.y = 1.28
+        tip.position.y = 1.24
         tip.material_override = _building_mat(root, GameConstants.COL_GOLD)
         root.add_child(tip)
 
@@ -146,24 +154,24 @@ func _build_house(pos: Vector3, with_windcatcher: bool) -> void:
         var dm2 := BoxMesh.new()
         dm2.size = Vector3(0.34, 0.52, 0.08)
         door.mesh = dm2
-        door.position = Vector3(0.0, 0.26, 1.0)
+        door.position = Vector3(0.0, 0.26, 0.86)
         door.material_override = _building_mat(root, GameConstants.COL_DOOR_WOOD)
         root.add_child(door)
 
-        # بادگیر — امضای معماری ایرانی (روی یکی از خانه‌ها)
+        # بادگیر — امضای معماری ایرانی (روی یکی از خانه‌ها) — داخل شعاع ۰٫۸۸
         if with_windcatcher:
                 var wc := MeshInstance3D.new()
                 var wc_mesh := BoxMesh.new()
-                wc_mesh.size = Vector3(0.44, 1.55, 0.44)
+                wc_mesh.size = Vector3(0.4, 1.55, 0.4)
                 wc.mesh = wc_mesh
-                wc.position = Vector3(-0.55, 1.1, -0.35)
+                wc.position = Vector3(-0.48, 1.1, -0.3)
                 wc.material_override = _building_mat(root, GameConstants.COL_WINDCATCHER)
                 root.add_child(wc)
                 var cap := MeshInstance3D.new()
                 var cap_mesh := BoxMesh.new()
-                cap_mesh.size = Vector3(0.5, 0.1, 0.5)
+                cap_mesh.size = Vector3(0.46, 0.1, 0.46)
                 cap.mesh = cap_mesh
-                cap.position = Vector3(-0.55, 1.9, -0.35)
+                cap.position = Vector3(-0.48, 1.9, -0.3)
                 cap.material_override = _building_mat(root, GameConstants.COL_TILE_PATTERN)
                 root.add_child(cap)
         # چرخش قطعی خانه برای تنوع
