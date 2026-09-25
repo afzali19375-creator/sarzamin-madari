@@ -27,6 +27,9 @@ extends Node
 ##     تا کاربر فرصت چیدن استراتژی داشته باشد
 ##   * گام ۶R2 — قایق‌ها هرگز برنمی‌گردند: چه مهاجمان زنده بمانند چه کشته شوند،
 ##     ناوگان پارک‌شده در ساحل می‌ماند
+##   * گام ۶R6 — قایق = وسیله‌ی حمل‌ونقل واقعی: سربازانِ واقعی از لحظه‌ی ظهور
+##     ناوگان روی عرشه‌اند (فرزند قایق) و هنگام پهلوگیری با reparent پیاده
+##     می‌شوند؛ «اسپاونر ساحل» حذف شد؛ قایق پس از تخلیه دور می‌شود و ناپدید می‌گردد
 ##   * هر گروه کانال FlowField خودش را دارد (۴..۷)؛ هدف = نزدیک‌ترین خانه‌ی زنده به فرود
 ##   * اگر خانه‌ی هدف بسوزد → گروه به نزدیک‌ترین خانه‌ی زنده بازهدف‌گیری می‌کند
 ##   * ترکیب پیش‌فرض: Peltast ≈ ۱/۳ + Hoplite سنگین در گروه‌های ≥ ۶ نفر، بقیه سبک
@@ -131,6 +134,8 @@ func spawn_wave(opts: Dictionary = {}) -> int:
         if target_building != null:
                 raid_target = Vector2(target_building.global_position.x,
                                 target_building.global_position.z)
+        var group_id := _next_group
+        var g_dict_scaffold: Array = []
 
         # ---- ناوگان: از دل افق دریا می‌آید و کنار ساحل پارک می‌ماند (گام ۶R2) ----
         var nav := PathService.nav
@@ -153,9 +158,7 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                 var side := (float(bi) - float(n_boats - 1) * 0.5) \
                                 * GameConstants.FLEET_BOAT_GAP
                 var anchor := water_xz + outward * off + tangent * side
-                # گام ۶R4fix — لنگر باید روی آب بماند: جابه‌جاییِ مماسیِ ناوگان
-                # روی ساحلِ خمیده می‌تواند لنگر را روی شن بیندازد (با offset
-                # کمِ ۶R4 واقعی شد)؛ کمی به بیرون سُر می‌دهیم تا سلولِ آب شود.
+                # گام ۶R4fix — لنگر باید روی آب بماند: کمی به بیرون سُر می‌دهیم
                 var wtries := 0
                 while wtries < 8 and nav.is_walkable(nav.world_to_cell(anchor)):
                         anchor += outward * 0.3
@@ -166,12 +169,12 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                 boat.boat_type = btype
                 boat.capacity = _capacity_of(btype)
                 boat.anchor_point = Vector3(anchor.x, 0, anchor.y)
-                # گام ۶R3 — «هر قایق یک نوع سرباز»: بار قایق = یک نوع + پرچم رنگی
                 boat.cargo_kind = spec["kind"]
                 boat.cargo_count = int(spec["load"])
-                # گام ۶R2 — ظهور از افق + گام ۶R3 — «قایق‌ها روی هم میرن»:
-                # ظهور پلکانی — قایق i چند متر عقب‌تر از قایق قبلی ظاهر می‌شود
-                # تا خط شنا از همان اول جدا باشد
+                # گام ۶R6 — قایقِ رونده: جهتِ بیرون جزیره + ریشه‌ی پیاده‌شدن
+                boat.outward_dir = outward
+                boat.disembark_root = raiders_root
+                # گام ۶R2 — ظهور از افق + گام ۶R3 — ظهور پلکانی ناوگان
                 var spawn_d := GameConstants.BOAT_SPAWN_DIST \
                                 + float(bi) * GameConstants.FLEET_SPAWN_STAGGER
                 # position (نه global_position) — نود هنوز در درخت نیست
@@ -179,16 +182,40 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                                 anchor.x + outward.x * spawn_d,
                                 0, anchor.y + outward.y * spawn_d)
                 boats_root.add_child(boat)
-                fleet.append({"boat": boat, "payload": spec["payload"],
-                                "landed": false})
+                # — گام ۶R6: سربازانِ واقعی «همین لحظه» سوار قایق می‌شوند —
+                #   فرزندِ قایق، Riding (AI خاموش)؛ دیگر اسپاونری در ساحل نیست
+                var payload: Dictionary = spec["payload"]
+                var boarded: Array = []
+                for kind in [KIND_LIGHT, KIND_HEAVY, KIND_PELTAST]:
+                        for i in int(payload.get(kind, 0)):
+                                var e2 := _create_enemy(kind)
+                                if e2 != null:
+                                        e2.raid_group = group_id % 4 if group_id >= 0 else 3
+                                        if group_id >= 0:
+                                                e2.raid_target = raid_target
+                                                e2.target_house = target_building
+                                        else:
+                                                e2.raid_target = Vector2(anchor.x, anchor.y)
+                                        if ground != null:
+                                                e2.ground_provider = Callable(ground, "height_at_world")
+                                        boat.board_soldier(e2)
+                                        boarded.append(e2)
+                fleet.append({"boat": boat, "payload": payload,
+                                "landed": false, "soldiers": boarded})
                 boat.landed.connect(_on_boat_landed.bind(gid))
+                boat.soldier_disembarked.connect(_on_soldier_disembarked.bind(gid))
+                # گام ۶R۷ — بستنِ فوریِ گروه هنگام ناپدیدیِ نهایی قایق
+                boat.gone.connect(_on_boat_gone.bind(gid))
+                # سربازانِ گروه = همین سوارشدگان (همان‌هایی که پیاده می‌شوند)
+                for s in boarded:
+                        g_dict_scaffold.append(s)
 
         # گام ۶R3 — ثبت جهت فرود برای تنوع زاویه‌ای موج‌های بعدی
         _remember_shore_angle(center, water_xz)
 
         _groups[gid] = {
                 "fleet": fleet,
-                "raiders": [],
+                "raiders": g_dict_scaffold,
                 "channel": channel,
                 "landing": landing,
                 "anchor": anchor0,
@@ -313,6 +340,10 @@ func _anchor_offset_of(btype: EnemyBoat.BoatType) -> float:
                         return 0.65
 
 
+## گام ۶R6 — قایق پهلو گرفت: فقط «سلول‌های پیاده‌شدن» را به خودِ قایق می‌دهیم؛
+## تخلیه (reparent سربازان واقعی) را خودِ قایق در حالت DISEMBARKING انجام می‌دهد.
+## «اسپاونر قدیمی» کاملاً حذف شد — سربازانی که پیاده می‌شوند همان‌هایی‌اند که
+## از ابتدا سوار بودند.
 func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
         if not _groups.has(gid):
                 return
@@ -325,54 +356,46 @@ func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
         if entry.is_empty() or entry["landed"]:
                 return
         entry["landed"] = true
-        # گام ۶R3 — «سربازهای دشمن روی قایق باشند و وقتی قایق لبه‌ی ساحل می‌رسد
-        # از آن پیاده بشن»: مهاجمان روی «عرشه‌ی همان قایق» ظاهر می‌شوند؛ هر یک
-        # نقطه‌ی پیاده‌شدنِ خودش را در ساحلِ کنارِ همان قایق می‌گیرد و واد می‌کند.
-        # بعد از پیاده‌شدن، میدانِ گروه خودش را به خانه می‌برد (EnemyBase).
-        var payload: Dictionary = entry["payload"]
-        var need := 0
-        for k in payload:
-                need += int(payload[k])
+        var need := boat.rider_count()
+        if need <= 0:
+                boat.start_disembark([])   # بارِ مرده → مستقیم DEPARTING
+                return
         var boat_xz := Vector2(boat.global_position.x, boat.global_position.z)
-        # شعاع = offset لنگر (تا ۱.۸m برای کشتی جنگی) + یک سلول ساحل + حاشیه
-        # گام ۶R4 — اگر قایقِ ضدقفل کمی دورتر لنگر انداخته باشد، شعاع پیاده‌شدن
-        # پویا باز می‌شود تا همیشه سلول ساحلیِ کافی پیدا شود.
-        # (۶R4fix) بافرِ «+۴» حذف شد: ۸ مهاجم فقط ۸ سلول می‌خواهند؛ خواستنِ ۱۲
-        # سلولِ نزدیک، سواحلِ مرزی را به فال‌بکِ ۶.۵m می‌برد و مهاجمِ دُمِ صف
-        # دور از قایقِ خودش فرود می‌آمد. سلول‌ها «نزدیک‌ترین‌به‌قایق» مرتب‌اند.
+        # شعاع = offset لنگر + یک سلول ساحل + حاشیه؛ پویا برای لنگرِ ضدقفل
         var cells := _walkable_cells_near(boat_xz, 3.8, need)
         if cells.size() < need:
                 cells = _walkable_cells_near(boat_xz, 5.5, need)
         if cells.size() < need:
                 cells = _walkable_cells_near(boat_xz, 8.0, need)
-        # گام ۶R3 — spawn پخش‌شده روی عرشه (عمود بر جهت قایق): ۸ مهاجم روی
-        # «یک نقطه» جداسازی را منفجر می‌کند و پیاده‌شدن را به‌هم می‌ریزد
-        var head := boat.rotation.y
-        var right := Vector2(cos(head), -sin(head))
-        var k2 := 0
-        for kind in [KIND_LIGHT, KIND_HEAVY, KIND_PELTAST]:
-                for i in int(payload.get(kind, 0)):
-                        # نقطه‌ی پیاده‌شدنِ اختصاصی (هر کدام یک سلول؛ اگر تمام شد
-                        # نزدیک‌ترین سلول ساحلیِ همان قایق)
-                        var spot: Vector2 = boat_xz
-                        if k2 < cells.size():
-                                spot = cells[k2]
-                        var spread_xz: Vector2 = boat_xz + right \
-                                        * ((float(k2) - float(need - 1) * 0.5) * 0.34)
-                        k2 += 1
-                        var e2 := spawn_enemy_on_boat(boat, kind, spot, gid, spread_xz)
-                        if e2 != null:
-                                g["raiders"].append(e2)
+        boat.start_disembark(cells)
+        # میدانِ گروه این لحظه به خانه ست می‌شود (سربازان با پیاده‌شدن فعال می‌شوند)
+        PathService.set_goal_for(g["channel"], g["raid_target"])
 
 
-## گام ۶R3 — spawn مهاجم «روی عرشه‌ی قایق» با مقصد پیاده‌شدن مشخص
-## (position باید قبل از add_child ست شود تا _y_smooth ارتفاع عرشه را بگیرد)
-func spawn_enemy_on_boat(boat: EnemyBoat, kind: String, disembark_at: Vector2,
-                group: int, spawn_xz: Vector2 = Vector2.INF) -> EnemyBase:
-        var at := spawn_xz
-        if at == Vector2.INF:
-                at = Vector2(boat.global_position.x, boat.global_position.z)
-        return spawn_enemy(kind, at, group, boat.deck_world_y(), disembark_at)
+## گام ۶R6 — هر سربازِ پیاده‌شده: وادِ ساحلِ خودش آغاز شده؛ فقط هدفِ مشعلِ گروه
+## را روی او نگه می‌داریم (میدان در _on_boat_landed ست شد)
+func _on_soldier_disembarked(boat: EnemyBoat, s: EnemyBase, gid: int) -> void:
+        if not _groups.has(gid):
+                return
+        if s == null or not is_instance_valid(s):
+                return
+        s.target_house = _groups[gid]["target_building"]
+        s.raid_target = _groups[gid]["raid_target"]
+
+
+## ساخت مهاجم بدون add_child — برای سوارشدن روی قایق (گام ۶R6)
+func _create_enemy(kind: String) -> EnemyBase:
+        var script: GDScript = null
+        match kind:
+                KIND_LIGHT:
+                        script = HopliteLight
+                KIND_HEAVY:
+                        script = HopliteHeavy
+                KIND_PELTAST:
+                        script = PeltastUnit
+                _:
+                        return null
+        return script.new()
 
 
 func _landed_count(g: Dictionary) -> int:
@@ -671,19 +694,30 @@ func _all_landed(g: Dictionary) -> bool:
         return true
 
 
+## گام ۶R۷ — ناپدیدیِ نهاییِ قایق: ردِ ناوگان همان لحظه پاک می‌شود و گروه
+## بلافاصله (نه در تیک ۰٫۳ ثانیه‌ای بعدی) قابلِ بستن است
+func _on_boat_gone(boat: EnemyBoat, gid: int) -> void:
+        if not _groups.has(gid):
+                return
+        for e in _groups[gid]["fleet"]:
+                if e.get("boat") == boat:
+                        e["boat"] = null
+        _check_groups()
+
+
 func _check_groups() -> void:
         var dead_ids: Array = []
         for gid in _groups:
                 var g: Dictionary = _groups[gid]
-                if _live_fleet(g).is_empty():
-                        # ناوگان آزاد شده (فقط با بازتولید جزیره/پاکسازی) → گروه بسته
+                # گام ۶R6 — قایق‌ها بعد از تخلیه از صحنه می‌روند (queue_free)؛
+                # گروه فقط وقتی بسته می‌شود که ناوگان رفته باشد «و» مهاجمی نمانده باشد
+                if _live_fleet(g).is_empty() and _dead_raiders(g):
                         dead_ids.append(gid)
                         continue
                 if g["cleared"]:
                         continue
                 _retarget_if_burned(gid, g)
-                # گام ۶R2 — قایق‌ها هرگز برنمی‌گردند (بازخورد کاربر): مهاجمان
-                # کشته شوند یا زنده بمانند، ناوگان پارک‌شده در ساحل می‌ماند.
+                # مهاجمان کشته شوند یا زنده بمانند، قایقِ تخلیه‌شده دور می‌شود —
                 # «پاکسازی موج» فقط سیگنال گزارشی است.
                 if not g["raiders"].is_empty() and raiders_alive(gid) == 0 \
                                 and _all_landed(g):
@@ -691,6 +725,14 @@ func _check_groups() -> void:
                         wave_cleared.emit(gid)
         for gid in dead_ids:
                 _groups.erase(gid)
+
+
+## گام ۶R6 — آیا همه‌ی مهاجمانِ گروه مرده‌اند؟ (سربازِ سوارِ قایق = زنده)
+func _dead_raiders(g: Dictionary) -> bool:
+        for e in g.get("raiders", []):
+                if is_instance_valid(e) and not e.is_dead():
+                        return false
+        return true
 
 
 ## اگر خانه‌ی هدف گروه سوخت → نزدیک‌ترین خانه‌ی زنده؛ میدان و مهاجمان به‌روز می‌شوند
@@ -829,11 +871,22 @@ func clear_all() -> void:
         _wave_accum = 0.0
 
 
-## برای تست: کشتن همه‌ی مهاجمان زنده (قایق‌ها در ساحل می‌مانند — گام ۶R2)
+## برای تست: کشتن همه‌ی مهاجمان زنده — گام ۶R6: سربازانِ «سوارِ قایق» هم
+## کشته می‌شوند (خارج از گروه hostiles‌اند ولی عضوِ گروهِ موج‌اند)
 func kill_all_raiders() -> int:
         var n := 0
+        var seen := {}
+        for gid in _groups:
+                for e in _groups[gid]["raiders"]:
+                        if is_instance_valid(e) and not e.is_dead() \
+                                        and not seen.has(e.get_instance_id()):
+                                seen[e.get_instance_id()] = true
+                                (e as EnemyBase).take_hit(99)
+                                n += 1
         for e in get_tree().get_nodes_in_group("hostiles"):
-                if e is EnemyBase and not e.is_dead():
+                if e is EnemyBase and not (e as EnemyBase).is_dead() \
+                                and not seen.has(e.get_instance_id()):
+                        seen[e.get_instance_id()] = true
                         (e as EnemyBase).take_hit(99)
                         n += 1
         return n

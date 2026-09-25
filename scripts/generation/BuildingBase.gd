@@ -29,6 +29,10 @@ var _burn_left := GameConstants.FIRE_DESTROY_SECONDS
 var _t := 0.0
 var _rng := RandomNumberGenerator.new()
 
+## گام ۶R6 — پرچمِ مالکیت روی خانه (سرخِ پیش‌فرض؛ با تصرف رنگِ دسته می‌گیرد)
+var _flag_mat: StandardMaterial3D
+var _flag_base := GameConstants.COL_HOUSE_FLAG
+
 
 func _ready() -> void:
         _rng.seed = hash("building:" + str(get_instance_id()))
@@ -41,6 +45,17 @@ func register_material(m: StandardMaterial3D) -> void:
                 return
         _mats.append(m)
         _base_colors.append(m.albedo_color)
+
+
+## گام ۶R6 — ماتریال پرچم را ثبت می‌کند (مستقل از ذغالی‌شدن)
+func register_flag_material(m: StandardMaterial3D) -> void:
+        _flag_mat = m
+
+
+## رنگِ پرچم = مالکیت خانه (سرخ: آزاد | رنگِ دسته: تصرف‌شده)
+func set_flag_color(c: Color) -> void:
+        if _flag_mat != null:
+                _flag_mat.albedo_color = c
 
 
 func _process(delta: float) -> void:

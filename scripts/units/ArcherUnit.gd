@@ -28,7 +28,7 @@ func _build_gear() -> void:
         bm.rings = 12
         bm.ring_segments = 6
         _bow.mesh = bm
-        _bow.position = Vector3(-0.24, 0.32, 0.06)
+        _bow.position = Vector3(-0.26, 0.34, 0.06)
         _bow.scale = Vector3(1.0, 1.0, 0.35)  # پخ‌کردن حلقه → شکل کمان
         var wood := StandardMaterial3D.new()
         wood.albedo_color = GameConstants.COL_DOOR_WOOD
@@ -43,7 +43,7 @@ func _build_gear() -> void:
         qm.bottom_radius = 0.05
         qm.height = 0.34
         _quiver.mesh = qm
-        _quiver.position = Vector3(0.12, 0.42, -0.14)
+        _quiver.position = Vector3(0.12, 0.44, -0.17)
         _quiver.rotation_degrees.z = 18.0
         var qmat := StandardMaterial3D.new()
         qmat.albedo_color = GameConstants.COL_GOLD

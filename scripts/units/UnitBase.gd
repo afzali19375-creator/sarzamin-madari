@@ -91,7 +91,8 @@ var garrisoned := false
 
 # ---------------- بصری ----------------
 var _spawn_color: Color
-var _mat: StandardMaterial3D
+var _base_color: Color
+var _mat: ShaderMaterial
 var _body: MeshInstance3D
 var _ring: MeshInstance3D
 
@@ -107,34 +108,21 @@ func _ready() -> void:
                 _spawn_color = squad_color
         else:
                 _spawn_color = GameConstants.UNIT_PALETTE.pick_random()
-        _mat = StandardMaterial3D.new()
-        _mat.albedo_color = _spawn_color
-        _mat.roughness = 0.8
+        _base_color = _spawn_color
+        _mat = ChibiLook.shader_mat(_spawn_color)
 
         # رسیدن موقتی است: با جابه‌جایی پرچم باید دوباره راه بیفتد
         # (رفع باگ «گیر کردن در آیدل بعد از رسیدن») — فقط برای کانال ۰/بدون اسلات
         GameEvents.goal_changed.connect(_on_goal_changed)
 
-        # تنه
+        # گام ۶R7 — تنه‌ی چینیِ اشکی (شکم + کلاه‌خودِ نوک‌تیز، گرادیانِ دسته)
         _body = MeshInstance3D.new()
-        var body_mesh := CylinderMesh.new()
-        body_mesh.top_radius = 0.14
-        body_mesh.bottom_radius = 0.2
-        body_mesh.height = 0.5
-        _body.mesh = body_mesh
-        _body.position.y = 0.25
+        _body.mesh = ChibiLook.body_mesh()
+        _body.position.y = 0.0
         _body.material_override = _mat
         add_child(_body)
-
-        # سر
-        var head := MeshInstance3D.new()
-        var head_mesh := SphereMesh.new()
-        head_mesh.radius = 0.11
-        head_mesh.height = 0.22
-        head.mesh = head_mesh
-        head.position.y = 0.58
-        head.material_override = _mat
-        add_child(head)
+        ChibiLook.add_face(_body)
+        ChibiLook.add_legs(self, _spawn_color)
 
         # حلقه‌ی انتخاب (فقط دسته‌ی انتخابی — الگوی Bad North)
         _ring = MeshInstance3D.new()
@@ -159,12 +147,12 @@ func _ready() -> void:
         if is_commander:
                 var band := MeshInstance3D.new()
                 var bm := TorusMesh.new()
-                bm.inner_radius = 0.095
-                bm.outer_radius = 0.13
+                bm.inner_radius = 0.10
+                bm.outer_radius = 0.15
                 bm.rings = 10
                 bm.ring_segments = 5
                 band.mesh = bm
-                band.position.y = 0.66
+                band.position.y = 0.62
                 var gm := StandardMaterial3D.new()
                 gm.albedo_color = GameConstants.COL_GOLD
                 gm.metallic = 0.5
@@ -223,8 +211,8 @@ func _knockback(from_dir: Vector3) -> void:
 
 
 func _flash_hit() -> void:
-        _flash_restore = _mat.albedo_color
-        _mat.albedo_color = Color(1, 1, 1, 1)
+        _flash_restore = _base_color
+        ChibiLook.set_flash(_mat, 1.0)
         _flash_t = 0.0
         _flashing = true
 
@@ -247,9 +235,10 @@ func die() -> void:
         tw.set_parallel(true)
         tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
         tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
-        _mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-        tw.tween_property(_mat, "albedo_color:a", 0.0, GameConstants.DEATH_FADE_SECONDS) \
-                        .set_delay(0.35)
+        # گام ۶R7 — محوِ مرگ روی همه‌ی مش‌ها (پرچمِ مستثنا؛ شیدر Opaque می‌ماند)
+        for p in ChibiLook.fade_parts(self):
+                tw.tween_property(p, "transparency", 1.0,
+                                GameConstants.DEATH_FADE_SECONDS).set_delay(0.35)
         tw.chain().tween_callback(queue_free)
 
 
@@ -424,7 +413,7 @@ func set_slot(world_xz: Vector2) -> void:
         if _arrived:
                 _arrived = false
                 _set_color(_spawn_color)
-                _body.position.y = 0.25
+                _body.position.y = 0.0
 
 
 func clear_slot() -> void:
@@ -461,8 +450,9 @@ func _process(delta: float) -> void:
                 _flash_t += delta
                 if _flash_t >= 0.12:
                         _flashing = false
-                        _mat.albedo_color = GameConstants.COL_ARRIVED \
-                                        if _arrived else _flash_restore
+                        ChibiLook.set_flash(_mat, 0.0)
+                        _set_color(GameConstants.COL_ARRIVED \
+                                        if _arrived else _flash_restore)
 
         # ---- لایه ۳: واکنش نبرد (بالاترین اولویت) ----
         _scan_accum += delta
@@ -489,7 +479,7 @@ func _process(delta: float) -> void:
                         _process_fidget(delta)
                 else:
                         # ایست در آرایش + تیک Fidget
-                        _body.position.y = 0.25 + absf(sin(_bob_t * 6.0)) * 0.1
+                        _body.position.y = absf(sin(_bob_t * 6.0)) * 0.07
                         _tick_fidget_timer(delta)
                 return
 
@@ -548,6 +538,15 @@ func _process(delta: float) -> void:
         # نزدیک اسلات/هدف، جریان صفر می‌شود → هدایت مستقیم (رفع باگ «یخ زدن»)
         var flow_d := PathService.sample_direction(pos, squad_id)
         var dir := to_goal.normalized() if _near_latch else flow_d
+        # گام ۶R6 — ضدِ پینگ‌پنگِ «پستِ مقابلِ اسلات»: هدفِ میدانِ کانال «پستِ»
+        # دسته است نه اسلاتِ واحد؛ اگر اسلات نزدیک باشد ولی میدان به سمتِ
+        # مخالفِ اسلات برود (اسلات آن‌طرفِ مانع)، هدایتِ مستقیم + لغزشِ دیوار
+        # ارجح است تا واحد بینِ پست و اسلات در نوسانِ ابدی نیفتد
+        if not _near_latch and _has_slot and gd < 6.0 \
+                        and flow_d != Vector2.ZERO \
+                        and flow_d.dot(to_goal.normalized()) < -0.5:
+                dir = to_goal.normalized()
+                _near_latch = true
         if _wf_active:
                 dir = to_goal.normalized().rotated(float(_wf_side) * 1.15)
         if dir == Vector2.ZERO:
@@ -711,7 +710,7 @@ func _on_goal_changed(_new_goal: Vector2) -> void:
                 _arrived = false
                 _vel = Vector2.ZERO
                 _set_color(_spawn_color)  # برگشت به رنگ تولد
-                _body.position.y = 0.25
+                _body.position.y = 0.0
 
 
 ## حلقه‌ی انتخاب دسته (Bad North: زیر دسته‌ی انتخابی حلقه‌ی سفید)
@@ -747,7 +746,7 @@ func exit_house(at: Vector3) -> void:
         _vel = Vector2.ZERO
         _arrived = false
         _set_color(_spawn_color)
-        _body.position.y = 0.25
+        _body.position.y = 0.0
         if not is_in_group("units"):
                 add_to_group("units")
 
@@ -766,7 +765,7 @@ func _dist_xz_to(n: Node3D) -> float:
 
 
 func body_color() -> Color:
-        return _mat.albedo_color
+        return _base_color
 
 
 ## رنگ فعلی بدنه — برای تست خودکار (رنگ تولد نباید سرخ «رسیده» باشد)
@@ -875,13 +874,14 @@ func _avoid_step(from: Vector2, step: Vector2, to_dir: Vector2,
 
 
 func _bob_visual(moving: bool) -> void:
-        var target := 0.25 + (absf(sin(_bob_t * 9.0)) * 0.045 if moving else 0.0)
+        var target := absf(sin(_bob_t * 9.0)) * 0.05 if moving else 0.0
         var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
         _body.position.y = lerpf(_body.position.y, target, k)
 
 
 func _set_color(c: Color) -> void:
-        _mat.albedo_color = c
+        _base_color = c
+        ChibiLook.set_base(_mat, c)
 
 
 # ---------------- Fidget (§۵.۳ پرامت — لایه ۲) ----------------
@@ -925,7 +925,7 @@ func _process_fidget(delta: float) -> void:
                 gy = ground_provider.call(pos)
         _y_smooth = lerpf(_y_smooth, gy, clampf(10.0 * delta, 0.0, 1.0))
         global_position = Vector3(pos.x, _y_smooth, pos.y)
-        _body.position.y = 0.25 + absf(sin(_bob_t * 7.0)) * 0.03
+        _body.position.y = absf(sin(_bob_t * 7.0)) * 0.03
         if k >= 1.0:
                 if _fidget_state == 1:
                         _fidget_state = 2  # بازگشت به آرایش

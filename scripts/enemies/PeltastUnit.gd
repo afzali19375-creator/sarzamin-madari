@@ -32,15 +32,15 @@ func _default_color() -> Color:
 
 
 func _build_gear() -> void:
-        # نوار سرخ سر
+        # نوار سرخ سر — حلقه دورِ کلاهِ چینی
         var band := MeshInstance3D.new()
         var bm := TorusMesh.new()
-        bm.inner_radius = 0.1
-        bm.outer_radius = 0.13
+        bm.inner_radius = 0.105
+        bm.outer_radius = 0.15
         bm.rings = 10
         bm.ring_segments = 5
         band.mesh = bm
-        band.position.y = 0.64
+        band.position.y = 0.58
         var bmat := StandardMaterial3D.new()
         bmat.albedo_color = GameConstants.COL_CRIMSON
         bmat.roughness = 0.6
@@ -53,7 +53,7 @@ func _build_gear() -> void:
         jm.size = Vector3(0.025, 0.025, 0.62)
         _javelin.mesh = jm
         _javelin.rotation_degrees = Vector3(-30.0, 0.0, 0.0)
-        _javelin.position = Vector3(0.2, 0.45, 0.12)
+        _javelin.position = Vector3(0.22, 0.44, 0.12)
         var wood := StandardMaterial3D.new()
         wood.albedo_color = GameConstants.COL_DOOR_WOOD
         wood.roughness = 0.85
@@ -66,7 +66,7 @@ func _build_gear() -> void:
         st.size = Vector3(0.035, 0.035, 0.4)
         _torch_in_hand.mesh = st
         _torch_in_hand.rotation_degrees = Vector3(-18.0, 0.0, 0.0)
-        _torch_in_hand.position = Vector3(-0.22, 0.5, 0.1)
+        _torch_in_hand.position = Vector3(-0.24, 0.48, 0.1)
         var stick_mat := StandardMaterial3D.new()
         stick_mat.albedo_color = GameConstants.COL_DOOR_WOOD
         stick_mat.roughness = 0.9
@@ -78,7 +78,7 @@ func _build_gear() -> void:
         fm.radius = 0.06
         fm.height = 0.12
         fl.mesh = fm
-        fl.position = Vector3(-0.22, 0.72, 0.02)
+        fl.position = Vector3(-0.24, 0.7, 0.02)
         var flm := StandardMaterial3D.new()
         flm.albedo_color = GameConstants.COL_GOLD
         flm.emission_enabled = true

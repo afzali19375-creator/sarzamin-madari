@@ -103,8 +103,9 @@ func _build_terrain_mesh() -> void:
                                 _add_tri(st, a, d, c2, col, up)
                         # پرتگاه ساحلی: لبه‌ای از خشکی که به آب می‌رسد
                         if is_land:
-                                var rock := GameConstants.COL_ROCK
-                                var rock_dark := GameConstants.COL_ROCK_DARK
+                                # گام ۶R6 — صخره‌ی سفید-خاکستری لایه‌ی زیرین (سبک مرجع)
+                                var rock := GameConstants.COL_CLIFF
+                                var rock_dark := GameConstants.COL_CLIFF_DARK
                                 if not _land_at(cx + 1, cy):  # شرق
                                         var col := rock.lerp(rock_dark, fposmod(sin(float(ci) * 3.7) * 0.5 + 0.5, 1.0) * 0.4)
                                         _add_wall(st, b, d, col)
@@ -117,7 +118,9 @@ func _build_terrain_mesh() -> void:
                                 if not _land_at(cx, cy - 1):  # شمال
                                         var col := rock.lerp(rock_dark, fposmod(sin(float(ci) * 9.7) * 0.5 + 0.5, 1.0) * 0.4)
                                         _add_wall(st, a, b, col)
-        st.generate_tangents()
+        # گام ۶R۷ — generate_tangents() حذف شد: متریالِ terrain فقط vertex-color
+        # است (بدون بافت/نرمال‌مپ) و مشِ دستی UV ندارد؛ فراخوانیِ آن در هر
+        # بازتولید سه خطای «UVs are required to generate tangents» می‌ساخت
         var mesh := st.commit()
         _terrain_mesh = MeshInstance3D.new()
         _terrain_mesh.mesh = mesh
@@ -211,6 +214,20 @@ void fragment() {
         _water.material_override = mat
         _water.position = Vector3(0, SEA_Y, 0)
         add_child(_water)
+
+        # گام ۶R6 — کولایدر آب: هیچ موجودیتِ فیزیکی وارد/از آن عبور نمی‌کند
+        # (حرکتِ تحلیلیِ واحدها از قبل با NavGrid از آب دوری می‌کند)
+        var water_body := StaticBody3D.new()
+        water_body.name = "WaterCollider"
+        var wshape := CollisionShape3D.new()
+        var wbox := BoxShape3D.new()
+        wbox.size = Vector3(320, 0.3, 320)
+        wshape.shape = wbox
+        wshape.position = Vector3(0, SEA_Y - 0.15, 0)
+        water_body.add_child(wshape)
+        water_body.collision_layer = 4
+        water_body.collision_mask = 0
+        add_child(water_body)
 
 
 # ---------------- کف ساحل (حلقه‌ی سفید دور جزیره — امضای Bad North) ----------------

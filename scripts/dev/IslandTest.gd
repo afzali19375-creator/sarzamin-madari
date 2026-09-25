@@ -44,7 +44,7 @@ const SQUAD_DEFS := [
 var mode := Mode.IDLE
 var island: Dictionary = {}
 var ground: IslandGround
-var cmd_grid: CommandGrid
+var cmd_grid: VoronoiBlocks
 var props: IslandProps
 var blocked_by_houses: Array[Vector2i] = []
 
@@ -127,6 +127,41 @@ func _ready() -> void:
                 var runner := IslandAutoTest.new()
                 runner.target_scene = self
                 add_child(runner)
+        elif OS.get_cmdline_user_args().has("--blockprobe"):
+                _run_block_probe()
+
+
+## پراب تشخیصی ۶R6 — صحتِ اسپات‌های بلوک ورونوی در برابر پیکینگ واقعی دوربین
+func _run_block_probe() -> void:
+        await get_tree().create_timer(2.0).timeout
+        var cam := get_viewport().get_camera_3d()
+        var bad_nook := 0
+        var bad_pick := 0
+        for i in cmd_grid.cell_count:
+                var info: Dictionary = cmd_grid.cell_info(i)
+                var spot: Vector2 = info["center"]
+                var bi: Dictionary = cmd_grid.block_at_world(spot)
+                if not bool(bi.get("ok", false)):
+                        bad_nook += 1
+                        print("[PROBE] spot not in block: ", spot)
+                var y := ground.height_at_world(spot)
+                var sp := cam.unproject_position(Vector3(spot.x, y + 0.1, spot.y))
+                var hit := ground.ray_pick(cam, sp)
+                var ok := bool(hit.get("in_island", false))
+                var hxz := Vector2.ZERO
+                if ok:
+                        var c: Vector2i = hit["cell"]
+                        hxz = PathService.nav.cell_center(c)
+                var bi2: Dictionary = cmd_grid.block_at_world(hxz) if ok else {}
+                if not bool(bi2.get("ok", false)):
+                        bad_pick += 1
+                        print("[PROBE] pick no-block: spot=", spot, " hit_walkable=",
+                                        str(hit.get("walkable", "-")), " hit_cell=",
+                                        str(hit.get("cell", "-")), " module=",
+                                        str(hit.get("module", "-")))
+        print("[PROBE] blocks=", cmd_grid.cell_count, " spot_fail=", bad_nook,
+                        " pick_fail=", bad_pick)
+        get_tree().quit(0)
 
 
 func _exit_tree() -> void:
@@ -161,9 +196,11 @@ func _regenerate(seed_value: int, announce: bool) -> void:
                 b.ignited.connect(_on_house_ignited)
                 b.burned_down.connect(_on_house_burned)
         if cmd_grid == null:
-                cmd_grid = CommandGrid.new()
+                cmd_grid = VoronoiBlocks.new()
                 add_child(cmd_grid)
-        # گام ۶R5 — تایلِ زیر هر خانه هم در شبکه هست (خانه = یک بلوک کامل)
+        # گام ۶R6 — بلوک‌های ورونوی: چندضلعی‌های نامنظمِ به‌هم‌چسبیده (نه شبکه)
+        cmd_grid.set_island_seed(int(island["seed_used"]))
+        # تایلِ زیر هر خانه همیشه هست (خانه = یک بلوک کامل)
         cmd_grid.rebuild(ground, nav, props.house_sites)
         # ریست وضعیت فرمان و گاریسون (خانه‌های تازه = بناهای تازه)
         squad_garrison.clear()
@@ -333,13 +370,46 @@ func _make_commander(u: UnitBase, squad_col: Color) -> void:
         flag.set_color(squad_col)   # بعد از add_child — ماتریال در _ready ساخته می‌شود
 
 
-## گام ۶R5 — اسلاتِ سرباز روی «مرکزِ یک بلوکِ آزاد» می‌نشیند:
-## «وقتی سربازها آیدل ایستاده‌اند باید در یک بلوک مستطیلی قرار بگیرند» —
-## هر سرباز دقیقاً یک تایل را تصاحب می‌کند (ثبتِ یکتا در CommandGrid)
-func _tile_slot(u: UnitBase, xz: Vector2) -> Vector2:
-        if cmd_grid == null:
-                return xz
-        return cmd_grid.claim_unique_tile(xz, u.get_instance_id())
+## گام ۶R7 — خوشه‌ی متراکمِ آرایش (بازخورد کاربر با تصویر مرجع Bad North):
+## «سربازها به جای هر کدام در یک بلوک، همه در یک بلوک جمع می‌شوند» —
+## شانه‌به‌شانه دورِ پرچم؛ هم‌پوشانیِ جزئی مجاز است. فرمانده = مرکز.
+## min_r > 0 یعنی بدونِ اسلاتِ مرکز (خوشه‌ی دورِ خانه — حلقه از min_r شروع)
+func _dense_slots(center: Vector2, n: int, min_r := 0.0) -> Array[Vector2]:
+        var nav := PathService.nav
+        var slots: Array[Vector2] = []
+        if min_r <= 0.0:
+                # اسلاتِ مرکز — روی نزدیک‌ترین نقطه‌ی قابل‌عبور (پرچم/فرمانده)
+                var c0 := _nearest_walkable_point(nav, center, 1.2)
+                slots.append(c0 if c0 != Vector2.INF else center)
+        var rings := [
+                [min_r + 0.55, 6, PI / 6.0],
+                [min_r + 1.05, 10, 0.0],
+                [min_r + 1.5, 14, 0.22],
+                [min_r + 1.9, 18, 0.4],
+        ]
+        for rdef in rings:
+                if slots.size() >= n:
+                        break
+                var r: float = rdef[0]
+                var per: int = rdef[1]
+                var a0: float = rdef[2]
+                for k in per:
+                        var ang := a0 + TAU * float(k) / float(per)
+                        var p := center + Vector2(cos(ang), sin(ang)) * r
+                        var np := _nearest_walkable_point(nav, p, 0.9)
+                        slots.append(np if np != Vector2.INF else p)
+                        if slots.size() >= n:
+                                break
+        # تضمین: همیشه به اندازه‌ی سربازها اسلات داریم
+        var guard := 0
+        while slots.size() < n and guard < 40:
+                var ang := _rng_scene() * TAU
+                var rr := min_r + 0.6 + float(guard % 4) * 0.35
+                var np := _nearest_walkable_point(nav,
+                                center + Vector2(cos(ang), sin(ang)) * rr, 1.2)
+                slots.append(np if np != Vector2.INF else center)
+                guard += 1
+        return slots
 
 
 func _walkable_cells_near(center: Vector2, radius: float, want: int) -> Array[Vector2]:
@@ -386,33 +456,28 @@ func regenerate(seed_value: int) -> void:
 # ---------------- محیط و دوربین (§۷ پرامت) ----------------
 
 func _build_environment() -> void:
-        var sky_mat := ProceduralSkyMaterial.new()
-        # §۱۴ — آسمان #D4E4EC (تقریباً سفید-خاکستری) با افق مه‌آلود Bad North
-        sky_mat.sky_top_color = Color("b9cdd9")
-        sky_mat.sky_horizon_color = GameConstants.COL_SKY
-        sky_mat.ground_bottom_color = Color("9fb4bf")
-        sky_mat.ground_horizon_color = GameConstants.COL_SKY
-        var sky := Sky.new()
-        sky.sky_material = sky_mat
+        # گام ۶R6 (بازخورد کاربر — سبک مرجع): نورِ Flat پاستلی؛ آسمان = رنگِ ساده
         var env := Environment.new()
-        env.background_mode = Environment.BG_SKY
-        env.sky = sky
-        env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-        env.ambient_light_energy = 1.15
-        env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+        env.background_mode = Environment.BG_COLOR
+        env.background_color = Color("c7d6e0")          # آبی-خاکستری روشن
+        env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+        env.ambient_light_color = Color(1, 1, 1)
+        env.ambient_light_energy = 0.8                   # نور محیطی سفید با انرژی کم
+        env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
         env.fog_enabled = true
-        env.fog_light_color = GameConstants.COL_SKY
-        env.fog_density = 0.008
-        env.fog_sky_affect = 0.2
+        env.fog_light_color = Color("cfe0ea")            # مه ملایم آبی کمرنگ — عمق
+        env.fog_density = 0.011
+        env.fog_sky_affect = 0.35
         var we := WorldEnvironment.new()
         we.environment = env
         add_child(we)
 
         var sun := DirectionalLight3D.new()
         sun.rotation_degrees = Vector3(-52.0, -35.0, 0.0)
-        sun.light_energy = 1.15
+        sun.light_energy = 1.0
         sun.light_color = GameConstants.COL_SUN
-        sun.shadow_enabled = true
+        # سبک Flat: بدون سایه‌های تیره و واقع‌گرایانه
+        sun.shadow_enabled = false
         add_child(sun)
 
         _cam_pivot = Node3D.new()
@@ -1049,6 +1114,9 @@ func _garrison_squad(idx: int, house: BuildingBase, silent: bool) -> void:
         PathService.set_goal_for(idx, hxz)
         squad_garrison[idx] = {"house": house, "t": 0.0, "phase": "walk",
                         "orig": int(SQUAD_DEFS[idx]["count"])}
+        # گام ۶R6 — پرچمِ خانه با تصرف تغییر رنگ می‌دهد (سرخِ مالکیتِ دشمن‌نشدن
+        # → رنگِ دسته‌ی تصرف‌کننده)
+        house.set_flag_color(GameConstants.UNIT_PALETTE[int(SQUAD_DEFS[idx]["color"])])
         _last_input_msg = "squad %d garrison -> house (%.1f, %.1f)" % [
                         idx + 1, hxz.x, hxz.y]
         if not silent:
@@ -1079,12 +1147,20 @@ func _emerge_from_house(idx: int, g: Dictionary, refill: bool) -> void:
                         alive.size() + 4)
         if spots.is_empty():
                 spots = [hxz]
+        # گام ۶R7 — خوشه‌ی متراکم دورِ خانه (بدونِ مرکز — خانه خودش وسط است؛
+        # حلقه‌ها از ۰٫۹۵m شروع می‌شوند تا داخلِ پادرنگِ خانه نیفتند)
+        var total := alive.size()
+        if refill:
+                total = maxi(total, int(SQUAD_DEFS[idx]["count"]))
+        var dslots := _dense_slots(hxz, total, 0.95)
         var k := 0
+        var dsi := 0
         for u in alive:
                 var at: Vector2 = spots[mini(k, spots.size() - 1)]
                 k += 1
                 u.exit_house(Vector3(at.x, ground.height_at_world(at), at.y))
-                u.set_slot(_tile_slot(u, at))   # گام ۶R5 — خروج روی بلوکِ آزاد
+                u.set_slot(dslots[mini(dsi, dslots.size() - 1)])
+                dsi += 1
         if not refill:
                 return
         # تکمیل دسته: سرباز تازه از خانه بیرون می‌آید تا ظرفیت اصلی
@@ -1096,7 +1172,8 @@ func _emerge_from_house(idx: int, g: Dictionary, refill: bool) -> void:
                 var at: Vector2 = spots[mini(k, spots.size() - 1)]
                 k += 1
                 var nu := _make_unit(def, idx, at, rng)
-                nu.set_slot(_tile_slot(nu, at))   # گام ۶R5
+                nu.set_slot(dslots[mini(dsi, dslots.size() - 1)])
+                dsi += 1
                 squads[idx].append(nu)
                 squad.append(nu)
                 added += 1
@@ -1129,12 +1206,14 @@ func _tick_garrisons(delta: float) -> void:
                         var house: BuildingBase = g["house"]
                         if house.burning or house.burned:
                                 squad_garrison[si] = null
+                                house.set_flag_color(GameConstants.COL_HOUSE_FLAG)
                                 _emerge_from_house(si, g, false)
                                 _toast_msg("خانه در آتش است! دسته بیرون پرید\nThe house is on fire! The squad rushed out")
                                 continue
                         g["t"] += delta
                         if g["t"] >= garrison_duration:
                                 squad_garrison[si] = null
+                                house.set_flag_color(GameConstants.COL_HOUSE_FLAG)
                                 _emerge_from_house(si, g, true)
 
 
@@ -1173,37 +1252,20 @@ func _trigger_game_over() -> void:
         _last_input_msg = "game over — all houses burned"
 
 
-## اسلات‌های آرایش ۱.۲ متری دور مرکز سلول (§۵.۲) — فقط روی سلول‌های قابل‌عبور
+## گام ۶R7 — آرایشِ دسته = خوشه‌ی متراکم دورِ نقطه‌ی فرمان (بازخورد کاربر):
+## «واحدها کاملاً متراکم؛ همه در یک بلوک» — فرمانده (عضو اول = حامل پرچم)
+## همیشه مرکز خوشه است تا پرچم وسطِ دسته بایستد (مثل تصویر مرجع)
 func _assign_slots(center: Vector2, idx: int) -> void:
-        var nav := PathService.nav
         var members: Array = squads[idx]
         var n := members.size()
-        var slots: Array[Vector2] = [center]
-        var ring := 1
-        while slots.size() < n and ring <= SLOT_MAX_RING:
-                var r := GameConstants.FORMATION_SPACING * float(ring)
-                var per := 6 * ring
-                for k in per:
-                        var ang := TAU * float(k) / float(per) + 0.4 * float(ring)
-                        var p := center + Vector2(cos(ang), sin(ang)) * r
-                        var np := _nearest_walkable_point(nav, p, 1.3)
-                        if np != Vector2.INF:
-                                slots.append(np)
-                                if slots.size() >= n:
-                                        break
-                ring += 1
-        # تضمین: همیشه به اندازه‌ی سربازها اسلات داریم
-        var guard := 0
-        while slots.size() < n and guard < 60:
-                var ang := _rng_scene() * TAU
-                var rr := 1.2 + float(guard % 3) * 1.2
-                var np := _nearest_walkable_point(nav, center + Vector2(cos(ang), sin(ang)) * rr, 1.6)
-                slots.append(np if np != Vector2.INF else center)
-                guard += 1
-        # اختصاص حریصانه: هر اسلات به نزدیک‌ترین سربازِ آزاد — اسلات روی مرکزِ
-        # بلوکِ آزاد می‌نشیند (گام ۶R5) تا سربازِ آیدل داخل تایل خودش باشد
-        var used := {}
-        for s in slots:
+        if n == 0:
+                return
+        var slots := _dense_slots(center, n)
+        members[0].set_slot(slots[0])   # فرمانده + پرچم = مرکز
+        # اختصاص حریصانه‌ی بقیه: هر اسلات به نزدیک‌ترین سربازِ آزاد
+        var used := {0: true}
+        for si in range(1, slots.size()):
+                var s := slots[si]
                 var best := -1
                 var best_d := 1e9
                 for i in members.size():
@@ -1214,7 +1276,7 @@ func _assign_slots(center: Vector2, idx: int) -> void:
                                 best_d = d
                                 best = i
                 if best >= 0:
-                        members[best].set_slot(_tile_slot(members[best], s))
+                        members[best].set_slot(s)
                         used[best] = true
 
 

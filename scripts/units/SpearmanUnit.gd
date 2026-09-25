@@ -21,9 +21,9 @@ const SPEAR_BRACE_DEG := 6.0
 
 
 func _build_gear() -> void:
-        # پیوت نیزه روی شانه‌ی راست
+        # پیوت نیزه روی شانه‌ی راست (بدنه‌ی چینی ۶R۷ — بالاتر و کشیده‌تر)
         _spear_pivot = Node3D.new()
-        _spear_pivot.position = Vector3(0.18, 0.4, 0.0)
+        _spear_pivot.position = Vector3(0.21, 0.44, 0.0)
         add_child(_spear_pivot)
 
         _spear = MeshInstance3D.new()

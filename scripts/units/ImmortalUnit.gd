@@ -16,14 +16,14 @@ var strikes_done := 0           # برای تست خودکار (گام ۶)
 
 
 func _build_gear() -> void:
-        # کلاه‌خود بلند هخامنشی
+        # کلاه‌خود بلند هخامنشی — روی نوکِ کلاهِ چینی (بدنه ۶R۷ تا ~۰٫۸۵m)
         _crest = MeshInstance3D.new()
         var cm := CylinderMesh.new()
         cm.top_radius = 0.02
         cm.bottom_radius = 0.12
         cm.height = 0.2
         _crest.mesh = cm
-        _crest.position.y = 0.76
+        _crest.position.y = 0.9
         var gold := StandardMaterial3D.new()
         gold.albedo_color = GameConstants.COL_GOLD
         gold.metallic = 0.6
@@ -31,12 +31,12 @@ func _build_gear() -> void:
         _crest.material_override = gold
         add_child(_crest)
 
-        # سپر مستطیلی — جلوی تنه (+Z مدل، سمت بینی جهت‌نما)
+        # سپر مستطیلی — جلوی شکم (+Z مدل، سمت بینی جهت‌نما)
         _shield = MeshInstance3D.new()
         var sm := BoxMesh.new()
-        sm.size = Vector3(0.44, 0.62, 0.05)
+        sm.size = Vector3(0.42, 0.56, 0.05)
         _shield.mesh = sm
-        _shield.position = Vector3(-0.16, 0.3, 0.2)
+        _shield.position = Vector3(-0.16, 0.34, 0.26)
         var shield_mat := StandardMaterial3D.new()
         shield_mat.albedo_color = GameConstants.COL_DOME_TILE  # کاشی فیروزه‌ای سپر
         shield_mat.roughness = 0.5

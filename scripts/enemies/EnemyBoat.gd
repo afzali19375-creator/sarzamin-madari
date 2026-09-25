@@ -1,37 +1,42 @@
 class_name EnemyBoat
 extends Node3D
-## ناوگان مهاجمان — گام ۶R3 (بازخورد کاربر):
-##   «قایق‌ها را بدون بادبان بساز؛ مینیمال بهتره» → همه‌ی انواع پارویی‌اند:
-##   بدنه + نوک خمیده + پاروهای کناری. هیچ دکل/بادبانی در کار نیست.
-##   «سربازهای دشمن روی قایق باشند و مشخص باشد» → مینی‌فیگرهای سرباز (رنگ
-##   بر اساس نوعِ بار) روی عرشه می‌ایستند و با قایق تکان می‌خورند.
-##   «قایق‌ها روی هم نروند» → جداسازی حین شنا (BOAT_SEP_DIST) + فاصله‌ی
-##   پهلوگیری بزرگ‌تر (FLEET_BOAT_GAP) + ظهور پلکانی از افق.
+## قایق مهاجمان — گام ۶R6 (بازخورد کاربر: «سیستم حمل‌ونقل واقعی»):
 ##
-## سه نوع قایق (تشخیص با اندازه/نوار/پرچمِ نوعِ بار):
-##   ROWBOAT  — کوچک، ۲ پارو (ظرفیت ۳)
-##   GALLEY   — متوسط، ۳ جفت پارو (ظرفیت ۶)
-##   WARSHIP  — بزرگ، ۴ جفت پارو + نوار طلایی (ظرفیت ۸)
+##   * سربازانِ روی قایق «موجودیت‌های واقعی»اند (EnemyBase با اسکریپت AI خودش)
+##     و «فرزند نود قایق»ند تا همراه آن حرکت کنند — آدمک‌های ثابتِ قبلی حذف شدند
+##   * مدل بصری قایق فقط بدنه‌ی چوبی است (بدنه + نوک خمیده + نوار + پاروها) —
+##     آدمک ثابت و پرچمِ بار حذف شد؛ نوعِ بار را خودِ سربازانِ روی عرشه نشان می‌دهند
+##   * ماشین حالت قایق:
+##       SAILING      → حرکت روی آب؛ سربازان Riding (AI/کولایدر خاموش)
+##       LANDING      → رسیدن به ساحل (رسیدن به لنگر تحلیلی — معادل Area3D)
+##       DISEMBARKING → reparent سربازان به ریشه‌ی صحنه با حفظ موقعیت جهانی
+##                      (بدون تلپورت) + واد تا سلول پیاده‌شدنِ خودشان
+##       DEPARTING    → قایق از ساحل دور می‌شود و ناپدید می‌گردد (queue_free)
+##   * «اسپاونر قدیمی» حذف شد: سربازانی که پیاده می‌شوند همان‌هایی‌اند که از
+##     ابتدا سوار بودند (کارگردان از اول آن‌ها را سوار قایق می‌کند)
 ##
-## پرچمِ پُپِ قایق رنگِ نوعِ بار را نشان می‌دهد:
-##   سبک = عاجی | سنگین = سرخ | پرتاب‌گر = فیروزه‌ای
-##
-## چرخه: SAILING (از دل افق دریا) → ANCHORED (پیاده‌شدن مهاجمان) — و همان‌جا
-## می‌ماند؛ هیچ بازگشتی در کار نیست (بازخورد کاربر گام ۶R2).
+## چرخه‌ی پیشین (پارک دائمی در ساحل — گام ۶R2) با دستور تازه‌ی کاربر جایگزین شد.
 
-enum BoatState { SAILING, ANCHORED }
+enum BoatState { SAILING, LANDING, DISEMBARKING, DEPARTING }
 enum BoatType { ROWBOAT, GALLEY, WARSHIP }
 
-signal landed(boat: EnemyBoat)
+signal landed(boat: EnemyBoat)                     # پهلوگیری کامل (شروع تخلیه)
+signal soldier_disembarked(boat: EnemyBoat, s: EnemyBase)   # هر پیاده‌شدن
+signal departed(boat: EnemyBoat)                   # آغاز دورشدن از ساحل
+signal gone(boat: EnemyBoat)                       # گام ۶R۷ — ناپدیدیِ نهایی (قبل از queue_free)
 
 const SEA_Y := -0.18                    # هم‌خوان با IslandGround.SEA_Y
-const REACH_EPS := 0.45                 # گام ۶R3: پهلوگیری بخشنده‌تر (ضد بن‌بستِ فشار قایق پارک‌شده)
+const REACH_EPS := 0.45                 # گام ۶R3: پهلوگیری بخشنده‌تر (ضد بن‌بست)
 
 var state := BoatState.SAILING
 var boat_type := BoatType.GALLEY
 var capacity := GameConstants.CAP_GALLEY
 var anchor_point: Vector3 = Vector3.ZERO   # نقطه‌ی لنگر (روی آب، کنار ساحل)
-## گام ۶R3 — نوعِ بار قایق: فقط «یک نوع سرباز» در هر قایق (بازخورد کاربر)
+## جهت بیرون جزیره (از مرکز به سمت دریا) — برای DEPARTING (ست توسط کارگردان)
+var outward_dir := Vector2.RIGHT
+## ریشه‌ی صحنه برای reparent سربازان (ست توسط کارگردان — raiders_root)
+var disembark_root: Node3D = null
+## گام ۶R6 — نوعِ بار قایق: فقط «یک نوع سرباز» در هر قایق
 var cargo_kind := "light"
 var cargo_count := 0
 
@@ -39,9 +44,16 @@ var _t := 0.0
 var _heading := 0.0
 var _speed_now := GameConstants.BOAT_CRUISE_SPEED
 var _deck_top := 0.3
-var _rider_nodes: Array[Node3D] = []      # سربازهای روی عرشه — برای شمارش تست
 var _stuck_t := 0.0                       # گام ۶R4 — ساعتیِ «بی‌پیشرفتی» پهلوگیری
 var _last_dist := 1e9
+var _hold_t := 0.0                        # توقف کوتاه LANDING
+var _dis_t := 0.0                         # شمارنده‌ی پیاده‌شدن پلکانی
+var _depart_t := 0.0                      # عمر مرحله‌ی DEPARTING (مهلت ایمنی)
+
+# سربازانِ سوار — موجودیت‌های واقعی (فرزند این نود)
+var _riders: Array[EnemyBase] = []
+var _disembark_cells: Array[Vector2] = []   # سلول پیاده‌شدنِ هر سرباز (کارگردان)
+var _next_rider := 0
 
 # ابعاد بدنه بر اساس نوع — طول در راستای +Z (جلو = +Z)
 var _hull_sz := Vector3(0.95, 0.42, 2.2)
@@ -55,7 +67,6 @@ func _ready() -> void:
         global_position.y = SEA_Y
         _apply_type_dims()
         _build_visuals()
-        _build_riders()
         add_to_group("enemy_boats")
         # رو به لنگر بچرخ، همان لحظه‌ی ظهور (رفع «گیج‌زدن» گام ۶R2)
         var to_anchor := Vector2(anchor_point.x - global_position.x,
@@ -92,7 +103,7 @@ func _build_visuals() -> void:
         cr_mat.albedo_color = GameConstants.COL_CRIMSON
         cr_mat.roughness = 0.7
 
-        # بدنه
+        # بدنه — «مدل بصری قایق فقط بدنه‌ی چوبی باشد»
         var hull := MeshInstance3D.new()
         var hm := BoxMesh.new()
         hm.size = _hull_sz
@@ -112,7 +123,7 @@ func _build_visuals() -> void:
                 prow.material_override = wood
                 add_child(prow)
 
-        # نوار سرخ روی بدنه (هویت مهاجم)
+        # نوار سرخ روی بدنه (هویت مهاجم — بخشی از بدنه)
         var stripe := MeshInstance3D.new()
         var sm := BoxMesh.new()
         sm.size = Vector3(_hull_sz.x + 0.04, 0.1, _hull_sz.z + 0.04)
@@ -151,94 +162,60 @@ func _build_visuals() -> void:
                         oar.material_override = wood
                         add_child(oar)
 
-        # پرچمِ نوعِ بار روی پُپ (عقب قایق) — تشخیص «هر قایق چه دارد» از دور
-        var pole := MeshInstance3D.new()
-        var pm2 := CylinderMesh.new()
-        pm2.top_radius = 0.018
-        pm2.bottom_radius = 0.022
-        pm2.height = 0.66
-        pole.mesh = pm2
-        pole.position = Vector3(0.0, _hull_sz.y + 0.3, -_prow_off + 0.06)
-        pole.material_override = wood
-        add_child(pole)
-
-        var flag := MeshInstance3D.new()
-        var fm := BoxMesh.new()
-        fm.size = Vector3(0.4, 0.22, 0.02)
-        flag.mesh = fm
-        flag.position = Vector3(0.2, _hull_sz.y + 0.52, -_prow_off + 0.06)
-        var flm := StandardMaterial3D.new()
-        flm.albedo_color = cargo_color(cargo_kind)
-        flm.roughness = 0.8
-        flag.material_override = flm
-        add_child(flag)
-
+        # ⚠️ آدمک‌های ثابت و پرچمِ بار حذف شدند — سربازانِ واقعی (فرزندان این نود)
+        # روی عرشه می‌ایستند (کارگردان با board_soldier سوارشان می‌کند)
         _deck_top = _hull_sz.y * 0.38 + _hull_sz.y * 0.5
-
-
-## رنگ نوعِ بار — از پالت هخامنشی:
-##   light = عاجی | heavy = سرخ | peltast = فیروزه‌ای
-static func cargo_color(kind: String) -> Color:
-        match kind:
-                "heavy":
-                        return GameConstants.COL_CRIMSON
-                "peltast":
-                        return GameConstants.COL_TURQUOISE
-                _:
-                        return GameConstants.COL_IVORY
-
-
-## مینی‌فیگرهای سرباز روی عرشه — دو ردیف پشت‌به‌پشت، رنگ = نوعِ بار
-## «باید سرباز های دشمن روی قایق باشند و این مشخص باشه» (بازخورد کاربر)
-func _build_riders() -> void:
-        var n := maxi(cargo_count, 0)
-        if n == 0:
-                return
-        var body_mat := StandardMaterial3D.new()
-        body_mat.albedo_color = cargo_color(cargo_kind)
-        body_mat.roughness = 0.8
-        var head_mat := StandardMaterial3D.new()
-        head_mat.albedo_color = GameConstants.COL_ROCK
-        head_mat.roughness = 0.85
-        # چیدمان: حداکثر ۳ نفر در هر ردیف؛ ردیف‌ها با فاصله در طول قایق
-        var per_row := mini(n, 3)
-        var rows := int(ceil(float(n) / float(per_row)))
-        var ri := 0
-        for r in rows:
-                var in_row := mini(per_row, n - r * per_row)
-                for c in in_row:
-                        var rider := Node3D.new()
-                        var lx := (float(c) - float(in_row - 1) * 0.5) * 0.24
-                        var lz := (float(r) - float(rows - 1) * 0.5) * 0.5
-                        rider.position = Vector3(lx, _deck_top, lz)
-                        var body := MeshInstance3D.new()
-                        var bm := CylinderMesh.new()
-                        bm.top_radius = 0.07
-                        bm.bottom_radius = 0.095
-                        bm.height = 0.3
-                        body.mesh = bm
-                        body.position.y = 0.15
-                        body.material_override = body_mat
-                        rider.add_child(body)
-                        var head := MeshInstance3D.new()
-                        var hm := SphereMesh.new()
-                        hm.radius = 0.055
-                        hm.height = 0.11
-                        head.mesh = hm
-                        head.position.y = 0.34
-                        head.material_override = head_mat
-                        rider.add_child(head)
-                        add_child(rider)
-                        _rider_nodes.append(rider)
-                        ri += 1
 
 
 func has_sail() -> bool:
         return false  # گام ۶R3: همه‌ی قایق‌ها بی‌بادبان (مینیمال — بازخورد کاربر)
 
 
+# ---------------- سوار/پیاده‌ی سربازان واقعی (گام ۶R6) ----------------
+
+## سوار کردن یک موجودیت واقعی روی عرشه — فرزند این قایق می‌شود
+## (باید قبل از add_child قایق یا حداقل قبل از اولین فریم صدا زده شود)
+func board_soldier(s: EnemyBase) -> void:
+        if s == null:
+                return
+        var idx := _riders.size()
+        _riders.append(s)
+        # چیدمان عرشه: حداکثر ۳ نفر در هر ردیف؛ ردیف‌ها در طول قایق
+        var per_row := mini(capacity, 3)
+        var row := idx / per_row
+        var col := idx % per_row
+        var in_row := mini(per_row, _riders.size() - row * per_row)
+        var lx := (float(col) - float(in_row - 1) * 0.5) * 0.26
+        var lz := (float(row) - float(maxi(1, int(ceil(float(capacity) / per_row))) - 1) * 0.5) * 0.55
+        s.position = Vector3(lx, _deck_top, lz)
+        s.riding = true          # _ready: خارج از hostiles + بدون AI
+        add_child(s)
+
+
+## سلول‌های پیاده‌شدن (کارگردان هنگام سیگنال landed ست می‌کند) + آغاز تخلیه
+func start_disembark(cells: Array[Vector2]) -> void:
+        _disembark_cells = cells.duplicate()
+        _next_rider = 0
+        _dis_t = 0.0
+        if state == BoatState.LANDING:
+                state = BoatState.DISEMBARKING
+
+
+## تعداد سربازانِ سوار — سازگار با تست‌های «riders on deck»
 func rider_count() -> int:
-        return _rider_nodes.size()
+        var n := 0
+        for r in _riders:
+                if is_instance_valid(r) and not r.is_dead():
+                        n += 1
+        return n
+
+
+func riders() -> Array[EnemyBase]:
+        return _riders.duplicate()
+
+
+func all_disembarked() -> bool:
+        return _next_rider >= _riders.size()
 
 
 func type_name() -> String:
@@ -251,7 +228,7 @@ func type_name() -> String:
                         return "galley"
 
 
-## ارتفاع عرشه در مختصات جهانی — نقطه‌ی spawn مهاجم هنگام پیاده‌شدن
+## ارتفاع عرشه در مختصات جهانی — نقطه‌ی سرباز هنگام پیاده‌شدن
 func deck_world_y() -> float:
         return global_position.y + _deck_top
 
@@ -273,11 +250,8 @@ func _process(delta: float) -> void:
                         _speed_now = lerpf(_speed_now, want, clampf(1.5 * delta, 0.0, 1.0))
                         _sail_toward(anchor_point, delta)
                         _separate_from_boats(delta)
-                        # گام ۶R4 — ضد قفل‌شدن پهلوگیری: دو موجِ هم‌ساحل (انتخاب
-                        # ساحل رندوم) ممکن است قایقی را که به لنگر خودش می‌رسد
-                        # با جداسازی بیرون برانند و هرگز به REACH_EPS نرسد.
-                        # اگر نزدیک لنگر است و ۳ ثانیه پیشرفتی نکرد → همان‌جا
-                        # لنگر می‌اندازد تا پیاده‌شدن قفل نشود.
+                        # گام ۶R4 — ضد قفل‌شدن پهلوگیری: دو موجِ هم‌ساحل ممکن است
+                        # قایق را با جداسازی بیرون برانند و هرگز به REACH_EPS نرسند
                         if dist <= GameConstants.BOAT_DOCK_ZONE * 2.2:
                                 if absf(dist - _last_dist) < 0.06:
                                         _stuck_t += delta
@@ -286,17 +260,73 @@ func _process(delta: float) -> void:
                                 _last_dist = dist
                                 if _stuck_t > 3.0 \
                                                 and dist <= GameConstants.BOAT_SEP_PARKED + 0.7:
-                                        state = BoatState.ANCHORED
-                                        landed.emit(self)
+                                        _begin_landing()
                                         return
                         else:
                                 _stuck_t = 0.0
                                 _last_dist = dist
                         if dist <= REACH_EPS:
-                                state = BoatState.ANCHORED
-                                landed.emit(self)
-                _:
-                        pass
+                                _begin_landing()
+                BoatState.LANDING:
+                        # توقف کوتاه روی خط ساحل؛ سپس تخلیه (کارگردان سلول‌ها را
+                        # در start_disembark می‌دهد؛ اگر نیامد، خودمان شروع می‌کنیم)
+                        _hold_t += delta
+                        if _hold_t >= GameConstants.BOAT_LANDING_HOLD \
+                                        and _disembark_cells.is_empty() == false:
+                                state = BoatState.DISEMBARKING
+                        elif _hold_t > 2.0:
+                                # کارگردان پاسخ نداد (گروه پاک شده) — بدون بارِ فعال
+                                state = BoatState.DISEMBARKING
+                BoatState.DISEMBARKING:
+                        # پیاده‌شدن پلکانی: هر BOAT_DISEMBARK_STAGGER یک سرباز
+                        # reparent می‌شود (حفظ موقعیت جهانی — بدون تلپورت)
+                        _dis_t -= delta
+                        if _dis_t <= 0.0 and _next_rider < _riders.size():
+                                _dis_t = GameConstants.BOAT_DISEMBARK_STAGGER
+                                var s := _riders[_next_rider]
+                                _next_rider += 1
+                                if is_instance_valid(s) and not s.is_dead():
+                                        var cell := Vector2(global_position.x,
+                                                        global_position.z)
+                                        if (_next_rider - 1) < _disembark_cells.size():
+                                                cell = _disembark_cells[_next_rider - 1]
+                                        s.detach_from_transport(disembark_root, cell)
+                                        soldier_disembarked.emit(self, s)
+                        if _next_rider >= _riders.size():
+                                _begin_departing()
+                BoatState.DEPARTING:
+                        # دورشدن از ساحل به سمت دریای باز + ناپدیدشدن
+                        _depart_t += delta
+                        var out3 := Vector3(outward_dir.x, 0.0, outward_dir.y)
+                        var target := anchor_point + out3 \
+                                        * GameConstants.BOAT_DEPART_FREE_DIST
+                        _speed_now = lerpf(_speed_now, GameConstants.BOAT_DEPART_SPEED,
+                                        clampf(0.8 * delta, 0.0, 1.0))
+                        _sail_toward(target, delta)
+                        var d_now := _xz().distance_to(
+                                        Vector2(anchor_point.x, anchor_point.z))
+                        # ⚠️ تلورانسِ ممیز شناور: چسبیدنِ دقیق به target ممکن است
+                        # d_now را ۲۵٫۹۹۹ نگه دارد — ۰٫۰۵m بخشندگی + مهلت ۴۰s
+                        if d_now >= GameConstants.BOAT_DEPART_FREE_DIST - 0.05 \
+                                        or _depart_t > 40.0:
+                                # گام ۶R۷ — سیگنالِ پیش از آزادشدن: کارگردان همان لحظه
+                                # گروه را می‌بندد (رفعِ تأخیر ۰٫۳ ثانیه‌ایِ پاکسازی)
+                                gone.emit(self)
+                                queue_free()
+
+
+## گذار SAILING → LANDING (رسیدن به ساحل)
+func _begin_landing() -> void:
+        state = BoatState.LANDING
+        _hold_t = 0.0
+        landed.emit(self)
+
+
+## گذار DISEMBARKING → DEPARTING
+func _begin_departing() -> void:
+        state = BoatState.DEPARTING
+        _depart_t = 0.0
+        departed.emit(self)
 
 
 func _xz() -> Vector2:
@@ -311,10 +341,10 @@ func _separate_from_boats(delta: float) -> void:
                 var ob := b as EnemyBoat
                 if ob == null or ob == self or not ob.is_inside_tree():
                         continue
-                # گام ۶R3 — قایقِ پارک‌شده شعاع کوچک‌تر (فقط ضدِ تداخل بدنه) تا
+                # قایقِ در حال تخلیه/لنگر شعاع کوچک‌تر (فقط ضدِ تداخل بدنه) تا
                 # قایقِ در حال پهلوگیری از رسیدن به لنگرِ خودش باز نماند
                 var sep_d := GameConstants.BOAT_SEP_DIST
-                if ob.state == BoatState.ANCHORED:
+                if ob.state != BoatState.SAILING:
                         sep_d = GameConstants.BOAT_SEP_PARKED
                 var op := ob._xz()
                 var diff := pos - op
@@ -341,7 +371,9 @@ func _sail_toward(target: Vector3, delta: float) -> void:
         global_position.x = pos.x
         global_position.z = pos.y
         # چرخش نرم به سمت حرکت
-        var target_h := atan2(to.x, to.y)
-        var diff := wrapf(target_h - _heading, -PI, PI)
-        _heading = wrapf(_heading + clampf(diff, -1.2 * delta, 1.2 * delta), -PI, PI)
-        rotation.y = _heading
+        if to.length() > 0.05:
+                var target_h := atan2(to.x, to.y)
+                var diff := wrapf(target_h - _heading, -PI, PI)
+                _heading = wrapf(_heading + clampf(diff, -1.2 * delta, 1.2 * delta),
+                                -PI, PI)
+                rotation.y = _heading

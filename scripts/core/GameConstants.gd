@@ -5,7 +5,33 @@ class_name GameConstants
 
 # ---------- هویت بیلد ----------
 ## روی صفحه‌ی تست و منو نمایش داده می‌شود تا همیشه مشخص باشد کاربر کدام نسخه را اجرا می‌کند
-const BUILD_ID := "2026-09-25-r14"
+const BUILD_ID := "2026-09-25-r16"
+
+# ---------- گام ۶R6 — بازطراحی سه‌بخشی (بازخورد کاربر) ----------
+## باگ ۱: قایق = وسیله‌ی حمل‌ونقل واقعی؛ سربازانِ سوار، موجودیت واقعی‌اند
+## (فرزند نود قایق) و پس از پهلوگیری reparent و پیاده می‌شوند؛ قایق بعد از
+## تخلیه از ساحل دور می‌شود و ناپدید می‌گردد (ماشین حالت قایق).
+const BOAT_LANDING_HOLD := 0.45           # توقف کوتاه روی خط ساحل (s)
+const BOAT_DISEMBARK_STAGGER := 0.28      # فاصله‌ی پیاده‌شدن سربازها (s)
+const BOAT_DEPART_SPEED := 3.4            # سرعت دورشدن قایق از ساحل (m/s)
+const BOAT_DEPART_FREE_DIST := 26.0       # فاصله‌ی ناپدیدشدن از لنگر (m)
+
+## باگ ۲: بلوک‌ها = چندضلعی‌های نامنظمِ ورونوی (نه شبکه‌ی شطرنجی) —
+## قطعات پازلِ به‌هم‌چسبیده با لبه‌ی مشترک؛ هیچ شکاف/شبکه‌ای بین‌شان نیست؛
+## رویه‌ی هر بلوک کاملاً مسطح تا سرباز رویش بایستد.
+const BLOCK_SITE_SPACING := 3.2           # فاصله‌ی شبکه‌ی اولیه‌ی سایت‌ها (m)
+const BLOCK_SITE_JITTER := 0.9            # لرزش قطعیِ سایت‌ها (irregular بودن)
+const BLOCK_SEAM_W := 0.05                # پهنای درزِ تیره‌ی روی لبه‌ی مشترک (m)
+
+## باگ ۳: پالت محیط به سبک مرجع (Low-Poly پاستلی — Bad North)
+const COL_CLIFF := Color("cfc9bc")        # صخره‌ی سفید-خاکستری لایه‌ی زیرین
+const COL_CLIFF_DARK := Color("a49d90")   # سایه‌ی صخره
+const COL_HOUSE_WALL := Color("f2ede1")   # دیوار سفید خانه
+const COL_HOUSE_ROOF := Color("8a6448")   # سقف قهوه‌ای
+const COL_HOUSE_ROOF_HI := Color("d9c8a8")# بژِ لبه‌ی سقف
+const COL_HOUSE_FLAG := Color("c9564a")   # پرچم سرخ/صورتی خانه
+const COL_ISLET := Color("b9b3a6")        # جزیره‌ک صخره‌ای در دل دریا
+const COL_DRIFTWOOD := Color("7a5c40")    # چوب شناور در آب کم‌عمق
 
 # ---------- زمان‌بندی و اسلوموشن (§۶ پرامت) ----------
 const SLOWMO_SCALE := 0.5                 # قانون: انتخاب جوخه یا نگه‌داشتن Space → 0.5
@@ -157,9 +183,10 @@ const ENEMY_RAID_STANDOFF := 2.6          # فاصله‌ی ایست مهاجم�
 const GARRISON_SNAP := 2.0                # فرمان روی سلولِ این فاصله از خانه = اشغال خانه (m)
 const GARRISON_EMERGE_RING := 2.1         # شعاع بیرون‌آمدن/آرایش بعد از خروج از خانه (m)
 ## گام ۶R2 — بازخورد کاربر: «پرچم‌ها واضح‌تر بشه» — پرچم بزرگ‌تر با دَرَک بلندتر
-const SQUAD_FLAG_W := 0.8                 # پهنای پرچم فرمانده (m)
-const SQUAD_FLAG_H := 0.52                # بلندی پارچه‌ی پرچم (m)
-const SQUAD_FLAG_POLE_H := 1.5            # بلندی دَرَک پرچم (m)
+## گام ۶R۷ — متناسب با تصویر مرجع: پرچمِ بزرگ روی میله‌ی بلند در مرکز خوشه
+const SQUAD_FLAG_W := 1.05                # پهنای پرچم فرمانده (m)
+const SQUAD_FLAG_H := 0.7                 # بلندی پارچه‌ی پرچم (m)
+const SQUAD_FLAG_POLE_H := 1.9            # بلندی دَرَک پرچم (m)
 
 # ---------- گام ۶R3 — ناوگان مهاجم: قایق مینیمال بی‌بادبان (بازخورد کاربر) ----------
 ## «قایق‌ها را بدون بادبان بساز؛ مینیمال بهتره» + «هر قایق یک نوع سرباز»
@@ -198,8 +225,8 @@ const COL_NIGHT := Color("0c2f36")        # منو
 
 # --- محیط ---
 const COL_SKY := Color("d4e4ec")              # آسمان
-const COL_WATER_SHALLOW := Color("4a90a4")    # آب کم‌عمق
-const COL_WATER_DEEP := Color("2c5f73")       # آب عمیق
+const COL_WATER_SHALLOW := Color("6c8a97")    # آب کم‌عمق — آبی-خاکستری مات
+const COL_WATER_DEEP := Color("46626f")       # آب عمیق — آبی-خاکستری مات
 const COL_BEACH_SAND := Color("e8d5a8")       # شن ساحل
 const COL_GRASS_LIGHT := Color("7a9a5c")      # چمن روشن
 const COL_GRASS_DARK := Color("5c7a44")       # چمن تیره

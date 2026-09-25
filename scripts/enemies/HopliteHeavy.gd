@@ -29,12 +29,12 @@ func _build_gear() -> void:
         # تنه‌ی تنومندتر
         _body.scale = Vector3(1.12, 1.06, 1.12)
 
-        # سپر بزرگ مستطیلی رو به +Z (سمت نگاه)
+        # سپر بزرگ مستطیلی رو به +Z (سمت نگاه) — جلوی شکمِ چینی
         _shield = MeshInstance3D.new()
         var sm := BoxMesh.new()
-        sm.size = Vector3(0.56, 0.74, 0.06)
+        sm.size = Vector3(0.54, 0.64, 0.06)
         _shield.mesh = sm
-        _shield.position = Vector3(-0.04, 0.34, 0.3)
+        _shield.position = Vector3(-0.04, 0.36, 0.3)
         var shield_mat := StandardMaterial3D.new()
         shield_mat.albedo_color = GameConstants.COL_FIRETEMPLE
         shield_mat.roughness = 0.55
@@ -46,7 +46,7 @@ func _build_gear() -> void:
         var rm := BoxMesh.new()
         rm.size = Vector3(0.6, 0.06, 0.07)
         rim.mesh = rm
-        rim.position = Vector3(-0.04, 0.7, 0.3)
+        rim.position = Vector3(-0.04, 0.67, 0.3)
         var rim_mat := StandardMaterial3D.new()
         rim_mat.albedo_color = GameConstants.COL_GOLD
         rim_mat.metallic = 0.5
@@ -61,7 +61,7 @@ func _build_gear() -> void:
         hm.bottom_radius = 0.13
         hm.height = 0.16
         helm.mesh = hm
-        helm.position.y = 0.76
+        helm.position.y = 0.92
         var hmat := StandardMaterial3D.new()
         hmat.albedo_color = GameConstants.COL_GOLD
         hmat.metallic = 0.5

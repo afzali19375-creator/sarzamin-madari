@@ -20,12 +20,12 @@ func _default_color() -> Color:
 
 
 func _build_gear() -> void:
-        # چُک سرخ روی کلاه
+        # چُک سرخ روی نوکِ کلاه (بدنه چینی ۶R۷)
         var crest := MeshInstance3D.new()
         var cm := BoxMesh.new()
         cm.size = Vector3(0.04, 0.12, 0.22)
         crest.mesh = cm
-        crest.position.y = 0.78
+        crest.position.y = 0.9
         var cmat := StandardMaterial3D.new()
         cmat.albedo_color = GameConstants.COL_CRIMSON
         cmat.roughness = 0.6
@@ -40,7 +40,7 @@ func _build_gear() -> void:
         sm.height = 1.3
         spear.mesh = sm
         spear.rotation_degrees = Vector3(70.0, 0.0, 0.0)
-        spear.position = Vector3(0.2, 0.4, 0.3)
+        spear.position = Vector3(0.22, 0.42, 0.3)
         var wood := StandardMaterial3D.new()
         wood.albedo_color = GameConstants.COL_DOOR_WOOD
         wood.roughness = 0.85

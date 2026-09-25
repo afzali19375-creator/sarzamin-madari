@@ -295,8 +295,8 @@ func _phase0_island_ready() -> void:
                                 mismatches += 1
         _check("navgrid_matches_island", mismatches == 0, "%d mismatches" % mismatches)
 
-        _check("command_cells_enough", target_scene.cmd_grid.cell_count >= 20,
-                        "%d cells" % target_scene.cmd_grid.cell_count)
+        _check("command_blocks_enough", target_scene.cmd_grid.cell_count >= 20,
+                        "%d blocks" % target_scene.cmd_grid.cell_count)
 
         # --- گام ۵: دسته‌ها، ترکیب و کلاس‌ها (گام ۶R4: ۳→۵ دسته) ---
         _check("squad_count_5", target_scene.squads.size() == 5,
@@ -416,6 +416,9 @@ func _pick_target_cells() -> void:
                 var center: Vector2 = e[2]
                 # گام ۶R — سلول نزدیک خانه = گاریسون؛ هدف فازهای فرمان نیست
                 if target_scene._alive_house_near(center) != null:
+                        continue
+                # گام ۶R6 — پرتوِ کلیک باید به همین بلوک برسد
+                if not _click_lands_on(center):
                         continue
                 var click_sp := _screen_of(Vector3(center.x,
                                 target_scene.ground.height_at_world(center) + 0.1, center.y))
@@ -718,8 +721,9 @@ func _phase5_wait_arrival_on_cell() -> void:
                         var tol := 1.5 if u.is_fidgeting() else 0.55
                         if uxz.distance_to(slot) <= tol:
                                 on_slot += 1
-                        # شعاع آرایش ۱.۲m × ۱ حلقه برای ۴ سرباز
-                        if slot.distance_to(_cell_b) <= 2.9:
+                        # شعاع آرایش — گام ۶R۷: اسلات‌های خوشه‌ی متراکم در یک بلوکِ
+                        # نقطه‌ی فرمان (تا ۱٫۹m — بدونِ تصاحبِ بلوکِ جدا برای هر سرباز)
+                        if slot.distance_to(_cell_b) <= 1.9:
                                 slot_in_cell += 1
                         centroid_acc += uxz
                         centroid_n += 1
@@ -733,12 +737,27 @@ func _phase5_wait_arrival_on_cell() -> void:
                                 "%d/%d in %.1fs" % [arrived, n, _t - _arrive_t0])
                 # قانون طلایی بازخورد کاربر: دسته «روی سلول انتخابی» می‌ایستد
                 _check("units_stand_ON_their_slots", on_slot >= 3, "%d/%d" % [on_slot, n])
+                # گام ۶R۷ — آرایشِ متراکم: همه‌ی اسلات‌ها در «یک بلوک» دورِ نقطه‌ی فرمان
+                # (خوشه‌ی فشرده تا ۱٫۵m + اسنپ ۰٫۴m — چندضلعی‌های ورونوی ~۳٫۲m فاصله)
                 _check("slots_in_formation_radius", slot_in_cell >= 3, "%d/%d" % [slot_in_cell, n])
                 var centroid := centroid_acc / float(maxi(centroid_n, 1))
-                # گام ۶R5 — آرایش روی «شبکه‌ی بلوک‌های ۲متری» می‌نشیند؛ مرکز جرم
-                # دسته می‌تواند تا ~۲ متر از سلولِ فرمان جابه‌جا باشد (تایل‌های آزاد)
-                _check("squad_centered_on_cell", centroid.distance_to(_cell_b) <= 2.0,
+                # خوشه‌ی متراکم: مرکز جرم حداکثر ~۰٫۷m از نقطه‌ی فرمان جابه‌جا می‌شود
+                _check("squad_centered_on_cell", centroid.distance_to(_cell_b) <= 1.3,
                                 "centroid=(%.1f,%.1f) cell=(%.1f,%.1f)" % [centroid.x, centroid.y, _cell_b.x, _cell_b.y])
+                # گام ۶R۷ — خواسته‌ی صریح کاربر: «همه در یک بلوک جمع شوند» —
+                # بیشترین فاصله‌ی زوجیِ سربازانِ رسیده ≤ قطرِ یک بلوک (~۲٫۸m)
+                var max_pair := 0.0
+                var arrived_list: Array = []
+                for u in s0:
+                        if u.is_arrived():
+                                arrived_list.append(Vector2(u.global_position.x,
+                                                u.global_position.z))
+                for ai in arrived_list.size():
+                        for aj in range(ai + 1, arrived_list.size()):
+                                max_pair = maxf(max_pair,
+                                                arrived_list[ai].distance_to(arrived_list[aj]))
+                _check("squad_packed_in_one_block", max_pair <= 2.8,
+                                "max_pair=%.1f" % max_pair)
                 _check("units_stand_on_smooth_ground", on_ground >= 3, "%d/%d" % [on_ground, n])
                 _check("units_parked_on_walkable", on_walkable >= 3, "%d/%d" % [on_walkable, n])
 
@@ -1070,6 +1089,25 @@ func _phase9_channel_isolation() -> void:
 
 
 ## سلول فرمان دور از نقطه‌ی داده‌شده + دور از همه‌ی سربازها (برای کلیک تمیز)
+## گام ۶R6 — اعتبارسنجیِ کلیک: پرتوِ واقعی دوربین روی این نقطه باید به «همین
+## بلوک» برسد (بلوک‌های ورونویِ ساحلی ممکن است پرتوِ مورب از کنارشان رد شود)
+func _click_lands_on(center: Vector2) -> bool:
+        var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
+        if cam == null:
+                return true
+        var sp := _screen_of(Vector3(center.x,
+                        target_scene.ground.height_at_world(center) + 0.1, center.y))
+        var hit: Dictionary = target_scene.ground.ray_pick(cam, sp)
+        if not bool(hit.get("in_island", false)):
+                return false
+        var nav: NavGrid = PathService.nav
+        var hxz: Vector2 = nav.cell_center(hit["cell"])
+        var info: Dictionary = target_scene.cmd_grid.cell_at_world(hxz)
+        if not bool(info.get("ok", false)):
+                return false
+        return (info["center"] as Vector2).distance_to(center) <= 0.9
+
+
 func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
         var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
         var best := Vector2.ZERO
@@ -1082,6 +1120,9 @@ func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
                         continue
                 # گام ۶R — سلول نزدیک خانه = گاریسون؛ هدفِ فرمان ساده نیست
                 if target_scene._alive_house_near(center) != null:
+                        continue
+                # گام ۶R6 — بلوکی که پرتوِ کلیک به آن نمی‌رسد، هدفِ تمیزی نیست
+                if not _click_lands_on(center):
                         continue
                 var click_sp := _screen_of(Vector3(center.x,
                                 target_scene.ground.height_at_world(center) + 0.1, center.y))
@@ -1274,8 +1315,9 @@ func _phase12_invasion_landing() -> void:
                         if n >= 6 or (_t - _sub_t) > 39.0:
                                 _check("boat_landed_six_raiders", n == 6,
                                                 "%d raiders (t=%.1f)" % [n, _t - _sub_t])
-                                _check("boat_anchored",
-                                                target_scene.director.boat_state(_group0) == 1,
+                                # گام ۶R6 — قایق به ساحل رسیده (LANDING/DISEMBARKING/DEPARTING)
+                                _check("boat_reached_shore",
+                                                target_scene.director.boat_state(_group0) >= 1,
                                                 "state=%d" % target_scene.director.boat_state(_group0))
                                 var ch := int((PathService.debug_info()["channels"] as Array).size())
                                 _check("enemy_channel_registered", ch >= 4,
@@ -1655,19 +1697,19 @@ func _phase15_permanence_and_clear() -> void:
                                 _check("wave_cleared_signal", _wave_cleared_fired)
                                 _check("all_raiders_dead",
                                                 target_scene.director.alive_raiders_total() == 0)
-                                # گام ۶R2 — قایق بعد از مرگ همه‌ی مهاجمانش «می‌ماند»
-                                _check("boat_stays_anchored_after_death",
-                                                target_scene.director.boat_state(_group0) == 1,
+                                # گام ۶R6 — قایق بعد از مرگ مهاجمانش «دور می‌شود»:
+                                # DEPARTING یا کاملاً از صحنه رفته (گروه بسته = ‎-۱)
+                                _check("boat_departed_after_death",
+                                                target_scene.director.boat_state(_group0) >= 2
+                                                or target_scene.director.boat_state(_group0) == -1,
                                                 "state=%d" % target_scene.director.boat_state(_group0))
-                                _check("boats_remain_on_shore",
-                                                target_scene.director.boats_active() >= 1,
-                                                "%d" % target_scene.director.boats_active())
                                 _sub = 3
                                 _sub_t = _t
                 3:
                         if _t - _sub_t >= 2.0:
-                                _check("boat_still_parked_after_2s",
-                                                target_scene.director.boat_state(_group0) == 1,
+                                _check("boat_gone_or_sailing_away",
+                                                target_scene.director.boat_state(_group0) >= 2
+                                                or target_scene.director.boat_state(_group0) == -1,
                                                 "state=%d" % target_scene.director.boat_state(_group0))
                                 # سلامت نهایی: زنده‌ها روی سلول قابل‌عبور + زمان نرمال
                                 var all_ok := true
@@ -2034,51 +2076,78 @@ func _phase19_fleet_touch_gameover() -> void:
                                         "solo→2")
                         var ccg: int = target_scene.cmd_grid.cell_count
                         _check("command_cells_exist", ccg > 0, "%d" % ccg)
-                        # — گام ۶R5: تایل‌های نرم سراسری — همیشه نمایان، خانه در یک
-                        #   بلوک، سرباز آیدل داخل بلوک خودش، هاله فقط از اضلاع —
-                        _check("command_tiles_built",
+                        # — گام ۶R6: بلوک‌های ورونویِ نامنظم — پوششِ کاملِ بدون شکاف،
+                        #   خانه در یک بلوک، سربازِ آیدل داخل بلوکِ خودش —
+                        _check("command_blocks_built",
                                         target_scene.cmd_grid.beam_instance_count() == ccg,
-                                        "tiles=%d cells=%d" % [
+                                        "blocks=%d count=%d" % [
                                         target_scene.cmd_grid.beam_instance_count(), ccg])
-                        _check("command_tiles_always_visible",
+                        _check("command_blocks_always_visible",
                                         target_scene.cmd_grid.tiles_visible())
-                        # خانه‌ها دقیقاً وسط بلوکِ خودشان (یک سهم از شبکه)
-                        var house_on_tile := true
+                        # پوشش کامل: هر سلولِ قابل‌رفت یک عضو از پازلِ چندضلعی‌هاست
+                        # (اتصال لبه‌ای — هیچ شکافی در ناحیه‌ی قابل‌رفت نیست)
+                        var navw: NavGrid = PathService.nav
+                        var covered := 0
+                        var walk_n := 0
+                        for cy2 in navw.height:
+                                for cx2 in navw.width:
+                                        var c2 := Vector2i(cx2, cy2)
+                                        if not navw.is_walkable(c2):
+                                                continue
+                                        walk_n += 1
+                                        if bool(target_scene.cmd_grid.block_at_world(
+                                                        navw.cell_center(c2)).get("ok", false)):
+                                                covered += 1
+                        _check("blocks_cover_all_walkable",
+                                        walk_n == 0 or covered * 100 >= walk_n * 97,
+                                        "%d/%d" % [covered, walk_n])
+                        # خانه دقیقاً وسطِ بلوکِ خودش + بلوکش «اشغالِ دائمی» است
+                        var house_on_block := true
                         var house_dbg := ""
                         for hp3 in target_scene.props.house_positions:
                                 var hxz3 := Vector2(hp3.x, hp3.z)
                                 var hi3: Dictionary = target_scene.cmd_grid \
-                                                .cell_at_world(hxz3)
+                                                .block_at_world(hxz3)
                                 if not bool(hi3.get("ok", false)):
-                                        house_on_tile = false
-                                        house_dbg = "no tile @ %s" % hxz3
+                                        house_on_block = false
+                                        house_dbg = "no block @ %s" % hxz3
                                         break
-                                var hd3: float = hxz3.distance_to(hi3["center"])
-                                if hd3 > 0.06:
-                                        house_on_tile = false
-                                        house_dbg = "off %.2fm" % hd3
+                                if target_scene.cmd_grid.owner_of(int(hi3["index"])) != -1:
+                                        house_on_block = false
+                                        house_dbg = "not occupied @ %s" % hxz3
                                         break
-                        _check("houses_centered_on_tiles", house_on_tile, house_dbg)
-                        # سربازهای آیدل داخل بلوکِ خودشان ایستاده‌اند
-                        var in_tiles := 0
+                        _check("houses_own_one_block", house_on_block, house_dbg)
+                        # گام ۶R۷ — خواسته‌ی کاربر (تصویر مرجع): «همه در یک بلوک
+                        # جمع شوند» — سربازانِ آیدلِ هر دسته در خوشه‌ی متراکم دورِ
+                        # فرمانده‌اند؛ بیشترین فاصله‌ی زوجی ≤ قطرِ یک بلوک (~۲٫۲m)
+                        var packed := 0
                         var idle_n := 0
-                        for u19 in target_scene.squad:
-                                if not is_instance_valid(u19) or u19.is_dead() \
-                                                or u19.garrisoned:
+                        var idle_dbg := ""
+                        for si7 in target_scene.squads.size():
+                                var mem7: Array = []
+                                for u19 in target_scene.squads[si7]:
+                                        if is_instance_valid(u19) and not u19.is_dead() \
+                                                        and not u19.garrisoned \
+                                                        and u19.brain_state() == &"idle":
+                                                mem7.append(Vector2(
+                                                                u19.global_position.x,
+                                                                u19.global_position.z))
+                                if mem7.size() < 2:
+                                        packed += mem7.size()
+                                        idle_n += mem7.size()
                                         continue
-                                if u19.brain_state() != &"idle":
-                                        continue
-                                idle_n += 1
-                                var uxz3 := Vector2(u19.global_position.x,
-                                                u19.global_position.z)
-                                var ui3: Dictionary = target_scene.cmd_grid \
-                                                .cell_at_world(uxz3)
-                                if bool(ui3.get("ok", false)) \
-                                                and uxz3.distance_to(ui3["center"]) < 0.55:
-                                        in_tiles += 1
-                        _check("idle_units_stand_in_tiles",
-                                        idle_n == 0 or in_tiles * 10 >= idle_n * 6,
-                                        "%d/%d" % [in_tiles, idle_n])
+                                idle_n += mem7.size()
+                                var mp7 := 0.0
+                                for ai7 in mem7.size():
+                                        for aj7 in range(ai7 + 1, mem7.size()):
+                                                mp7 = maxf(mp7, mem7[ai7].distance_to(mem7[aj7]))
+                                if mp7 <= 2.2:
+                                        packed += mem7.size()
+                                else:
+                                        idle_dbg += " s%d=%.1f" % [si7, mp7]
+                        _check("idle_squads_packed_dense",
+                                        idle_n == 0 or packed * 10 >= idle_n * 8,
+                                        "%d/%d%s" % [packed, idle_n, idle_dbg])
                         target_scene.cmd_grid.set_command_mode(true)
                         _check("command_mode_flag_on",
                                         target_scene.cmd_grid.is_command_mode())
@@ -2214,14 +2283,14 @@ func _phase19_fleet_touch_gameover() -> void:
                                                 or e2.last_disembark_target == Vector2.INF:
                                         continue
                                 # «پیاده‌شدن کنار همان قایق» = مقصدِ اختصاصیِ هر مهاجم
-                                # خودِ ساختار داده‌ها ≤ ۴.۵m از قایقِ خودش است
-                                # (مستقل از زمان — مهاجمِ پیاده‌شده ممکن است الان
-                                # چند متری خانه باشد)
+                                # خودِ ساختار داده‌ها ≤ ۴.۵m از «لنگرِ» قایقِ خودش است
+                                # (لنگر ثابت است — گام ۶R6: قایق بعد از تخلیه دور می‌شود
+                                # و مقایسه با موقعیتِ «فعلی» آن غلط می‌شد)
                                 var bd2 := 1e9
                                 for bt2 in bw2:
                                         bd2 = minf(bd2, e2.last_disembark_target.distance_to(
-                                                        Vector2(bt2.global_position.x,
-                                                        bt2.global_position.z)))
+                                                        Vector2(bt2.anchor_point.x,
+                                                        bt2.anchor_point.z)))
                                 if bd2 <= 4.5:
                                         _dis_latched[e2.get_instance_id()] = true
                                         _dis_near += 1
@@ -2257,17 +2326,38 @@ func _phase19_fleet_touch_gameover() -> void:
                                 _sub = 3
                                 _sub_t = _t
                 3:
-                        # قایق‌ها بعد از مرگ سربازها هم در ساحل می‌مانند (بازخورد کاربر)
-                        if _t - _sub_t >= 2.0:
-                                _check("rowboat_stays_after_death",
-                                                target_scene.director.boat_state(_fleet_g3) == 1,
-                                                "state=%d" % target_scene.director.boat_state(_fleet_g3))
-                                _check("warship_stays_after_death",
-                                                target_scene.director.boat_state(_fleet_gw) == 1,
-                                                "state=%d" % target_scene.director.boat_state(_fleet_gw))
-                                _check("boats_still_active",
-                                                target_scene.director.boats_active() >= 3,
-                                                "%d" % target_scene.director.boats_active())
+                        # گام ۶R6 — قایق‌ها بعد از تخلیه از ساحل دور می‌شوند و
+                        # ناپدید می‌گردند (BOAT_DEPART_FREE_DIST) — با مهلتِ ۳۰s
+                        # صبر می‌کنیم تا همه از صحنه بروند
+                        var departed_ok := true
+                        for gchk in [_fleet_g3, _fleet_g8, _fleet_gw]:
+                                for bt3 in target_scene.director.group_boats(gchk):
+                                        if is_instance_valid(bt3) \
+                                                        and int(bt3.state) < 2:
+                                                departed_ok = false
+                        if (departed_ok and target_scene.director.boats_active() == 0) \
+                                        or (_t - _sub_t) > 30.0:
+                                var dbg_boats := ""
+                                for gchk in [_fleet_g3, _fleet_g8, _fleet_gw]:
+                                        for bt4 in target_scene.director.group_boats(gchk):
+                                                if is_instance_valid(bt4):
+                                                        var d4: float = Vector2(bt4.global_position.x,
+                                                                        bt4.global_position.z).distance_to(
+                                                                        Vector2(bt4.anchor_point.x,
+                                                                        bt4.anchor_point.z))
+                                                        dbg_boats += " [st=%d d=%.1f riders=%d next=%d/%d]" % [
+                                                                        int(bt4.state), d4,
+                                                                        bt4.rider_count(),
+                                                                        bt4._next_rider,
+                                                                        bt4._riders.size()]
+                                _check("boats_departed_after_drop",
+                                                target_scene.director.boats_active() == 0,
+                                                "%d active (t=%.1f)%s" % [
+                                                target_scene.director.boats_active(),
+                                                _t - _sub_t, dbg_boats])
+                                _check("fleet_groups_cleaned",
+                                                target_scene.director.groups_count() == 0,
+                                                "%d groups" % target_scene.director.groups_count())
                                 # — چرخش دوربین با کشیدن دکمه‌ی چپ موس —
                                 # (روی اندروید، لمس با emulate_mouse_from_touch
                                 # به همین دنباله‌ی رویداد تبدیل می‌شود)

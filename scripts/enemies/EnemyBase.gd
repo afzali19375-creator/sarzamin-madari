@@ -47,6 +47,9 @@ var _wade_t := 0.0                        # مدت پیاده‌شدن — مه�
 
 var dead := false
 var engaged_unit: Node3D = null     # سربازِ درگیر (برای تست/کارگردان)
+## گام ۶R6 — سوارِ قایق: موجودیت واقعیِ روی عرشه — AI و گروهِ hostiles
+## غیرفعال‌اند تا قایق با خیال راحت حمل‌شان کند؛ با پیاده‌شدن فعال می‌شوند
+var riding := false
 ## بنای هدف برای مشعل — کارگردان ست می‌کند (گام ۶R)
 var target_house: BuildingBase = null
 ## شمارنده‌ی مشعل‌های پرتاب‌شده — برای تست خودکار (گام ۶R)
@@ -74,7 +77,7 @@ var _march_best_gd := 1e9         # بهترین فاصله تا هدف از آ�
 var _march_avoid_side := 0        # ‎+۱‎ پادساعتگرد / ‎−۱‎ ساعتگرد — تعهد سمت
 var _march_avoid_hold := 0.0      # ثانیه‌ی باقی‌مانده‌ی تعهد
 
-var _mat: StandardMaterial3D
+var _mat: ShaderMaterial
 var _body: MeshInstance3D
 var _body_color: Color
 
@@ -85,35 +88,26 @@ func _init() -> void:
 
 func _ready() -> void:
         add_to_group("hostiles")
+        if riding:
+                # گام ۶R6 — سوارِ قایق: هنوز «موجودیت فعال» نیست (کارگردان
+                # هنگام پیاده‌شدن فعالش می‌کند) — بدون AI، بدون گروه hostiles
+                remove_from_group("hostiles")
+                set_process(false)
         _bob_t = randf() * TAU
         _y_smooth = global_position.y
         _heading = rotation.y
         _channel = GameConstants.ENEMY_CHANNEL_BASE + raid_group
         _body_color = _default_color()
-        _mat = StandardMaterial3D.new()
-        _mat.albedo_color = _body_color
-        _mat.roughness = 0.8
+        # گام ۶R۷ — بدنه‌ی چینیِ اشکی با گرادیان (هم‌سبک با یونیت‌های خودی)
+        _mat = ChibiLook.shader_mat(_body_color)
 
-        # تنه
         _body = MeshInstance3D.new()
-        var bm := CylinderMesh.new()
-        bm.top_radius = 0.15
-        bm.bottom_radius = 0.21
-        bm.height = 0.52
-        _body.mesh = bm
-        _body.position.y = 0.26
+        _body.mesh = ChibiLook.body_mesh()
+        _body.position.y = 0.0
         _body.material_override = _mat
         add_child(_body)
-
-        # سر
-        var head := MeshInstance3D.new()
-        var hm := SphereMesh.new()
-        hm.radius = 0.11
-        hm.height = 0.22
-        head.mesh = hm
-        head.position.y = 0.6
-        head.material_override = _mat
-        add_child(head)
+        ChibiLook.add_face(_body)
+        ChibiLook.add_legs(self, _body_color)
 
         # تجهیزات اختصاصی کلاس (کلاه‌خود/سپر/نیزه‌ی پرتاب)
         _build_gear()
@@ -497,9 +491,15 @@ func _turn_to(target: float, delta: float) -> void:
 
 
 func _bob_visual(moving: bool) -> void:
-        var target := 0.26 + (absf(sin(_bob_t * 9.0)) * 0.045 if moving else 0.0)
+        var target := absf(sin(_bob_t * 9.0)) * 0.05 if moving else 0.0
         var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
         _body.position.y = lerpf(_body.position.y, target, k)
+
+
+## رنگ پایه‌ی بدنه (گرادیانِ چینی از همین مشتق می‌شود)
+func _set_color(c: Color) -> void:
+        _body_color = c
+        ChibiLook.set_base(_mat, c)
 
 
 ## یورش کوتاه به جلو هنگام ضربه/پرتاب
@@ -515,7 +515,8 @@ func _tick_flash(delta: float) -> void:
         _flash_t += delta
         if _flash_t >= 0.12:
                 _flashing = false
-                _mat.albedo_color = _flash_restore
+                ChibiLook.set_flash(_mat, 0.0)
+                _set_color(_flash_restore)
 
 
 # ---------------- آسیب و مرگ (§۷: دائمی) ----------------
@@ -528,6 +529,43 @@ func is_alive() -> bool:
         return not dead
 
 
+## گام ۶R6 — سوار/پیاده‌ی قایق:
+##   سوار  → فرزندِ قایق، پردازش خاموش، خارج از گروه hostiles (تیرِ خودی
+##           و جست‌وجوی سرباز پارسی او را نمی‌بیند)
+##   پیاده → reparent قبلاً انجام شده؛ اینجا AI روشن و وادِ ساحل آغاز می‌شود
+func set_riding(on: bool) -> void:
+        if riding == on:
+                return
+        riding = on
+        set_process(not on)
+        if on:
+                if is_in_group("hostiles"):
+                        remove_from_group("hostiles")
+                engaged_unit = null
+                _wading = false
+                _wade_t = 0.0
+        else:
+                if not is_in_group("hostiles"):
+                        add_to_group("hostiles")
+                _y_smooth = global_position.y
+                _heading = rotation.y
+
+
+## گام ۶R6 — پیاده‌شدن از قایق: حفظ موقعیت جهانی (بدون تلپورت) + تغییر والد
+## صحنه اصلی باید خودش add_child را انجام دهد (reparent با حفظ global_position)
+func detach_from_transport(new_parent: Node3D, disembark_at: Vector2) -> void:
+        var gp := global_position
+        var old_parent := get_parent()
+        if old_parent != null:
+                old_parent.remove_child(self)
+        if new_parent != null:
+                new_parent.add_child(self)
+        global_position = gp          # همان نقطه‌ی عرشه — یک‌باره تلپورت نمی‌شود
+        disembark_target = disembark_at
+        _wade_t = 0.0
+        set_riding(false)
+
+
 ## ضربه (تیر/ضربه‌ی تن‌به‌تن) — گام ۶R2: اگر «attacker» شناخته باشد، مهاجم
 ## به شلیک‌کننده تلافی می‌کند (تعقیبِ کوتاه حتی بیرون شعاع توجه)
 ## گام ۶R3: پس‌زنی کوتاه در جهت ضربه — حس جسمِ درگیری
@@ -536,8 +574,8 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
         if dead:
                 return
         hp -= dmg
-        _flash_restore = _mat.albedo_color
-        _mat.albedo_color = Color(1, 1, 1, 1)
+        _flash_restore = _body_color
+        ChibiLook.set_flash(_mat, 1.0)
         _flash_t = 0.0
         _flashing = true
         _knockback(from_dir)
@@ -578,7 +616,8 @@ func die() -> void:
         tw.set_parallel(true)
         tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
         tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
-        _mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-        tw.tween_property(_mat, "albedo_color:a", 0.0, GameConstants.DEATH_FADE_SECONDS) \
-                        .set_delay(0.35)
+        # گام ۶R۷ — محوِ مرگ روی همه‌ی مش‌ها (شیدر Opaque می‌ماند)
+        for p in ChibiLook.fade_parts(self):
+                tw.tween_property(p, "transparency", 1.0,
+                                GameConstants.DEATH_FADE_SECONDS).set_delay(0.35)
         tw.chain().tween_callback(queue_free)
