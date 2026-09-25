@@ -218,6 +218,8 @@ func _process(delta: float) -> void:
                 19:
                         _phase19_fleet_touch_gameover()
                 20:
+                        _phase20_battle_scene()
+                21:
                         _finish()
 
 
@@ -1669,9 +1671,23 @@ func _phase15_permanence_and_clear() -> void:
                                 return
                         if _t - _sub_t < 1.2:
                                 return
+                        # گام ۶R۹-fix — اگر فرمانده‌ای در نبردِ فاز ۱۴ افتاده باشد
+                        # (تسک A: مرگ فرمانده = انحلال + فرار)، بازماندگانِ در حالِ
+                        # فرار تا رسیدن به ساحل در squad می‌مانند و بعد خارج می‌شوند؛
+                        # شمارشِ مرگِ آزمایشی فقط بعد از تخلیه‌ی کاملِ فراری‌ها قطعی است
+                        var fleeing_n := 0
+                        for u in target_scene.squad:
+                                if is_instance_valid(u) and not u.is_dead() \
+                                                and (u as UnitBase).brain_state() == &"flee":
+                                        fleeing_n += 1
+                        if fleeing_n > 0 and _t - _sub_t < 40.0:
+                                return
                         _units_before = target_scene.squad.size()
                         for u in target_scene.squad:
-                                if is_instance_valid(u) and not u.is_dead():
+                                # گام ۶R9 — فرمانده‌ها نمی‌میرند اینجا (مرگ فرمانده =
+                                # انحلال گروه — فاز ۱۶ این را جداگانه می‌آزماید)
+                                if is_instance_valid(u) and not u.is_dead() \
+                                                and not u.is_commander:
                                         _killed_unit = u
                                         u.take_hit(99)
                                         break
@@ -1686,8 +1702,19 @@ func _phase15_permanence_and_clear() -> void:
                                                 target_scene.squad.size() == _units_before - 1,
                                                 "%d→%d" % [_units_before,
                                                 target_scene.squad.size()])
-                                _check("dead_unit_freed_after_anim",
-                                                not is_instance_valid(_killed_unit))
+                                # گام ۶R۹ — جنازه می‌ماند: جسد افتاده روی زمین (نه آزادشدن)
+                                var corpse_ok := false
+                                if is_instance_valid(_killed_unit):
+                                        corpse_ok = (_killed_unit as UnitBase).is_dead() \
+                                                        and (_killed_unit as Node3D).rotation.z > 1.2
+                                _check("dead_unit_corpse_remains", corpse_ok,
+                                                "valid=%s" % str(is_instance_valid(_killed_unit)))
+                                _check("blood_stain_on_friendly_death",
+                                                get_tree().get_nodes_in_group("blood_stain").size() >= 1,
+                                                "%d stains" % get_tree().get_nodes_in_group("blood_stain").size())
+                                _check("corpse_in_scene_yard",
+                                                get_tree().get_nodes_in_group("corpses").size() >= 1,
+                                                "%d corpses" % get_tree().get_nodes_in_group("corpses").size())
                                 # پاکسازی موج: همه‌ی مهاجمان کشته می‌شوند
                                 target_scene.director.kill_all_raiders()
                                 _sub = 2
@@ -1697,20 +1724,19 @@ func _phase15_permanence_and_clear() -> void:
                                 _check("wave_cleared_signal", _wave_cleared_fired)
                                 _check("all_raiders_dead",
                                                 target_scene.director.alive_raiders_total() == 0)
-                                # گام ۶R6 — قایق بعد از مرگ مهاجمانش «دور می‌شود»:
-                                # DEPARTING یا کاملاً از صحنه رفته (گروه بسته = ‎-۱)
-                                _check("boat_departed_after_death",
-                                                target_scene.director.boat_state(_group0) >= 2
-                                                or target_scene.director.boat_state(_group0) == -1,
-                                                "state=%d" % target_scene.director.boat_state(_group0))
+                                # گام ۶R۹ — قایق بعد از مرگ مهاجمانش «لنگر می‌ماند»:
+                                # پارک دائمی در ساحل (PARKED) — نه دورشدن، نه ناپدیدی
+                                var parked_info := _parked_boats_info()
+                                _check("boat_parked_after_death",
+                                                _parked_boats_count() >= 1, parked_info)
                                 _sub = 3
                                 _sub_t = _t
                 3:
                         if _t - _sub_t >= 2.0:
-                                _check("boat_gone_or_sailing_away",
-                                                target_scene.director.boat_state(_group0) >= 2
-                                                or target_scene.director.boat_state(_group0) == -1,
-                                                "state=%d" % target_scene.director.boat_state(_group0))
+                                # گام ۶R۹ — قایقِ پارک‌شده بعد از ۲ ثانیه هم همان‌جاست
+                                _check("boat_still_parked_later",
+                                                _parked_boats_count() >= 1,
+                                                _parked_boats_info())
                                 # سلامت نهایی: زنده‌ها روی سلول قابل‌عبور + زمان نرمال
                                 var all_ok := true
                                 var bad_info := ""
@@ -1762,9 +1788,11 @@ func _phase16_flags_and_camera() -> void:
                                                 - _yaw_before), -PI, PI))
                                 _check("camera_rotates_with_arrow_keys", rad_to_deg(dyaw2) > 10.0,
                                                 "%.1f deg" % rad_to_deg(dyaw2))
-                                # دسته‌ای با حداقل ۲ عضو زنده برای تست انتقال پرچم
+                                # گام ۶R9 — تسک A: دسته‌ای با حداقل ۲ عضو زنده برای
+                                # آزمونِ انحلال (آخرین دسته — تا دسته‌های ۰..۳ برای فازهای
+                                # بعدی دست‌نخورده بمانند)
                                 _flag_squad = -1
-                                for si in target_scene.squads.size():
+                                for si in range(target_scene.squads.size() - 1, -1, -1):
                                         var alive_n := 0
                                         for u in target_scene.squads[si]:
                                                 if is_instance_valid(u) and not u.is_dead():
@@ -1772,7 +1800,7 @@ func _phase16_flags_and_camera() -> void:
                                         if alive_n >= 2:
                                                 _flag_squad = si
                                                 break
-                                _check("squad_for_flag_transfer_found", _flag_squad >= 0)
+                                _check("squad_for_dissolution_found", _flag_squad >= 0)
                                 if _flag_squad >= 0:
                                         for u in target_scene.squads[_flag_squad]:
                                                 if is_instance_valid(u) and not u.is_dead() \
@@ -1784,19 +1812,71 @@ func _phase16_flags_and_camera() -> void:
                                 _sub_t = _t
                 3:
                         if _t - _sub_t >= 0.7:
-                                if _flag_squad >= 0:
-                                        var ok := false
-                                        for u in target_scene.squads[_flag_squad]:
-                                                if is_instance_valid(u) and not u.is_dead() \
-                                                                and u.is_commander:
-                                                        var has := false
-                                                        for c in u.get_children():
-                                                                if c is SquadFlag:
-                                                                        has = true
-                                                        ok = has
-                                                        break
-                                        _check("flag_transfers_on_commander_death", ok,
+                                if _flag_squad >= 0 and is_instance_valid(_flag_dead_cmd):
+                                        # گام ۶R9 — تسک A: گروه منحل شد (وضعیت ثبت شد)
+                                        var dis_ok: bool = _flag_squad < \
+                                                        target_scene.squad_dissolved.size() \
+                                                        and target_scene.squad_dissolved[_flag_squad]
+                                        _check("squad_dissolved_on_commander_death", dis_ok,
                                                         "squad=%d" % _flag_squad)
+                                        # پرتره‌ی خاکستری: پرچم + پیکرِ فرمانده
+                                        var has_flag := false
+                                        var gray_flag := false
+                                        for c in _flag_dead_cmd.get_children():
+                                                if c is SquadFlag:
+                                                        has_flag = true
+                                                        gray_flag = (c as SquadFlag) \
+                                                                        .flag_color() \
+                                                                        .is_equal_approx(
+                                                                        GameConstants.COL_FLAG_GRAY)
+                                        _check("flag_grayed_on_commander_death",
+                                                        has_flag and gray_flag,
+                                                        "has=%s gray=%s" % [has_flag, gray_flag])
+                                        _check("commander_body_grayed",
+                                                        _flag_dead_cmd.body_color() \
+                                                        .is_equal_approx(
+                                                        GameConstants.COL_FLAG_GRAY),
+                                                        "col=%s" % str(_flag_dead_cmd.body_color()))
+                                        # بازماندگان: همه در حالت فرار — و نبرد را رها کرده‌اند
+                                        var fleeing := 0
+                                        var alive_total := 0
+                                        for u in target_scene.squads[_flag_squad]:
+                                                if is_instance_valid(u) and not u.is_dead():
+                                                        alive_total += 1
+                                                        if (u as UnitBase).brain_state() == &"flee":
+                                                                fleeing += 1
+                                        _check("dissolved_members_flee",
+                                                        alive_total > 0 and fleeing == alive_total,
+                                                        "%d/%d fleeing" % [fleeing, alive_total])
+                                        # فرمان به گروهِ منحل نادیده گرفته می‌شود (هدفِ کانال ثابت)
+                                        # گام ۶R9-fix — مبنای نقطه‌ی فرمانِ ساختگی = جسدِ فرمانده
+                                        # (پایدار و همیشه معتبر)؛ squads[si] ممکن است در
+                                        # همین ۰٫۷ ثانیه خالی شده باشد و [0] خطای اندیس بدهد
+                                        var goal0: Vector2 = PathService.goal_for(_flag_squad)
+                                        var wp0: int = target_scene.squad_waypoints[_flag_squad].size()
+                                        var fake_center: Vector2 = _xz(_flag_dead_cmd) \
+                                                        + Vector2(6.0, -4.0)
+                                        target_scene._issue_move_to(fake_center,
+                                                        _flag_squad, true)
+                                        _check("dissolved_squad_ignores_commands",
+                                                        PathService.goal_for(_flag_squad) == goal0 \
+                                                        and target_scene.squad_waypoints[_flag_squad].size() \
+                                                        == wp0,
+                                                        "goal_moved=%s" % str(
+                                                        PathService.goal_for(_flag_squad) != goal0))
+                                _sub = 4
+                                _sub_t = _t
+                4:
+                        # گام ۶R9 — تسک A: فراری‌ها به ساحل می‌رسند و جزیره را ترک می‌کنند
+                        if _flag_squad < 0 or target_scene.squads[_flag_squad].is_empty() \
+                                        or (_t - _sub_t) > 45.0:
+                                var left: int = 0 if _flag_squad < 0 \
+                                                else target_scene.squads[_flag_squad].size()
+                                _check("fleeing_members_left_island", left == 0,
+                                                "%d still on island (t=%.1f)" % [left,
+                                                _t - _sub_t])
+                                _flag_squad = -1
+                                _flag_dead_cmd = null
                                 _phase = 17
                                 _sub = 0
                                 _sub_t = _t
@@ -2326,35 +2406,34 @@ func _phase19_fleet_touch_gameover() -> void:
                                 _sub = 3
                                 _sub_t = _t
                 3:
-                        # گام ۶R6 — قایق‌ها بعد از تخلیه از ساحل دور می‌شوند و
-                        # ناپدید می‌گردند (BOAT_DEPART_FREE_DIST) — با مهلتِ ۳۰s
-                        # صبر می‌کنیم تا همه از صحنه بروند
-                        var departed_ok := true
-                        for gchk in [_fleet_g3, _fleet_g8, _fleet_gw]:
-                                for bt3 in target_scene.director.group_boats(gchk):
-                                        if is_instance_valid(bt3) \
-                                                        and int(bt3.state) < 2:
-                                                departed_ok = false
-                        if (departed_ok and target_scene.director.boats_active() == 0) \
-                                        or (_t - _sub_t) > 30.0:
+                        # گام ۶R9 — قایق‌ها بعد از تخلیه «لنگر می‌مانند» (پارک دائمی —
+                        # بازخورد کاربر: «هر چند سربازهایش کشته بشن لب ساحل بمونن»).
+                        # فقط ۲.۵ ثانیه سکون برای بستنِ گروه‌ها
+                        if _t - _sub_t >= 2.5:
+                                var parked := 0
+                                var sailing := 0
                                 var dbg_boats := ""
-                                for gchk in [_fleet_g3, _fleet_g8, _fleet_gw]:
-                                        for bt4 in target_scene.director.group_boats(gchk):
-                                                if is_instance_valid(bt4):
-                                                        var d4: float = Vector2(bt4.global_position.x,
-                                                                        bt4.global_position.z).distance_to(
-                                                                        Vector2(bt4.anchor_point.x,
-                                                                        bt4.anchor_point.z))
-                                                        dbg_boats += " [st=%d d=%.1f riders=%d next=%d/%d]" % [
-                                                                        int(bt4.state), d4,
-                                                                        bt4.rider_count(),
-                                                                        bt4._next_rider,
-                                                                        bt4._riders.size()]
-                                _check("boats_departed_after_drop",
-                                                target_scene.director.boats_active() == 0,
-                                                "%d active (t=%.1f)%s" % [
-                                                target_scene.director.boats_active(),
-                                                _t - _sub_t, dbg_boats])
+                                for bt4 in get_tree().get_nodes_in_group("enemy_boats"):
+                                        var bb4 := bt4 as EnemyBoat
+                                        if bb4 == null or not is_instance_valid(bb4):
+                                                continue
+                                        var d4: float = Vector2(bb4.global_position.x,
+                                                        bb4.global_position.z).distance_to(
+                                                        Vector2(bb4.anchor_point.x,
+                                                        bb4.anchor_point.z))
+                                        dbg_boats += " [st=%d d=%.1f]" % [
+                                                        int(bb4.state), d4]
+                                        if bb4.state == EnemyBoat.BoatState.PARKED:
+                                                # فاصله از لنگر مهم نیست — جداسازیِ قایق‌ها
+                                                # حینِ پهلوگیری جابه‌جاییِ ۲ متریِ قانونی می‌دهد
+                                                parked += 1
+                                        else:
+                                                sailing += 1
+                                _check("boats_parked_after_drop",
+                                                parked >= 3 and sailing == 0,
+                                                "parked=%d moving=%d (t=%.1f)%s" % [
+                                                parked, sailing, _t - _sub_t,
+                                                dbg_boats])
                                 _check("fleet_groups_cleaned",
                                                 target_scene.director.groups_count() == 0,
                                                 "%d groups" % target_scene.director.groups_count())
@@ -2453,6 +2532,188 @@ func _phase19_fleet_touch_gameover() -> void:
                                 _check("regen_resets_game_over",
                                                 not target_scene.game_over)
                                 _phase = 20
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- گام ۶R۹ — شمارنده‌های قایقِ پارک‌شده (بدونِ گروه) ----------------
+
+## قایق‌های PARKEDِ موجود در صحنه — حتی وقتی ردّ گروه پاک شده باشد
+func _parked_boats_count() -> int:
+        var n := 0
+        for b in get_tree().get_nodes_in_group("enemy_boats"):
+                var bt := b as EnemyBoat
+                if bt != null and is_instance_valid(bt) \
+                                and bt.state == EnemyBoat.BoatState.PARKED:
+                        n += 1
+        return n
+
+
+func _parked_boats_info() -> String:
+        var info := "parked=%d" % _parked_boats_count()
+        for b in get_tree().get_nodes_in_group("enemy_boats"):
+                var bt := b as EnemyBoat
+                if bt != null and is_instance_valid(bt):
+                        info += " [st=%d]" % int(bt.state)
+        return info
+
+
+# ---------------- فاز ۲۰: صحنه‌ی نبرد ۶R9 — خون، جنازه، سوئینگ، تیر ----------------
+
+var _p20_dummy: TrainingDummy = null
+
+func _phase20_battle_scene() -> void:
+        match _sub:
+                0:
+                        # انتظار برای آرایش‌گیری دسته‌ها روی پست‌های تازه (جزیره‌ی ۷۷۷۷۷۷)
+                        # — مسیرِ دور با پیچِ مانع تا ۳۰ ثانیه هم می‌کشد
+                        var arrived := 0
+                        var total := 0
+                        for u in target_scene.squad:
+                                if is_instance_valid(u) and not u.is_dead():
+                                        total += 1
+                                        if (u as UnitBase).is_arrived():
+                                                arrived += 1
+                        # تشخیص ۶R9 — پیشرفتِ نرسیده‌ها هر ۵ ثانیه چاپ می‌شود
+                        if arrived < total and _t - _sub_t > 0.0 \
+                                        and int((_t - _sub_t) * 10.0) % 50 == 0:
+                                var trail := ""
+                                for u in target_scene.squad:
+                                        if is_instance_valid(u) and not u.is_dead() \
+                                                        and not (u as UnitBase).is_arrived():
+                                                var up: Vector2 = _xz(u)
+                                                trail += " (%.1f,%.1f)d%.1f" % [up.x,
+                                                                up.y, up.distance_to(
+                                                                        (u as UnitBase).slot_pos())]
+                                print("[AUTOTEST] p20 t=%.1f arrived=%d/%d trail:%s" % [
+                                                _t - _sub_t, arrived, total, trail])
+                        if (total > 0 and arrived == total) or (_t - _sub_t) > 30.0:
+                                for si in target_scene.squads.size():
+                                        var gg: Dictionary = \
+                                                        target_scene.garrison_state(si)
+                                        if not gg.is_empty():
+                                                print("[AUTOTEST] p20 squad %d garrison phase=%s t=%.1f alive=%d" % [
+                                                        si, str(gg.get("phase")),
+                                                        float(gg.get("t", 0.0)),
+                                                        target_scene._alive_members(si).size()])
+                                # تشخیص عمیق ۶R۹ — چرا حرکت خشکید؟
+                                print("[AUTOTEST] DBG computes=" + str(
+                                                PathService.debug_info().get("computes")))
+                                for u in target_scene.squad:
+                                        if is_instance_valid(u) and not u.is_dead() \
+                                                        and not (u as UnitBase).is_arrived():
+                                                var ub2 := u as UnitBase
+                                                var flow2: Vector2 = PathService.sample_direction(
+                                                                _xz(ub2), ub2.squad_id)
+                                                var msg := "[AUTOTEST] DBG pos=" + str(_xz(ub2))
+                                                msg += " slot=" + str(ub2.slot_pos())
+                                                msg += " vel=" + str(ub2._vel)
+                                                msg += " flow=" + str(flow2)
+                                                msg += " goal=" + str(PathService.goal_for(
+                                                                ub2.squad_id))
+                                                msg += " wf=" + str(ub2._wf_active)
+                                                msg += " stuck_t=" + str(ub2._stuck_t)
+                                                msg += " latch=" + str(ub2._near_latch)
+                                                print(msg)
+                                _check("p20_squads_formed",
+                                                float(arrived) / maxf(total, 1.0) >= 0.8,
+                                                "%d/%d arrived (t=%.1f)" % [arrived,
+                                                total, _t - _sub_t])
+                                # کوله‌ی تمرین کنار جاویدان‌ها — سوئینگِ شمشیر باید بزند
+                                _p20_dummy = target_scene.spawn_dummy_near_world(
+                                                target_scene.squad_center(0), Vector2(2.2, 0.0))
+                                _sub = 1
+                                _sub_t = _t
+                1:
+                        # هلثِ مخفی چندضربه‌ای + خون‌ریزی + صدا — یک عضو غیرفرمانده
+                        var victim: UnitBase = null
+                        for u in target_scene.squads[0]:
+                                var ub := u as UnitBase
+                                if is_instance_valid(ub) and not ub.is_dead() \
+                                                and not ub.is_commander:
+                                        victim = ub
+                                        break
+                        if victim != null:
+                                var hp0 := victim.hp
+                                victim.take_hit(1)
+                                # گام ۶R۹ — تسک A: ضربه = لرزشِ کوتاهِ دوربین
+                                _check("camera_shake_on_hit",
+                                                target_scene._shake_energy > 0.0,
+                                                "%.3f energy" % target_scene._shake_energy)
+                                _check("hidden_hp_single_hit_survives",
+                                                not victim.is_dead() and victim.hp == hp0 - 1,
+                                                "hp %d→%d" % [hp0, victim.hp])
+                                _check("blood_burst_on_hit",
+                                                get_tree().get_nodes_in_group("blood_burst").size() >= 1,
+                                                "%d bursts" % get_tree().get_nodes_in_group("blood_burst").size())
+                                _check("sfx_played_on_hit", BattleFX.played_count() >= 1,
+                                                "%d sounds" % BattleFX.played_count())
+                                var hits := 0
+                                while not victim.is_dead() and hits < 12:
+                                        victim.take_hit(1)
+                                        hits += 1
+                                _check("multi_hit_death", victim.is_dead() and hits >= 2,
+                                                "hp=%d → %d more hits" % [hp0, hits])
+                        else:
+                                _check("p20_victim_found", false, "no non-commander")
+                        _sub = 2
+                        _sub_t = _t
+                2:
+                        # سوئینگ: کوله‌ی تمرین باید ضربه بخورد (چرخه‌ی ضربه‌ی خوانا)
+                        if _t - _sub_t >= 7.0:
+                                _check("melee_swings_hit_dummy",
+                                                target_scene.dummy_hits_total() >= 1,
+                                                "%d hits" % target_scene.dummy_hits_total())
+                                _check("corpse_laid_after_multi_hit",
+                                                get_tree().get_nodes_in_group("corpses").size() >= 1,
+                                                "%d corpses" % get_tree().get_nodes_in_group("corpses").size())
+                                _check("blood_stain_after_death",
+                                                get_tree().get_nodes_in_group("blood_stain").size() >= 1,
+                                                "%d stains" % get_tree().get_nodes_in_group("blood_stain").size())
+                                # تسلیحات چندقطعه‌ای: همه‌ی سربازانِ مسلح سلاحِ روی دست دارند
+                                var armed := 0
+                                for u in target_scene.squad:
+                                        if is_instance_valid(u) and not u.is_dead() \
+                                                        and (u as UnitBase)._swing_weapon != null:
+                                                armed += 1
+                                _check("weapons_multi_part_armed", armed >= 8,
+                                                "%d armed" % armed)
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        # موج دشمن → شبح‌ها پیاده می‌شوند، خونِ بنفش می‌ریزد
+                        var gid: int = target_scene.director.spawn_wave(
+                                        {"size": 4, "force": true})
+                        _check("p20_wave_spawned", gid >= 0, "gid=%d" % gid)
+                        _sub = 4
+                        _sub_t = _t
+                4:
+                        # صبر برای پیاده‌شدن شبح‌ها در ساحل
+                        var landed_live := 0
+                        for e in get_tree().get_nodes_in_group("hostiles"):
+                                var en := e as EnemyBase
+                                if en != null and not en.riding and not en.is_dead():
+                                        landed_live += 1
+                        if landed_live >= 3 or (_t - _sub_t) > 70.0:
+                                _check("p20_ghosts_landed", landed_live >= 3,
+                                                "%d landed (t=%.1f)" % [landed_live,
+                                                _t - _sub_t])
+                                target_scene.director.kill_all_raiders()
+                                _sub = 5
+                                _sub_t = _t
+                5:
+                        if _t - _sub_t >= 2.0:
+                                _check("p20_ghost_corpses_remain",
+                                                get_tree().get_nodes_in_group("corpses").size() >= 2,
+                                                "%d corpses" % get_tree().get_nodes_in_group("corpses").size())
+                                _check("p20_ghost_blood_stains",
+                                                get_tree().get_nodes_in_group("blood_stain").size() >= 2,
+                                                "%d stains" % get_tree().get_nodes_in_group("blood_stain").size())
+                                # قایق‌ها پارک مانده‌اند حتی با مرگ همه‌ی سربازان
+                                var parked := _parked_boats_count()
+                                _check("p20_boats_parked_despite_deaths", parked >= 1,
+                                                "%d parked" % parked)
+                                _phase = 21
                                 _sub = 0
                                 _sub_t = _t
 

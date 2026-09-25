@@ -358,7 +358,7 @@ func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
         entry["landed"] = true
         var need := boat.rider_count()
         if need <= 0:
-                boat.start_disembark([])   # بارِ مرده → مستقیم DEPARTING
+                boat.start_disembark([])   # بارِ مرده → مستقیم PARKED (۶R9)
                 return
         var boat_xz := Vector2(boat.global_position.x, boat.global_position.z)
         # شعاع = offset لنگر + یک سلول ساحل + حاشیه؛ پویا برای لنگرِ ضدقفل
@@ -709,15 +709,20 @@ func _check_groups() -> void:
         var dead_ids: Array = []
         for gid in _groups:
                 var g: Dictionary = _groups[gid]
-                # گام ۶R6 — قایق‌ها بعد از تخلیه از صحنه می‌روند (queue_free)؛
-                # گروه فقط وقتی بسته می‌شود که ناوگان رفته باشد «و» مهاجمی نمانده باشد
-                if _live_fleet(g).is_empty() and _dead_raiders(g):
+                # گام ۶R9 — قایق‌ها دیگر نمی‌روند (پارک دائمی در ساحل)؛ گروه
+                # وقتی بسته می‌شود که «همه پیاده شده باشند» و «مهاجمان مرده باشند» —
+                # قایقِ پارک‌شده مانعِ بستن گروه و آزادشدن ردّ ناوگان نیست
+                if _dead_raiders(g) and _all_landed(g):
+                        # سیگنالِ پاکسازی موج قبل از بستنِ گروه از دست نمی‌رود
+                        if not g["cleared"] and not g["raiders"].is_empty():
+                                g["cleared"] = true
+                                wave_cleared.emit(gid)
                         dead_ids.append(gid)
                         continue
                 if g["cleared"]:
                         continue
                 _retarget_if_burned(gid, g)
-                # مهاجمان کشته شوند یا زنده بمانند، قایقِ تخلیه‌شده دور می‌شود —
+                # مهاجمان کشته شوند یا زنده بمانند، قایق لنگر مانده —
                 # «پاکسازی موج» فقط سیگنال گزارشی است.
                 if not g["raiders"].is_empty() and raiders_alive(gid) == 0 \
                                 and _all_landed(g):

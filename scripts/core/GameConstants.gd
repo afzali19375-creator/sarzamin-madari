@@ -249,7 +249,16 @@ const COL_GHOST_PELTAST := Color("3c1f33")    # شبحِ پرتابگر — آل
 const COL_GHOST_BONE := Color("d8d8c4")       # ماسکِ استخوانی
 const COL_GHOST_BLADE := Color("dff0e0")      # تیغه‌ی کم‌رنگِ سبز-سفید (مرجع)
 const COL_GHOST_HAND := Color("8a8088")       # دستِ خاکستری (مرجع)
+const STEEL_BLADE := Color("e3e9ef")          # گام ۶R9 — فولادِ سردِ سلاحِ خودی
+const BLOOD_FRIENDLY := Color("7c1610")       # گام ۶R9 — خونِ سرخِ سربازِ خودی
+const BLOOD_GHOST := Color("43215e")          # گام ۶R9 — خونِ بنفشِ شبح
+const CORPSE_CAP := 48                        # گام ۶R9 — سقفِ جنازه‌های روی زمین
 const COL_GHOST_SHIELD := Color("2a1a30")     # سپرِ شبحِ سنگین
+const COL_FLAG_GRAY := Color("8b8b84")        # گام ۶R9 — پرتره‌ی خاکستریِ گروهِ بی‌فرمانده
+const FLEE_SPEED_MULT := 1.35                 # گام ۶R9 — فرارِ اضطراریِ اعضای گروهِ منحل
+const FLEE_ARRIVE_RADIUS := 1.0               # گام ۶R9 — رسیدن به ساحل = خروج از جزیره
+const FLEE_MIN_TIME := 1.5                    # گام ۶R9-fix — حداقلِ زمانِ فرار؛ ضدِ
+                                              # محوشدنِ آنیِ فراری کنارِ «ساحلِ دروغین»
 
 const UNIT_PALETTE: Array[Color] = [
         Color("e0d6b8"), # عاجی

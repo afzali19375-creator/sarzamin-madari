@@ -79,6 +79,24 @@ var _flash_t := 10.0
 var _flashing := false
 var _flash_restore := Color.WHITE
 
+## گام ۶R9 — پاشش خون و لکه؛ سربازِ خودی سرخِ تیره می‌ریزد
+var _blood_color: Color = Color("7c1610")
+
+# ---------------- گام ۶R9 — محورِ دست و سبکِ سوئینگ ----------------
+## سلاح‌ها فرزندِ این پیوت‌اند؛ چرخه‌ی ضربه همین را می‌چرخاند تا سوئینگِ
+## شمشیر/یورشِ نیزه واقعاً «دیده شود» (بازخورد کاربر)
+enum SwingStyle { NONE, SWORD_SLASH, THRUST }
+var _hand: Node3D
+var _swing_style := SwingStyle.NONE
+## سلاحِ در دست — زیرکلاس‌ها روی _hand می‌سازند
+var _swing_weapon: Node3D
+
+# گام ۶R9 — تسک A: فرارِ اضطراری (انحلال گروه با مرگ فرمانده) —
+# عضوِ بی‌فرمانده دیگر نمی‌جنگد؛ فقط به نزدیک‌ترین ساحل می‌دود و جزیره را ترک می‌کند
+var _fleeing := false
+var _flee_goal := Vector2.ZERO
+var _flee_t := 0.0   # گام ۶R9-fix — عمرِ فرار؛ زیرِ FLEE_MIN_TIME محو نمی‌شود
+
 # گام ۶R — وضعیت پرهیز از مانع (تعهد سمتِ چرخش، ضد نوسان حدی)
 var _avoid_side := 0     # 0=غیرفعال | ‎+۱‎=پادساعتگرد | ‎−۱‎=ساعتگرد
 var _avoid_hold := 0.0   # ثانیه‌ی باقی‌مانده‌ی تعهد
@@ -141,6 +159,10 @@ func _ready() -> void:
         add_child(_ring)
 
         # تجهیزات اختصاصی کلاس (سپر/نیزه/کمان — در زیرکلاس‌ها)
+        # گام ۶R9 — پیوتِ دستِ راست: سلاح فرزندِ این است تا با ضربه سوئینگ کند
+        _hand = Node3D.new()
+        _hand.position = Vector3(0.17, 0.42, 0.08)
+        add_child(_hand)
         _build_gear()
 
         # گام ۶R — نشان فرمانده: سربند طلایی (پرچم را صحنه وصل می‌کند)
@@ -190,6 +212,12 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
         hp -= dmg
         _flash_hit()
         _knockback(from_dir)
+        # گام ۶R9 — خون‌ریزی: پاشش در سینه‌ی سرباز + صدای برخورد
+        BattleFX.blood_burst(get_parent(), global_position + Vector3(0, 0.45, 0),
+                        from_dir, _blood_color)
+        BattleFX.play_sfx(get_tree(), &"hit")
+        # گام ۶R9 — تسک A: لرزشِ کوتاهِ دوربین با هر ضربه (نزدیک = شدیدتر)
+        GameEvents.world_shake.emit(0.10, global_position)
         if hp <= 0:
                 die()
 
@@ -229,17 +257,27 @@ func die() -> void:
         # قانون آهنین سند طراحی §۷: مرگ دائمی است — هرگز برنمی‌گردد
         GameEvents.unit_permanently_died.emit(self)
         set_process(false)
-        # انیمیشن مرگ: افتادن + محو (بدون عدد §۱۰؛ لکه‌ی خون در گام ۷)
+        # گام ۶R9 — فلشِ در جریان روی جسد نمی‌ماند
+        _flashing = false
+        ChibiLook.set_flash(_mat, 0.0)
+        # گام ۶R9 — خون: لکه‌ی دائمی جای سقوط + صدای افتادن
+        var gy := position.y
+        if ground_provider.is_valid():
+                gy = float(ground_provider.call(Vector2(position.x, position.z)))
+        BattleFX.blood_stain(get_parent(), Vector2(position.x, position.z), gy,
+                        _blood_color)
+        BattleFX.play_sfx(get_tree(), &"fall", -6.0)
+        # انیمیشن مرگ: افتادن — گام ۶R9 (بازخورد کاربر: «جنازه‌ها باقی بمونن»):
+        # جسد روی زمین می‌ماند؛ نه محو می‌شود نه آزاد. پاکسازی با سقفِ جنازه‌ی صحنه.
         var y0 := position.y
         var tw := create_tween()
         tw.set_parallel(true)
         tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
-        tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
-        # گام ۶R7 — محوِ مرگ روی همه‌ی مش‌ها (پرچمِ مستثنا؛ شیدر Opaque می‌ماند)
-        for p in ChibiLook.fade_parts(self):
-                tw.tween_property(p, "transparency", 1.0,
-                                GameConstants.DEATH_FADE_SECONDS).set_delay(0.35)
-        tw.chain().tween_callback(queue_free)
+        tw.tween_property(self, "position:y", y0 - 0.1, 0.42)
+        add_to_group("corpses")
+        GameEvents.corpse_laid.emit(self)
+        # گام ۶R9 — تسک A: افتادنِ سرباز = تکونِ محسوس‌ترِ دوربین
+        GameEvents.world_shake.emit(0.28, global_position)
 
 
 ## ضربه‌ی تن‌به‌تن — true = ضربه آغاز شد (خنک‌شدن تمام). جهتِ ضربه به هدف می‌رود
@@ -323,6 +361,7 @@ func _spawn_hit_spark(at: Vector3) -> void:
 
 
 ## ژست کشش ضربه (پیش‌فرض: بدنه کمی عقب + چرخش کوتاه پهلو) — زیرکلاس می‌تواند override کند
+## گام ۶R9 — سوئینگِ سلاح: بر اساس سبکِ کلاس، دستِ سلاح‌دار هم حرکت می‌کند
 func _strike_windup_fx() -> void:
         if _body == null:
                 return
@@ -332,9 +371,30 @@ func _strike_windup_fx() -> void:
                         GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
         tw.tween_property(_body, "rotation:y", -0.22,
                         GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
+        match _swing_style:
+                SwingStyle.SWORD_SLASH:
+                        # عقب‌کشیدنِ تیغه به بالای شانه — آماده‌ی اسلش
+                        if _hand != null:
+                                var hw := create_tween()
+                                hw.set_parallel(true)
+                                hw.tween_property(_hand, "rotation:y", 1.0,
+                                                GameConstants.STRIKE_WINDUP) \
+                                                .set_ease(Tween.EASE_OUT)
+                                hw.tween_property(_hand, "rotation:z", 0.5,
+                                                GameConstants.STRIKE_WINDUP)
+                SwingStyle.THRUST:
+                        # نیزه کمی عقب می‌رود — کوبشِ بعدی پرقدرت‌تر دیده می‌شود
+                        if _hand != null:
+                                var tw2 := create_tween()
+                                tw2.tween_property(_hand, "position:z", -0.12,
+                                                GameConstants.STRIKE_WINDUP) \
+                                                .set_ease(Tween.EASE_OUT)
+                _:
+                        pass
 
 
 ## ژست لحظه‌ی ضربه (پیش‌فرض: بازگشت بدنه) — جاویدان: _lunge، نیزه‌دار: _thrust
+## گام ۶R9 — اسلشِ تندِ شمشیر/کوبشِ نیزه در لحظه‌ی برخورد + بازگشت نرم
 func _strike_impact_fx() -> void:
         if _body == null:
                 return
@@ -342,6 +402,32 @@ func _strike_impact_fx() -> void:
         tw.set_parallel(true)
         tw.tween_property(_body, "position:z", 0.0, GameConstants.STRIKE_RECOVER)
         tw.tween_property(_body, "rotation:y", 0.0, GameConstants.STRIKE_RECOVER)
+        match _swing_style:
+                SwingStyle.SWORD_SLASH:
+                        if _hand != null:
+                                # اسلش: قوسِ تند از بالا-عقب به پایین-جلو (خوانا و زیبا)
+                                var hs := create_tween()
+                                hs.set_parallel(true)
+                                hs.tween_property(_hand, "rotation:y", -1.35,
+                                                GameConstants.STRIKE_LUNGE + 0.05) \
+                                                .set_ease(Tween.EASE_OUT)
+                                hs.tween_property(_hand, "rotation:z", -0.2,
+                                                GameConstants.STRIKE_LUNGE + 0.05)
+                                hs.chain().tween_property(_hand, "rotation:y", 0.0,
+                                                GameConstants.STRIKE_RECOVER)
+                                hs.parallel().tween_property(_hand, "rotation:z",
+                                                0.0, GameConstants.STRIKE_RECOVER)
+                SwingStyle.THRUST:
+                        if _hand != null:
+                                # کوبش: دست به جلو پرت می‌شود و نرم برمی‌گردد
+                                var ht := create_tween()
+                                ht.tween_property(_hand, "position:z", 0.34,
+                                                GameConstants.STRIKE_LUNGE + 0.04) \
+                                                .set_ease(Tween.EASE_OUT)
+                                ht.tween_property(_hand, "position:z", 0.0,
+                                                GameConstants.STRIKE_RECOVER)
+                _:
+                        pass
 
 
 ## گام ۶R2 — حرکت در حین نبرد به سمت هدف تا فاصله‌ی stop_at.
@@ -429,11 +515,16 @@ func slot_pos() -> Vector2:
 
 
 ## هدف مؤثر این واحد: اسلات خودش یا هدف سراسری جریان (کانال ۰)
+## گام ۶R9 — فراری فقط یک هدف دارد: ساحل (همه‌ی ماشینِ حرکتِ لایه ۱ استفاده می‌شود)
 func _effective_goal() -> Vector2:
+        if _fleeing:
+                return _flee_goal
         return _slot if _has_slot else PathService.goal_world()
 
 
 func _effective_arrive_radius() -> float:
+        if _fleeing:
+                return GameConstants.FLEE_ARRIVE_RADIUS
         return SLOT_ARRIVE_RADIUS if _has_slot else ARRIVE_RADIUS
 
 
@@ -455,13 +546,21 @@ func _process(delta: float) -> void:
                                         if _arrived else _flash_restore)
 
         # ---- لایه ۳: واکنش نبرد (بالاترین اولویت) ----
-        _scan_accum += delta
-        if _scan_accum >= GameConstants.COMBAT_SCAN_INTERVAL:
-                _scan_accum = 0.0
-                _rescan_hostile()
-        if _in_combat and is_instance_valid(_combat_target):
-                _combat_tick(delta, _combat_target)
-                return
+        # گام ۶R9 — تسک A: فراری‌ها نمی‌جنگند (گروه منحل شده — فقط فرار)
+        if _fleeing:
+                _flee_t += delta   # گام ۶R9-fix — ساعتِ فرار از همین‌جا خوانده می‌شود
+                if _in_combat:
+                        _in_combat = false
+                        _combat_target = null
+                        _combat_end()
+        else:
+                _scan_accum += delta
+                if _scan_accum >= GameConstants.COMBAT_SCAN_INTERVAL:
+                        _scan_accum = 0.0
+                        _rescan_hostile()
+                if _in_combat and is_instance_valid(_combat_target):
+                        _combat_tick(delta, _combat_target)
+                        return
 
         # ---- لایه ۱/۲: حرکت و Fidget ----
         if _arrived:
@@ -488,10 +587,18 @@ func _process(delta: float) -> void:
         var to_goal := goal - pos
         var arrive_r := _effective_arrive_radius()
         if to_goal.length() <= arrive_r:
-                _arrived = true
-                _vel = Vector2.ZERO
-                _set_color(GameConstants.COL_ARRIVED)  # سرخ روشن = رسیده به هدف
-                return
+                # گام ۶R9 — تسک A: فراری به ساحل رسید → جزیره را ترک می‌کند
+                # گام ۶R9-fix — اما نه پیش از FLEE_MIN_TIME ثانیه فرار؛ وگرنه
+                # فراریِ کنارِ هدف، در همان فریمِ شروعِ فرار محو می‌شد
+                if _fleeing:
+                        if _flee_t >= GameConstants.FLEE_MIN_TIME:
+                                _flee_despawn()
+                                return
+                else:
+                        _arrived = true
+                        _vel = Vector2.ZERO
+                        _set_color(GameConstants.COL_ARRIVED)  # سرخ روشن = رسیده به هدف
+                        return
 
         # گام ۶R4 — حرکتِ دوحالته با «چسبندگی»: داخلِ حبابِ هدایتِ مستقیم، اسلات
         # مرجع است و میدان کاری‌اش ندارد (هدفِ میدان «پستِ» دسته است نه اسلاتِ
@@ -557,7 +664,9 @@ func _process(delta: float) -> void:
                 if dir == Vector2.ZERO:
                         return
 
-        var speed := GameConstants.SPEED_BASE * speed_mult
+        # گام ۶R9-fix — فرارِ اضطراری = دویدنِ ویلان‌آسا (FLEE_SPEED_MULT)
+        var speed := GameConstants.SPEED_BASE * speed_mult \
+                        * (GameConstants.FLEE_SPEED_MULT if _fleeing else 1.0)
         var desired := dir * speed
         # §۵.۲ — شتاب 8 m/s² (به‌جای lerp نمایی: حرکت قابل‌پیش‌بینی و قانون‌مند)
         _vel = _vel.move_toward(desired, GameConstants.ACCEL * delta)
@@ -593,11 +702,55 @@ func _process(delta: float) -> void:
 
 ## وضعیت مغز واحد — برای تست خودکار و HUD
 func brain_state() -> StringName:
+        if _fleeing:
+                return &"flee"
         if _in_combat:
                 return &"combat"
         if _arrived:
                 return &"fidget" if _fidget_state != 0 else &"idle"
         return &"moving"
+
+
+# ---------------- گام ۶R9 — تسک A: انحلال گروه و فرار از جزیره ----------------
+
+## آغاز فرار اضطراری — صحنه (IslandTest) هنگام انحلال گروه صدا می‌زند:
+## نبرد رها می‌شود، اسلات پاک می‌شود و تنها هدف = ساحلِ نزدیک
+func start_flee(shore_xz: Vector2) -> void:
+        _fleeing = true
+        _flee_goal = shore_xz
+        _flee_t = 0.0   # گام ۶R9-fix — ساعتِ فرار صفر
+        _in_combat = false
+        _combat_target = null
+        _combat_end()
+        clear_slot()
+        _arrived = false
+        _near_latch = false
+        _wf_active = false
+        _best_gd = 1e9
+        _stuck_t = 0.0
+        _fidget_state = 0
+        _vel = Vector2.ZERO
+        _set_color(_spawn_color)   # رنگ تولد — تابع نیست، متغیر است (رفع خطای کامپایل)
+
+
+## فراری به آبِ ساحل رسید — از صحنه خارج می‌شود (محوِ نرم، بدون جنازه؛ او «رفت»)
+func _flee_despawn() -> void:
+        _fleeing = false
+        set_process(false)
+        remove_from_group("units")
+        set_selected_ring(false)
+        GameEvents.unit_fled_island.emit(self)
+        var parts := ChibiLook.fade_parts(self)
+        var tw := create_tween()
+        for p in parts:
+                tw.tween_property(p, "transparency", 1.0, 0.7)
+        tw.chain().tween_callback(queue_free)
+
+
+## گام ۶R9 — تسک A: خاکستری‌شدن پیکر/پرتره — فرماندهِ افتاده رنگِ دسته را نمی‌ماند
+func gray_out_body() -> void:
+        _base_color = GameConstants.COL_FLAG_GRAY
+        ChibiLook.set_base(_mat, GameConstants.COL_FLAG_GRAY)
 
 
 func is_arrived() -> bool:

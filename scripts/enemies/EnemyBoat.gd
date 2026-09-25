@@ -11,19 +11,18 @@ extends Node3D
 ##       LANDING      → رسیدن به ساحل (رسیدن به لنگر تحلیلی — معادل Area3D)
 ##       DISEMBARKING → reparent سربازان به ریشه‌ی صحنه با حفظ موقعیت جهانی
 ##                      (بدون تلپورت) + واد تا سلول پیاده‌شدنِ خودشان
-##       DEPARTING    → قایق از ساحل دور می‌شود و ناپدید می‌گردد (queue_free)
+##       PARKED       → گام ۶R9 (بازخورد کاربر: «قایق‌ها هر چند سربازهایش
+##                      کشته بشن لب ساحل باقی بمونن») — قایق برای همیشه لنگر
+##                      می‌ماند و روی موج تکان می‌خورد؛ دیگر دور نمی‌شود
 ##   * «اسپاونر قدیمی» حذف شد: سربازانی که پیاده می‌شوند همان‌هایی‌اند که از
 ##     ابتدا سوار بودند (کارگردان از اول آن‌ها را سوار قایق می‌کند)
-##
-## چرخه‌ی پیشین (پارک دائمی در ساحل — گام ۶R2) با دستور تازه‌ی کاربر جایگزین شد.
 
-enum BoatState { SAILING, LANDING, DISEMBARKING, DEPARTING }
+enum BoatState { SAILING, LANDING, DISEMBARKING, PARKED }
 enum BoatType { ROWBOAT, GALLEY, WARSHIP }
 
 signal landed(boat: EnemyBoat)                     # پهلوگیری کامل (شروع تخلیه)
 signal soldier_disembarked(boat: EnemyBoat, s: EnemyBase)   # هر پیاده‌شدن
-signal departed(boat: EnemyBoat)                   # آغاز دورشدن از ساحل
-signal gone(boat: EnemyBoat)                       # گام ۶R۷ — ناپدیدیِ نهایی (قبل از queue_free)
+signal gone(boat: EnemyBoat)                       # فقط پاکسازیِ صحنه (clear_all)
 
 const SEA_Y := -0.18                    # هم‌خوان با IslandGround.SEA_Y
 const REACH_EPS := 0.45                 # گام ۶R3: پهلوگیری بخشنده‌تر (ضد بن‌بست)
@@ -32,7 +31,7 @@ var state := BoatState.SAILING
 var boat_type := BoatType.GALLEY
 var capacity := GameConstants.CAP_GALLEY
 var anchor_point: Vector3 = Vector3.ZERO   # نقطه‌ی لنگر (روی آب، کنار ساحل)
-## جهت بیرون جزیره (از مرکز به سمت دریا) — برای DEPARTING (ست توسط کارگردان)
+## جهت بیرون جزیره (از مرکز به سمت دریا) — چرخشِ اولیه‌ی قایق رو به ساحل
 var outward_dir := Vector2.RIGHT
 ## ریشه‌ی صحنه برای reparent سربازان (ست توسط کارگردان — raiders_root)
 var disembark_root: Node3D = null
@@ -48,7 +47,6 @@ var _stuck_t := 0.0                       # گام ۶R4 — ساعتیِ «بی�
 var _last_dist := 1e9
 var _hold_t := 0.0                        # توقف کوتاه LANDING
 var _dis_t := 0.0                         # شمارنده‌ی پیاده‌شدن پلکانی
-var _depart_t := 0.0                      # عمر مرحله‌ی DEPARTING (مهلت ایمنی)
 
 # سربازانِ سوار — موجودیت‌های واقعی (فرزند این نود)
 var _riders: Array[EnemyBase] = []
@@ -293,26 +291,11 @@ func _process(delta: float) -> void:
                                         s.detach_from_transport(disembark_root, cell)
                                         soldier_disembarked.emit(self, s)
                         if _next_rider >= _riders.size():
-                                _begin_departing()
-                BoatState.DEPARTING:
-                        # دورشدن از ساحل به سمت دریای باز + ناپدیدشدن
-                        _depart_t += delta
-                        var out3 := Vector3(outward_dir.x, 0.0, outward_dir.y)
-                        var target := anchor_point + out3 \
-                                        * GameConstants.BOAT_DEPART_FREE_DIST
-                        _speed_now = lerpf(_speed_now, GameConstants.BOAT_DEPART_SPEED,
-                                        clampf(0.8 * delta, 0.0, 1.0))
-                        _sail_toward(target, delta)
-                        var d_now := _xz().distance_to(
-                                        Vector2(anchor_point.x, anchor_point.z))
-                        # ⚠️ تلورانسِ ممیز شناور: چسبیدنِ دقیق به target ممکن است
-                        # d_now را ۲۵٫۹۹۹ نگه دارد — ۰٫۰۵m بخشندگی + مهلت ۴۰s
-                        if d_now >= GameConstants.BOAT_DEPART_FREE_DIST - 0.05 \
-                                        or _depart_t > 40.0:
-                                # گام ۶R۷ — سیگنالِ پیش از آزادشدن: کارگردان همان لحظه
-                                # گروه را می‌بندد (رفعِ تأخیر ۰٫۳ ثانیه‌ایِ پاکسازی)
-                                gone.emit(self)
-                                queue_free()
+                                _begin_parked()
+                BoatState.PARKED:
+                        # گام ۶R9 (بازخورد کاربر): قایق برای همیشه لب ساحل می‌ماند —
+                        # هر چند سربازانش کشته شوند؛ فقط روی موج تکان می‌خورد
+                        pass
 
 
 ## گذار SAILING → LANDING (رسیدن به ساحل)
@@ -322,11 +305,9 @@ func _begin_landing() -> void:
         landed.emit(self)
 
 
-## گذار DISEMBARKING → DEPARTING
-func _begin_departing() -> void:
-        state = BoatState.DEPARTING
-        _depart_t = 0.0
-        departed.emit(self)
+## گذار DISEMBARKING → PARKED — گام ۶R9: پارکِ دائمی در لنگر (بدونِ بازگشت)
+func _begin_parked() -> void:
+        state = BoatState.PARKED
 
 
 func _xz() -> Vector2:

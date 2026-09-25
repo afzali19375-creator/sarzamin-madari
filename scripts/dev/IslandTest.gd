@@ -76,6 +76,9 @@ var garrison_duration := GameConstants.LOOT_DURATION_SECONDS
 ## si -> {} یا {"house": BuildingBase, "t": float, "phase": "walk"/"inside", "orig": int}
 var squad_garrison: Array = []
 
+# گام ۶R9 — تسک A: گروه‌های منحل‌شده (مرگ فرمانده) — دستور نمی‌پذیرند و تکمیل نمی‌شوند
+var squad_dissolved: Array[bool] = []
+
 # دوربین (§۷ پرامت)
 var _cam_pivot: Node3D
 var _cam_arm: Node3D
@@ -84,6 +87,9 @@ var _yaw := GameConstants.CAM_YAW0_DEG
 var _target_height := GameConstants.CAM_HEIGHT0
 var _middle_drag := false
 var _keys_held := {}
+
+# گام ۶R9 — تسک A: لرزش دوربین در ضربه/افتادن (انرژی ۰..۱، افتِ نمایی)
+var _shake_energy := 0.0
 
 # گام ۶R2 — چرخش دوربین با کشیدن موس/لمس (اندروید): لمس با emulate_mouse_from_touch
 # خودکار به رویداد ماوسِ چپ تبدیل می‌شود؛ تپ = کلیک، کشیدن > آستانه = چرخش
@@ -123,12 +129,80 @@ func _ready() -> void:
         _regenerate(_island_seed, false)
         _build_ui()
         GameEvents.unit_permanently_died.connect(_on_unit_died)   # §۷: مرگ دائمی
+        # گام ۶R۹ — جنازه‌ها روی زمین می‌مانند؛ سقفِ CORPSE_CAP با محوِ قدیمی‌ترین
+        GameEvents.corpse_laid.connect(_on_corpse_laid)
+        # گام ۶R۹ — تسک A: لرزش دوربین + خروج فراری‌ها از جزیره
+        GameEvents.world_shake.connect(_on_world_shake)
+        GameEvents.unit_fled_island.connect(_on_unit_fled_island)
         if OS.get_cmdline_user_args().has("--autotest"):
                 var runner := IslandAutoTest.new()
                 runner.target_scene = self
                 add_child(runner)
         elif OS.get_cmdline_user_args().has("--blockprobe"):
                 _run_block_probe()
+        elif OS.get_cmdline_user_args().has("--screenshot"):
+                _run_screenshot_probe()
+
+
+## پراب اسکرین‌شات ۶R9 — رندر واقعی (زیر Xvfb) برای بازبینی بصری:
+## نمای کلی آرایش متراکم + کلوزآپ دسته + موج دشمن (شبح‌ها)
+## اجرا:
+##   SHOT_DIR=/abs/path xvfb-run godot --path . res://scenes/dev/IslandTest.tscn -- --screenshot
+func _run_screenshot_probe() -> void:
+        var out_dir := OS.get_environment("SHOT_DIR")
+        if out_dir.is_empty():
+                out_dir = "/tmp"
+        # ۱) نمای کلی — دسته‌ها متراکم در بلوک‌هایشان (۸ ثانیه برای آرایش‌گیری)
+        await get_tree().create_timer(8.0).timeout
+        _snap(out_dir + "/shot1_overview.png")
+        # ۲) کلوزآپ دسته‌ی صفر — جزئیات چینی‌ها، پرچم بزرگ فرمانده
+        var post: Vector2 = _squad_posts[0]
+        _cam_pivot.position = Vector3(post.x, ground.height_at_world(post), post.y)
+        _target_height = 6.5
+        _cam_arm.rotation_degrees.x = -62.0
+        await get_tree().create_timer(1.5).timeout
+        _snap(out_dir + "/shot2_squad_close.png")
+        # ۳) موج دشمن — قایق‌ها از افق و شبح‌های پیاده‌شده (قایق‌ها آهسته‌اند: ۶۰ ثانیه)
+        if director != null:
+                director.spawn_wave()
+        await get_tree().create_timer(58.0).timeout
+        _cam_pivot.position = Vector3.ZERO
+        _target_height = GameConstants.CAM_HEIGHT0
+        _cam_arm.rotation_degrees.x = GameConstants.CAM_PITCH_DEG
+        await get_tree().create_timer(1.5).timeout
+        _snap(out_dir + "/shot3_wave.png")
+        # ۴) کلوزآپ مهاجم پیاده‌شده؛ اگر موج نرسیده بود، مستقیم کنار دسته اسپاون می‌کنیم
+        var e := _first_landed_enemy()
+        if e == null and director != null:
+                var near := _squad_posts[0] + Vector2(2.2, 1.4)
+                director.spawn_enemy("heavy", near, 0)
+                director.spawn_enemy("light", near + Vector2(1.1, -0.9), 0)
+                director.spawn_enemy("peltast", near + Vector2(-0.9, -1.2), 0)
+                e = _first_landed_enemy()
+        if e != null:
+                var p2 := Vector2(e.global_position.x, e.global_position.z)
+                _cam_pivot.position = Vector3(p2.x, e.global_position.y, p2.y)
+                _target_height = 5.0
+                await get_tree().create_timer(1.5).timeout
+                _snap(out_dir + "/shot4_ghost_close.png")
+        print("[SHOT] done -> ", out_dir)
+        get_tree().quit(0)
+
+
+## گرفتن یک فریم از ویوپورت فعلی و ذخیره‌ی PNG
+func _snap(path: String) -> void:
+        var img := get_viewport().get_texture().get_image()
+        img.save_png(path)
+        print("[SHOT] saved ", path, " ", img.get_width(), "x", img.get_height())
+
+
+## اولین مهاجمی که واقعاً پیاده شده (نه سوارِ قایق، نه مرده)
+func _first_landed_enemy() -> EnemyBase:
+        for n in get_tree().get_nodes_in_group("hostiles"):
+                var e := n as EnemyBase
+                if e != null and not e.riding and not e.dead:
+                        return e
+        return null
 
 
 ## پراب تشخیصی ۶R6 — صحتِ اسپات‌های بلوک ورونوی در برابر پیکینگ واقعی دوربین
@@ -204,6 +278,7 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         cmd_grid.rebuild(ground, nav, props.house_sites)
         # ریست وضعیت فرمان و گاریسون (خانه‌های تازه = بناهای تازه)
         squad_garrison.clear()
+        squad_dissolved.clear()
         for wq in squad_waypoints:
                 wq.clear()
         waypoints.clear()
@@ -213,6 +288,12 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         _slow_select = false
         _slow_space = false
         Engine.time_scale = 1.0
+        # گام ۶R9 (رفع باگی که فاز ۲۰ آشکار کرد): ریستِ باخت باید «قبل از»
+        # اسپاون دسته‌ها باشد — وگرنه فرمانِ اولیه‌ی آرایش در گاردِ
+        # game_over می‌خورد و سربازها بدون اسلات و بدون میدان، یخ می‌زنند
+        game_over = false
+        if _game_over_panel != null:
+                _game_over_panel.visible = false
         _clear_dummies()
         _clear_units()
         # سه پست دور از هم برای سه دسته + فرمان اولیه‌ی هر دسته به پست خودش
@@ -226,6 +307,9 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         director.auto_waves = not OS.get_cmdline_user_args().has("--autotest")
         director.setup(ground, props, _squad_posts)
         director.clear_all()
+        # گام ۶R9 — لکه‌های خون و رجیستری جنازه‌ها با جزیره‌ی تازه پاک می‌شوند
+        BattleFX.reset_stains()
+        _corpses.clear()
         # گام ۶R2 — ریست باخت (جزیره‌ی تازه = شانس تازه)
         game_over = false
         if _game_over_panel != null:
@@ -262,6 +346,7 @@ func _clear_units() -> void:
         squad.clear()
         squad_waypoints.clear()
         squad_garrison.clear()
+        squad_dissolved.clear()
         _squad_posts.clear()
         # گام ۶R5 — همه‌ی تایل‌های اشغال‌شده‌ی سربازان آزاد می‌شوند (خانه‌ها باقی‌اند)
         if cmd_grid != null:
@@ -326,6 +411,7 @@ func _spawn_squads() -> void:
                 var wq: Array[Vector2] = []
                 squad_waypoints.append(wq)
                 squad_garrison.append(null)
+                squad_dissolved.append(false)   # گام ۶R9 — دسته‌ی تازه = فعال
                 # سلول‌های اسپاون: قابل‌عبور در شعاع ۲.۵ متری پست (پشتیبان: ۵ متری)
                 var spawn_cells := _walkable_cells_near(post, 2.5, def["count"])
                 if spawn_cells.size() < int(def["count"]):
@@ -723,6 +809,16 @@ func _process(delta: float) -> void:
         _cam.position.z = move_toward(_cam.position.z, _target_height,
                         GameConstants.CAM_ZOOM_SPEED * raw)
 
+        # گام ۶R۹ — تسک A: اعمالِ لرزشِ در حالِ افت روی بازوی دوربین (با دلتای واقعی
+        # تا در اسلوموشن هم طبیعی بماند)؛ صفر شدن = بازگشتِ بی‌لرزش
+        if _shake_energy > 0.002:
+                _shake_energy = maxf(0.0, _shake_energy - raw * 2.4)
+                var amp := _shake_energy * 0.05
+                _cam_arm.position = Vector3(randf_range(-amp, amp),
+                                randf_range(-amp, amp), 0.0)
+        elif _cam_arm.position != Vector3.ZERO:
+                _cam_arm.position = Vector3.ZERO
+
         # گام ۶R — تیک گاریسون خانه‌ها (ورود/تکمیل/خروج اضطراری)
         _tick_garrisons(delta)
 
@@ -936,6 +1032,11 @@ func _select_squad(idx: int) -> void:
                 _toast_msg("دسته‌ی %d هنوز استخدام نشده (دسته‌های فعال: %d)\nSquad %d not recruited yet (active: %d)" % [
                         idx + 1, squads.size(), idx + 1, squads.size()])
                 return
+        # گام ۶R۹ — تسک A: گروهِ منحل‌شده (مرگ فرمانده) قابل انتخاب نیست
+        if idx < squad_dissolved.size() and squad_dissolved[idx]:
+                _toast_msg("این گروه با مرگ فرمانده منحل شده است\nThis squad dissolved — its commander has fallen")
+                _last_input_msg = "squad %d is dissolved" % (idx + 1)
+                return
         mode = Mode.COMMAND
         selected = idx
         _slow_select = true  # §۶ — اسلوموشن هنگام انتخاب
@@ -988,6 +1089,11 @@ func _issue_move_to(center: Vector2, idx: int, silent: bool) -> void:
                 return
         if idx < 0 or idx >= squads.size():
                 return
+        # گام ۶R۹ — تسک A: گروهِ منحل‌شده فرمان نمی‌پذیرد (بازماندگان در فرارند)
+        if idx < squad_dissolved.size() and squad_dissolved[idx]:
+                if not silent:
+                        _toast_msg("این گروه منحل شده — فرمانده‌ای برای فرمان نیست\nSquad dissolved — no commander to obey")
+                return
         # گام ۶R — فرمان روی خانه‌ی زنده = اشغال خانه (بازخورد کاربر)
         var house := _alive_house_near(center)
         if house != null:
@@ -1014,6 +1120,9 @@ func _issue_move_to(center: Vector2, idx: int, silent: bool) -> void:
 
 func _add_waypoint(center: Vector2, idx: int) -> void:
         if idx < 0 or idx >= squads.size():
+                return
+        # گام ۶R۹ — تسک A: گروهِ منحل‌شده waypoint هم نمی‌پذیرد
+        if idx < squad_dissolved.size() and squad_dissolved[idx]:
                 return
         var wq: Array = squad_waypoints[idx]
         if wq.size() >= GameConstants.WAYPOINT_MAX:
@@ -1461,37 +1570,164 @@ func _on_unit_died(u: Node) -> void:
         if cmd_grid != null and u is UnitBase:
                 cmd_grid.release_owner(u.get_instance_id())
         if u is UnitBase:
-                _transfer_flag_if_commander(u)   # گام ۶R — پرچم به عضو زنده‌ی بعدی
+                _dissolve_squad_if_commander(u)   # گام ۶R9 — مرگ فرمانده = انحلال گروه
         if selected >= 0 and (selected >= squads.size() or squads[selected].is_empty()):
                 _deselect()
         _toast_msg("یک سرباز از دست رفت — مرگ دائمی است\nA soldier has fallen — death is permanent")
         _last_input_msg = "unit died — alive %d" % alive_units_total()
 
 
-## مرگ فرمانده → پرچم به اولین عضو زنده‌ی همان دسته منتقل می‌شود (گام ۶R)
-func _transfer_flag_if_commander(dead_u: UnitBase) -> void:
+## گام ۶R۹ — تسک A: ضربه/افتادن → انرژیِ لرزش (تضعیف با فاصله‌ی دوربین تا میدان نبرد)
+func _on_world_shake(amount: float, at: Vector3) -> void:
+        var d := _cam_pivot.global_position.distance_to(at)
+        var fall := clampf(1.0 - d / 30.0, 0.18, 1.0)
+        _shake_energy = minf(1.0, maxf(_shake_energy, amount * fall * 7.0))
+
+
+## گام ۶R۹ — تسک A: فراری از جزیره خارج شد — از همه‌ی فهرست‌های دسته حذف می‌شود
+func _on_unit_fled_island(u: Node) -> void:
+        for si in squads.size():
+                squads[si].erase(u)
+        squad.erase(u)
+        if selected >= 0 and (selected >= squads.size() \
+                        or squads[selected].is_empty()):
+                _deselect()
+        _last_input_msg = "fled island — alive %d" % alive_units_total()
+
+
+# ---------------- گام ۶R۹ — میدانِ جنازه‌ها (بازخورد کاربر) ----------------
+
+## جنازه‌ی تازه‌افتاده ثبت می‌شود؛ بیش از CORPSE_CAP، قدیمی‌ترین نرم محو می‌شود
+var _corpses: Array = []
+
+func _on_corpse_laid(c: Node) -> void:
+        _corpses.append(c)
+        while _corpses.size() > GameConstants.CORPSE_CAP:
+                var old = _corpses.pop_front()
+                if is_instance_valid(old) and not (old as Node).is_queued_for_deletion():
+                        _fade_corpse(old)
+
+
+## محوِ نرمِ قدیمی‌ترین جنازه — دفنِ آرام، بدون ناپدیدیِ ناگهانی
+func _fade_corpse(c: Node) -> void:
+        var parts := ChibiLook.fade_parts(c)
+        if parts.is_empty():
+                c.queue_free()
+                return
+        var tw := c.create_tween()
+        for p in parts:
+                tw.tween_property(p, "transparency", 1.0, 2.0)
+        tw.chain().tween_callback(c.queue_free)
+
+
+## گام ۶R9 — تسک A (بازخورد کاربر): مرگ فرمانده → «پرتره‌ی» گروه خاکستری می‌شود
+## و گروه منحل می‌شود: پرچم خاکستری با جسد فرمانده می‌ماند، دسته فرمان نمی‌پذیرد،
+## و بازماندگان بی‌فرمانده به نزدیک‌ترین ساحل می‌گریزند و جزیره را ترک می‌کنند
+## (الگوی Bad North: سقوطِ فرمانده = پایانِ گروه).
+func _dissolve_squad_if_commander(dead_u: UnitBase) -> void:
         if not dead_u.is_commander:
                 return
         dead_u.is_commander = false
+        # پرتره‌ی خاکستری: پرچمِ دسته رنگِ عزا می‌گیرد + پیکرِ فرمانده خاکستری
         var flag: SquadFlag = null
         for c in dead_u.get_children():
                 if c is SquadFlag:
                         flag = c
                         break
-        if flag == null:
-                return
+        if flag != null:
+                flag.set_color(GameConstants.COL_FLAG_GRAY)
+        dead_u.gray_out_body()
         var si := dead_u.squad_id
-        if si < 0 or si >= squads.size():
-                flag.queue_free()
+        if si < 0 or si >= squads.size() or si >= squad_dissolved.size():
                 return
+        squad_dissolved[si] = true
+        if selected == si:
+                _deselect()
+        # بازماندگان: فرار از جزیره — به نزدیک‌ترین ساحلِ نقطه‌ی فرمانده
+        var shore := _nearest_shore_xz(Vector2(dead_u.global_position.x,
+                        dead_u.global_position.z))
         for u in squads[si]:
                 if is_instance_valid(u) and not u.is_dead() and u != dead_u:
-                        dead_u.remove_child(flag)
-                        u.add_child(flag)
-                        u.is_commander = true
-                        return
-        # هیچ عضو زنده‌ای نیست — پرچم با فرمانده می‌افتد
-        flag.queue_free()
+                        if u.garrisoned:
+                                # داخلِ خانه بود — بیرون می‌آید و فرار می‌کند
+                                u.exit_house(Vector3(shore.x,
+                                                ground.height_at_world(shore), shore.y))
+                        u.start_flee(shore)
+        GameEvents.squad_dissolved.emit(si)
+        _toast_msg("فرمانده افتاد! گروه منحل شد — بازماندگان فرار می‌کنند\nCommander down! Squad dissolved — survivors are fleeing")
+        _last_input_msg = "squad %d dissolved (commander died)" % (si + 1)
+
+
+## گام ۶R9-fix — آبِ واقعیِ دریا: سلول‌های غیرقابل‌عبوری که از لبه‌ی شبکه
+## به داخل می‌رسند (BFS از حاشیه). سنگ/خانه‌ی داخل جزیره به دریا وصل نیستند
+## و در این مجموعه نمی‌آیند — رفعِ «ساحلِ دروغینِ کنارِ سنگ» که فراری‌ها را
+## بلافاصله محو می‌کرد (باگ فاز ۱۶).
+var _water_cells := {}
+var _water_cache_seed := -999999
+
+func _water_set() -> Dictionary:
+        var seed_v := int(island.get("seed_used", -999999))
+        if _water_cache_seed == seed_v and not _water_cells.is_empty():
+                return _water_cells
+        _water_cells.clear()
+        _water_cache_seed = seed_v
+        var nav := PathService.nav
+        if nav == null or nav.width == 0:
+                return _water_cells
+        var q: Array[Vector2i] = []
+        for x in nav.width:
+                for c0: Vector2i in [Vector2i(x, 0), Vector2i(x, nav.height - 1)]:
+                        if nav.in_bounds(c0) and not nav.is_walkable(c0) \
+                                        and not _water_cells.has(c0):
+                                _water_cells[c0] = true
+                                q.append(c0)
+        for y in nav.height:
+                for c0: Vector2i in [Vector2i(0, y), Vector2i(nav.width - 1, y)]:
+                        if nav.in_bounds(c0) and not nav.is_walkable(c0) \
+                                        and not _water_cells.has(c0):
+                                _water_cells[c0] = true
+                                q.append(c0)
+        var d4: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0),
+                        Vector2i(0, 1), Vector2i(0, -1)]
+        while not q.is_empty():
+                var c: Vector2i = q.pop_back()
+                for d: Vector2i in d4:
+                        var n4 := c + d
+                        if nav.in_bounds(n4) and not nav.is_walkable(n4) \
+                                        and not _water_cells.has(n4):
+                                _water_cells[n4] = true
+                                q.append(n4)
+        return _water_cells
+
+
+## گام ۶R9 — نزدیک‌ترین سلولِ ساحلیِ قابل‌عبور (خشکیِ چسبیده به آبِ دریا) از نقطه
+func _nearest_shore_xz(from: Vector2) -> Vector2:
+        var nav := PathService.nav
+        if nav == null or nav.width == 0:
+                return from
+        var water := _water_set()
+        var best := Vector2.INF
+        var best_d := 1e9
+        for y in nav.height:
+                for x in nav.width:
+                        var c := Vector2i(x, y)
+                        if not nav.is_walkable(c):
+                                continue
+                        # ساحلِ واقعی = خشکیِ همسایه‌به‌آبِ دریا — نه کنارِ سنگ/خانه
+                        var coastal := false
+                        for d4: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0),
+                                        Vector2i(0, 1), Vector2i(0, -1)]:
+                                if water.has(c + d4):
+                                        coastal = true
+                                        break
+                        if not coastal:
+                                continue
+                        var cc := nav.cell_center(c)
+                        var dd := cc.distance_to(from)
+                        if dd < best_d:
+                                best_d = dd
+                                best = cc
+        return best if best != Vector2.INF else from
 
 
 func alive_units_total() -> int:

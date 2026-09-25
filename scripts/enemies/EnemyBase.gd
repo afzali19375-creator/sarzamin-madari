@@ -50,6 +50,12 @@ var engaged_unit: Node3D = null     # سربازِ درگیر (برای تست/�
 ## گام ۶R6 — سوارِ قایق: موجودیت واقعیِ روی عرشه — AI و گروهِ hostiles
 ## غیرفعال‌اند تا قایق با خیال راحت حمل‌شان کند؛ با پیاده‌شدن فعال می‌شوند
 var riding := false
+## گام ۶R9 — خونِ شبح: بنفشِ ژرف‌تر از بدنه (خوانا روی چمنِ پاستلی)
+var _blood_color: Color = Color("43215e")
+## گام ۶R9 — پیوتِ دستِ راست برای سوئینگِ سلاح (هم‌امای UnitBase)
+var _hand: Node3D
+## سلاحِ در دست — زیرکلاس‌ها روی _hand می‌سازند (پلتاست برای ژستِ پرتاب)
+var _swing_weapon: Node3D
 ## بنای هدف برای مشعل — کارگردان ست می‌کند (گام ۶R)
 var target_house: BuildingBase = null
 ## شمارنده‌ی مشعل‌های پرتاب‌شده — برای تست خودکار (گام ۶R)
@@ -107,6 +113,11 @@ func _ready() -> void:
         _body.material_override = _mat
         add_child(_body)
         GhostLook.add_face(_body)
+
+        # گام ۶R۹ — پیوتِ دستِ راست برای سوئینگِ سلاح (هم‌امای UnitBase)
+        _hand = Node3D.new()
+        _hand.position = Vector3(0.17, 0.42, 0.08)
+        add_child(_hand)
 
         # تجهیزات اختصاصی کلاس (کلاه‌خود/سپر/نیزه‌ی پرتاب)
         _build_gear()
@@ -186,11 +197,20 @@ func _combat_tick(delta: float) -> void:
 
 
 ## چرخه‌ی ضربه: کشش → یورش → ضربه در اوج → بازگشت
+## گام ۶R9 — سوئینگِ سلاح روی پیوتِ دست: کششِ تیغه به پشت، اسلشِ تند در اوج
 func _perform_strike(target: Node3D) -> void:
         _striking = true
         _atk_cd = attack_cooldown \
                         * (1.0 + randf_range(-GameConstants.CADENCE_VARIANCE,
                         GameConstants.CADENCE_VARIANCE))
+        # کشش: تیغه به پشتِ شانه
+        if _hand != null:
+                var hw := create_tween()
+                hw.set_parallel(true)
+                hw.tween_property(_hand, "rotation:y", 1.0,
+                                GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
+                hw.tween_property(_hand, "rotation:z", 0.5,
+                                GameConstants.STRIKE_WINDUP)
         var tw := create_tween()
         tw.tween_property(_body, "position:z", -0.1,
                         GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
@@ -201,6 +221,18 @@ func _perform_strike(target: Node3D) -> void:
         tw.tween_callback(_strike_impact.bind(wr))
         tw.tween_property(_body, "position:z", 0.0, GameConstants.STRIKE_RECOVER)
         tw.tween_callback(func() -> void: _striking = false)
+        # اسلش: قوسِ تند در لحظه‌ی یورش + بازگشت نرم
+        if _hand != null:
+                var hs := create_tween()
+                hs.tween_interval(GameConstants.STRIKE_WINDUP)
+                hs.tween_property(_hand, "rotation:y", -1.35,
+                                GameConstants.STRIKE_LUNGE + 0.05) \
+                                .set_ease(Tween.EASE_OUT)
+                hs.set_parallel(true)
+                hs.tween_property(_hand, "rotation:y", 0.0,
+                                GameConstants.STRIKE_RECOVER)
+                hs.tween_property(_hand, "rotation:z", 0.0,
+                                GameConstants.STRIKE_RECOVER)
 
 
 ## لحظه‌ی ضربه — هدف در اوجِ یورش اعتبارسنجی می‌شود (فراری تا بردِ کشیده می‌خورد)
@@ -580,6 +612,12 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
         _flash_t = 0.0
         _flashing = true
         _knockback(from_dir)
+        # گام ۶R9 — خونِ شبح: پاششِ بنفش در سینه + صدای برخورد (بازخورد کاربر)
+        BattleFX.blood_burst(get_parent(), global_position + Vector3(0, 0.5, 0),
+                        from_dir, _blood_color)
+        BattleFX.play_sfx(get_tree(), &"hit")
+        # گام ۶R9 — تسک A: لرزشِ خفیفِ دوربین با ضربه به شبح (ضعیف‌تر از ضربه به خودی)
+        GameEvents.world_shake.emit(0.05, global_position)
         if attacker != null and is_instance_valid(attacker) \
                         and attacker.is_in_group("units") \
                         and not _unit_dead(attacker):
@@ -612,13 +650,24 @@ func die() -> void:
         remove_from_group("hostiles")
         died.emit(self)
         set_process(false)
+        # گام ۶R9 — فلشِ در جریان روی جسد نمی‌ماند
+        _flashing = false
+        GhostLook.set_flash(_mat, 0.0)
+        # گام ۶R9 — لکه‌ی خونِ بنفش جای سقوط + صدای افتادن
+        var gy := position.y
+        if ground_provider.is_valid():
+                gy = float(ground_provider.call(Vector2(position.x, position.z)))
+        BattleFX.blood_stain(get_parent(), Vector2(position.x, position.z), gy,
+                        _blood_color)
+        BattleFX.play_sfx(get_tree(), &"fall", -10.0)
+        # انیمیشن مرگ: افتادن — گام ۶R9 (بازخورد کاربر: «جنازه‌های دشمن باقی بمونه»):
+        # شبحِ افتاده روی زمین می‌ماند؛ نه محو، نه آزاد. پاکسازی با سقفِ صحنه.
         var y0 := position.y
         var tw := create_tween()
         tw.set_parallel(true)
         tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
-        tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
-        # گام ۶R۸ — محوِ مرگ روی همه‌ی مش‌ها (شیدر Opaque می‌ماند)
-        for p in GhostLook.fade_parts(self):
-                tw.tween_property(p, "transparency", 1.0,
-                                GameConstants.DEATH_FADE_SECONDS).set_delay(0.35)
-        tw.chain().tween_callback(queue_free)
+        tw.tween_property(self, "position:y", y0 - 0.08, 0.42)
+        add_to_group("corpses")
+        GameEvents.corpse_laid.emit(self)
+        # گام ۶R9 — تسک A: سقوطِ شبح = تکونِ دوربین
+        GameEvents.world_shake.emit(0.2, global_position)

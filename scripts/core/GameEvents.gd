@@ -19,6 +19,19 @@ signal village_destroyed(village_id: int)
 signal commander_died(commander: Node)
 signal unit_permanently_died(unit: Node)
 
+## گام ۶R۹ — جسد روی زمین ماند (بازخورد کاربر) — صحنه سقفِ جنازه‌ها را نگه می‌دارد
+signal corpse_laid(corpse: Node)
+
+## گام ۶R۹ — لرزش دوربین در ضربه/افتادن (تسک A: فیدبک حسی نبرد)؛
+## صحنه با فاصله‌ی دوربین تا نقطه‌ی ضربه تضعیف می‌کند
+signal world_shake(amount: float, at: Vector3)
+
+## گام ۶R۹ — تسک A: مرگ فرمانده → گروه منحل شد؛ بازماندگان از جزیره فرار می‌کنند
+signal squad_dissolved(squad_id: int)
+
+## گام ۶R۹ — عضوِ فراری به ساحل رسید و از جزیره خارج شد (صحنه از دسته حذف می‌کند)
+signal unit_fled_island(unit: Node)
+
 ## پایان بازی — گام ۶R2 (بازخورد کاربر: «وقتی خانه‌ها کامل آتش گرفت کاربر می‌بازد»)
 signal game_over(reason: String)
 

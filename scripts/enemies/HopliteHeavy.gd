@@ -30,6 +30,12 @@ func _build_gear() -> void:
         # تنه‌ی تنومندتر
         _body.scale = Vector3(1.12, 1.06, 1.12)
 
+        # گام ۶R9 — شمشیرِ برنز در دستِ راست: ضربه‌ی سنگینِ او اکنون «دیده می‌شود»
+        _swing_weapon = WeaponLook.sword(Color("c9963c"), 0.44)
+        _swing_weapon.rotation_degrees.z = -14.0
+        _hand.add_child(_swing_weapon)
+        GhostLook.add_hand(self, Vector3(0.19, 0.4, 0.1))
+
         # سپر بزرگ مستطیلی رو به +Z (سمت نگاه) — جلوی شکمِ چینی
         _shield = MeshInstance3D.new()
         var sm := BoxMesh.new()

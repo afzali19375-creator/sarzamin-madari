@@ -10,7 +10,7 @@ extends UnitBase
 
 const SPEAR_LEN := 2.2
 
-var _spear: MeshInstance3D
+var _spear: Node3D
 var _spear_pivot: Node3D
 var brace_active := false       # برای تست خودکار و HUD
 var _brace_k := 0.0             # 0=نیزه بالا (مسیر) → 1=افقی (آماده‌باش)
@@ -25,20 +25,17 @@ func _build_gear() -> void:
         _spear_pivot = Node3D.new()
         _spear_pivot.position = Vector3(0.21, 0.44, 0.0)
         add_child(_spear_pivot)
+        # گام ۶R9 — پیوتِ دست = پیوتِ نیزه؛ سوئینگِ THRUST پایه با آن کار می‌کند
+        _hand = _spear_pivot
 
-        _spear = MeshInstance3D.new()
-        var sm := CylinderMesh.new()
-        sm.top_radius = 0.02
-        sm.bottom_radius = 0.03
-        sm.height = SPEAR_LEN
-        _spear.mesh = sm
+        # گام ۶R9 — نیزه‌ی چندقطعه‌ای: چوبِ گرم + گل‌میوه‌ی برنجی + سره‌ی
+        # برگ‌سانِ فولادیِ پخ‌دار + بندِ چرمی — مبدأ روی جای دست
+        _spear = WeaponLook.spear(SPEAR_LEN, WeaponLook.WARM_WOOD,
+                        GameConstants.STEEL_BLADE) as Node3D
+        _swing_weapon = _spear
+        _swing_style = SwingStyle.THRUST
         # نیزه در راستای +Z مدل (جهت نگاه) — پیوت زاویه‌اش را تعیین می‌کند
         _spear.rotation_degrees.x = 90.0
-        _spear.position = Vector3(0.0, 0.0, SPEAR_LEN * 0.5 - 0.3)
-        var wood := StandardMaterial3D.new()
-        wood.albedo_color = GameConstants.COL_DOOR_WOOD
-        wood.roughness = 0.85
-        _spear.material_override = wood
         _spear_pivot.add_child(_spear)
         _spear_pivot.rotation_degrees.x = -SPEAR_UP_DEG  # در مسیر: نیزه رو به بالا
 
@@ -77,18 +74,17 @@ func _combat_end() -> void:
         _spear_pivot.rotation_degrees.x = -SPEAR_UP_DEG
 
 
-## یورش نیزه به جلو هنگام ضربه
+## یورش نیزه به جلو هنگام ضربه — گام ۶R9: مبدأ نیزه روی جای دست است
 func _thrust() -> void:
-        var z0 := SPEAR_LEN * 0.5 - 0.3
         var tw := create_tween()
-        tw.tween_property(_spear, "position:z", z0 + 0.55, 0.09).set_ease(Tween.EASE_OUT)
-        tw.tween_property(_spear, "position:z", z0, 0.16)
+        tw.tween_property(_spear, "position:z", 0.55, 0.09).set_ease(Tween.EASE_OUT)
+        tw.tween_property(_spear, "position:z", 0.0, 0.16)
 
 
-## گام ۶R3 — ژست نیزه در لحظه‌ی ضربه + گام ۶R4 — بازگشت چرخشِ کششِ ضربه
+## گام ۶R9 — کوبشِ دست (پیاده‌سازی پایه) + یورشِ نیزه‌ی خودِ کلاس
 func _strike_impact_fx() -> void:
+        super()
         _thrust()
-        _body.rotation.y = 0.0
 
 
 ## هنگام شروع حرکت نیزه باید بالا برگردد (لایه ۱ آماده‌ی سفر)

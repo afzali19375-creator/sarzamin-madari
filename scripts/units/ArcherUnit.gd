@@ -9,7 +9,7 @@ extends UnitBase
 ##   * خنک‌شدن ARCHER_COOLDOWN؛ تیر بالستیک (ArrowProjectile)
 ## بصری: لاجوردی + کمان حلقه‌ای در دست چپ + تیردان پشت.
 
-var _bow: MeshInstance3D
+var _bow: Node3D
 var _quiver: MeshInstance3D
 var _nock: MeshInstance3D       # تیرِ روی کمان هنگام هدف‌گیری
 var shots_fired := 0            # برای تست خودکار
@@ -20,21 +20,12 @@ func _default_hp() -> int:
 
 
 func _build_gear() -> void:
-        # کمان — حلقه‌ی باریک عمودی در دست چپ
-        _bow = MeshInstance3D.new()
-        var bm := TorusMesh.new()
-        bm.inner_radius = 0.24
-        bm.outer_radius = 0.27
-        bm.rings = 12
-        bm.ring_segments = 6
-        _bow.mesh = bm
-        _bow.position = Vector3(-0.26, 0.34, 0.06)
-        _bow.scale = Vector3(1.0, 1.0, 0.35)  # پخ‌کردن حلقه → شکل کمان
-        var wood := StandardMaterial3D.new()
-        wood.albedo_color = GameConstants.COL_DOOR_WOOD
-        wood.roughness = 0.8
-        _bow.material_override = wood
-        add_child(_bow)
+        # گام ۶R9 — کمانِ واقعی: شانه‌ی خمیده از بند‌های چوبی روی قوس + زه‌ی
+        # عاجی + نقشِ برنزیِ دسته — روی پیوتِ دست چپ، زه رو به سینه‌ی کماندار
+        _bow = WeaponLook.bow(0.3)
+        _bow.position = Vector3(-0.4, -0.07, 0.02)
+        _bow.rotation_degrees = Vector3(0.0, 90.0, 0.0)
+        _hand.add_child(_bow)
 
         # تیردان پشت
         _quiver = MeshInstance3D.new()
@@ -56,7 +47,7 @@ func _build_gear() -> void:
         var nm := BoxMesh.new()
         nm.size = Vector3(0.02, 0.02, 0.4)
         _nock.mesh = nm
-        _nock.position = Vector3(-0.24, 0.34, 0.2)
+        _nock.position = Vector3(-0.26, 0.35, 0.14)
         var nmat := StandardMaterial3D.new()
         nmat.albedo_color = GameConstants.COL_BEACH_SAND
         _nock.material_override = nmat

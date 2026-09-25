@@ -1,8 +1,9 @@
 class_name HopliteLight
 extends EnemyBase
 ## هوپلیت سبک (§۶): سریع، کم‌جان — خط اول مهاجمان.
-## گام ۶R8 — بصری: شبحِ بنفش (COL_GHOST_LIGHT) با شمشیرِ کم‌رنگِ عمودی —
-## دقیقاً مثلِ تصویرِ مرجعِ کاربر (تیغه‌ی سبز-سفید + دستِ خاکستری).
+## گام ۶R9 — شمشیرِ چندقطعه‌ایِ واضح روی پیوتِ دست: تیغه‌ی سبز-سفیدِ مرجع با
+## محافظِ برنز، دسته‌ی چرمی و سوئینگِ اسلش واقعی (بازخورد: «شمشیر قشنگ‌تر و
+## واضح‌تر بشن و به شکل زیبا حرکت کند و به دشمن بخورد»).
 
 func _init() -> void:
         hp = GameConstants.HOPLITE_LIGHT_HP
@@ -21,29 +22,9 @@ func _default_color() -> Color:
 
 
 func _build_gear() -> void:
-        # شمشیرِ کم‌رنگِ عمودی در سمتِ راستِ مدل — تیغه‌ی سبز-سفیدِ مرجع
-        var blade := MeshInstance3D.new()
-        var bm := BoxMesh.new()
-        bm.size = Vector3(0.055, 0.52, 0.014)
-        blade.mesh = bm
-        blade.position = Vector3(0.24, 0.53, 0.15)
-        var bmat := StandardMaterial3D.new()
-        bmat.albedo_color = GameConstants.COL_GHOST_BLADE
-        bmat.roughness = 0.45
-        blade.material_override = bmat
-        add_child(blade)
-
-        # محافظِ دسته — خاکستریِ مرجع
-        var guard := MeshInstance3D.new()
-        var gm := BoxMesh.new()
-        gm.size = Vector3(0.1, 0.028, 0.038)
-        guard.mesh = gm
-        guard.position = Vector3(0.24, 0.265, 0.15)
-        var gmat := StandardMaterial3D.new()
-        gmat.albedo_color = GameConstants.COL_GHOST_HAND
-        gmat.roughness = 0.7
-        guard.material_override = gmat
-        add_child(guard)
-
-        # دستِ خاکستریِ گیرنده‌ی دسته
-        GhostLook.add_hand(self, Vector3(0.24, 0.235, 0.15))
+        # شمشیرِ مرجع — تیغه‌ی سبز-سفیدِ کم‌رنگ؛ مبدأ = جای دست؛ سوئینگ با _hand
+        _swing_weapon = WeaponLook.sword(GameConstants.COL_GHOST_BLADE, 0.5)
+        _swing_weapon.rotation_degrees.z = -12.0   # تیغه کمی به بیرونِ بدن
+        _hand.add_child(_swing_weapon)
+        # دستِ خاکستریِ گیرنده‌ی دسته (مرجعِ تصویر) — روی مچِ پیوتِ دست
+        GhostLook.add_hand(self, Vector3(0.19, 0.4, 0.1))

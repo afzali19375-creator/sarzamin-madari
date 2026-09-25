@@ -16,6 +16,13 @@ var strikes_done := 0           # برای تست خودکار (گام ۶)
 
 
 func _build_gear() -> void:
+        # گام ۶R9 — جاویدان اکنون شمشیر هم دارد: سپرِ فیروزه‌ای چپ، تیغه‌ی
+        # فولادی راست روی پیوتِ دست — اسلشِ واقعی هنگام ضربه (سبک SWORD_SLASH)
+        _swing_style = SwingStyle.SWORD_SLASH
+        _swing_weapon = WeaponLook.sword(GameConstants.STEEL_BLADE, 0.46)
+        _swing_weapon.rotation_degrees.z = -12.0
+        _hand.add_child(_swing_weapon)
+
         # کلاه‌خود بلند هخامنشی — روی نوکِ کلاهِ چینی (بدنه ۶R۷ تا ~۰٫۸۵m)
         _crest = MeshInstance3D.new()
         var cm := CylinderMesh.new()
@@ -95,7 +102,20 @@ func _lunge() -> void:
         tw.tween_property(_body, "position:z", 0.0, 0.14)
 
 
-## گام ۶R3 — ژست ضربه در اوجِ یورش + گام ۶R4 — بازگشت چرخشِ کششِ ضربه
+## گام ۶R9 — یورش + اسلشِ شمشیر (سوئینگِ دست در پیاده‌سازیِ پایه)
 func _strike_impact_fx() -> void:
         _lunge()
         _body.rotation.y = 0.0
+        # سوئینگِ تیغه — منطقِ SWORD_SLASH از پایه (بدونِ ژستِ بدنه‌ی پیش‌فرض)
+        if _hand != null:
+                var hs := create_tween()
+                hs.set_parallel(true)
+                hs.tween_property(_hand, "rotation:y", -1.35,
+                                GameConstants.STRIKE_LUNGE + 0.05) \
+                                .set_ease(Tween.EASE_OUT)
+                hs.tween_property(_hand, "rotation:z", -0.2,
+                                GameConstants.STRIKE_LUNGE + 0.05)
+                hs.chain().tween_property(_hand, "rotation:y", 0.0,
+                                GameConstants.STRIKE_RECOVER)
+                hs.parallel().tween_property(_hand, "rotation:z", 0.0,
+                                GameConstants.STRIKE_RECOVER)

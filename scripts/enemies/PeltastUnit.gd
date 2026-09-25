@@ -11,7 +11,6 @@ extends EnemyBase
 ## یک دست، مشعلِ روشن در دستِ دیگر (آتشِ مشعل سیگنالِ گیم‌پلی می‌ماند).
 
 var javelins_thrown := 0     # برای تست خودکار
-var _javelin: MeshInstance3D
 var _torch_in_hand: MeshInstance3D
 
 
@@ -35,20 +34,13 @@ func _default_color() -> Color:
 func _build_gear() -> void:
         # گام ۶R8 — بدونِ نوارِ سر (مرجعِ شبح کلاهِ لخت دارد)
 
-        # نیزه‌ی پرتابِ استخوانی در دست
-        _javelin = MeshInstance3D.new()
-        var jm := BoxMesh.new()
-        jm.size = Vector3(0.025, 0.025, 0.62)
-        _javelin.mesh = jm
-        _javelin.rotation_degrees = Vector3(-30.0, 0.0, 0.0)
-        _javelin.position = Vector3(0.22, 0.44, 0.12)
-        var bone := StandardMaterial3D.new()
-        bone.albedo_color = GameConstants.COL_GHOST_BONE
-        bone.roughness = 0.6
-        _javelin.material_override = bone
-        add_child(_javelin)
+        # گام ۶R9 — نیزه‌ی پرتابِ چندقطعه‌ای (ساقِ استخوانی + سره‌ی هرمی + پر)
+        # روی پیوتِ دست — ژستِ پرتاب اکنون کلِ بازو را می‌چرخاند
+        _swing_weapon = WeaponLook.javelin(0.66)
+        _swing_weapon.rotation_degrees = Vector3(-30.0, 0.0, -8.0)
+        _hand.add_child(_swing_weapon)
         # دستِ خاکستریِ گیرنده‌ی نیزه (مرجع)
-        GhostLook.add_hand(self, Vector3(0.21, 0.42, 0.13))
+        GhostLook.add_hand(self, Vector3(0.19, 0.4, 0.1))
 
         # گام ۶R — مشعل روشن در دست دیگر (سمت چپ مدل)
         _torch_in_hand = MeshInstance3D.new()
@@ -104,15 +96,25 @@ func _combat_tick(delta: float) -> void:
                                 ground_provider)
 
 
-## پرتاب به جلو — نیزه‌ی دست برای لحظه‌ای محو می‌شود (رها شد)
+## پرتاب — گام ۶R9: کلِ بازو به جلو شلاق می‌خورد + نیزه لحظه‌ای جلو می‌رود
 func _throw_anim() -> void:
+        if _hand == null:
+                return
         var tw := create_tween()
-        tw.tween_property(_javelin, "position:z", 0.3, 0.09).set_ease(Tween.EASE_OUT)
-        tw.tween_callback(_javelin_back)
+        tw.set_parallel(true)
+        tw.tween_property(_hand, "rotation:x", 0.9, 0.09).set_ease(Tween.EASE_OUT)
+        tw.tween_property(_swing_weapon, "position:z", 0.22, 0.09) \
+                        .set_ease(Tween.EASE_OUT)
+        tw.chain().tween_callback(_javelin_back)
 
 
 func _javelin_back() -> void:
-        _javelin.position = Vector3(0.22, 0.44, 0.12)
+        if _hand == null:
+                return
+        var tw := create_tween()
+        tw.set_parallel(true)
+        tw.tween_property(_hand, "rotation:x", 0.0, 0.18)
+        tw.tween_property(_swing_weapon, "position:z", 0.0, 0.18)
 
 
 # ---------------- گام ۶R — ژست اختصاصی پرتاب مشعل ----------------
