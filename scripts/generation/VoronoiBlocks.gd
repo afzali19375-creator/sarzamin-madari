@@ -1,22 +1,18 @@
 class_name VoronoiBlocks
 extends Node3D
-## «بلوک‌های» زمین — گام ۶R۱۲ (بازخورد کاربر: «بلوک‌ها اصلا شبیه اسکرین‌شات
-## نبود»): پدهای بیضیِ سبزِ مجزا روی زمینِ خشکِ کمرنگ — دقیقاً زبان بصری
-## اسکرین‌شات‌های Bad North (جزیره‌ی دوتراسه: لکه‌های چمنِ بیضی با فاصله‌های
-## روشن بین‌شان).
+## پدهای بیضیِ زمین — گام ۶R۱۳ (بازخورد کاربر):
+##   * «نباید معلوم باشند؛ فقط وقتی روی دسته کلیک می‌کنم نمایش داده شوند»
+##     → پیش‌فرض مخفی؛ ورود به حالتِ فرمان (انتخاب دسته) = نمایان
+##   * «فاصله‌های کم از هم داشته باشند» → شبکه‌ی ۲٫۵ متری + بیضی‌های
+##     درشت‌تر نسبت به شکاف — گپِ دیداری ~۰٫۲-۰٫۴ متر
 ##
-##   * هر پد = یک بیضیِ نرم (rx~۱٫۵m / ry~۱٫۱m) هم‌راستای شیب زمین
-##   * پدها روی شبکه‌ی لرزانِ ۳٫۲ متری روی خشکی می‌نشینند؛ فاصله‌ی حداقلی
-##     بین پدها تضمین می‌شود تا هم‌پوشانی نشوند (شبکه‌ی قبلیِ ورونویِ تمام‌پوشش
-##     حذف شد — «پازل» بودن مشکل بود، نه حسن)
-##   * پدِ خانه: بیضیِ بزرگ‌تر زیر هر بنا — خانه دقیقاً «یک بلوک» دارد
-##   * کلیک/پیکینگ: نزدیک‌ترین پد با متریکِ بیضی (تا ۱٫۳۵× — کلیکِ لبه‌ی پد هم
-##     ثبت می‌شود)؛ بینِ پدها = هیچ (مثل مرجع)
-##   * حالت فرمان: پدها پرنورتر می‌شوند؛ هاور = پدِ زیر ماوس روشن‌تر
+##   * هر پد = یک بیضیِ نرم هم‌راستای شیب زمین؛ پدِ خانه بزرگ‌تر — «خانه دقیقاً یک بلوک»
+##   * کلیک/پیکینگ: نزدیک‌ترین پد با متریکِ بیضی (تا ۱٫۳۵×)
+##   * حالت فرمان: پدها نمایان + هاور = پدِ زیر ماوس روشن‌تر
 ##   * ثبتِ اشغال: هر سربازِ ایستاده یک پدِ آزاد را تصاحب می‌کند؛ پدِ خانه‌ها
 ##     از قبل اشغال است (OWNER_OCCUPIED)
 ##
-## API عمداً سازگار با نسخه‌ی ورونوی نگه داشته شد (صحنه/تست‌ها/پrobe).
+## API عمداً سازگار با نسخه‌های قبلی نگه داشته شد (صحنه/تست‌ها/probe).
 
 const LIFT := 0.045                       # بلندی پد روی زمین (ضد z-fight)
 const OWNER_OCCUPIED := -1                # پدِ خانه‌ها — هرگز به سرباز نمی‌رسد
@@ -70,9 +66,9 @@ func rebuild(ground: IslandGround, nav: NavGrid, house_sites: Array[Vector2i]) -
                         var raw := Vector2(_origin.x + gx + rng.randf_range(-jitter, jitter),
                                         _origin.y + gy + rng.randf_range(-jitter, jitter))
                         var spot := _nearest_walkable(nav, raw, 1.1)
-                        if spot != Vector2.INF and _far_enough(spot, 2.35):
-                                _add_pad(spot, rng.randf_range(1.42, 1.62),
-                                                rng.randf_range(1.02, 1.18),
+                        if spot != Vector2.INF and _far_enough(spot, 2.0):
+                                _add_pad(spot, rng.randf_range(1.16, 1.32),
+                                                rng.randf_range(0.86, 0.98),
                                                 rng.randf() * PI)
                         gx += spacing
                 gy += spacing
@@ -82,7 +78,7 @@ func rebuild(ground: IslandGround, nav: NavGrid, house_sites: Array[Vector2i]) -
         for site in house_sites:
                 var hc := nav.origin + (Vector2(site) + Vector2(1.0, 1.0)) * nav.cell_size
                 house_centers.append(hc)
-                _add_pad(hc, 1.78, 1.34, rng.randf() * PI)
+                _add_pad(hc, 1.58, 1.2, rng.randf() * PI)
 
         cell_count = _blocks.size()
 
@@ -220,7 +216,8 @@ func _build_visuals() -> void:
         _pad_mat.shader = _pad_shader()
         _pad_mat.set_shader_parameter("intensity", 0.62)
         _mmi.material_override = _pad_mat
-        _mmi.visible = not _blocks.is_empty()
+        # گام ۶R۱۳ — «پدها نباید معلوم باشند» — پیش‌فرض مخفی؛ فقط حالتِ فرمان
+        _mmi.visible = false
         add_child(_mmi)
 
         # هاور — همان بیضی پرنورتر روی پدِ زیر ماوس
@@ -263,8 +260,11 @@ func _pad_transform(b: Dictionary) -> Transform3D:
 
 func set_command_mode(on: bool) -> void:
         _command = on
+        # گام ۶R۱۳ — پدها فقط هنگام انتخابِ دسته (کلیک روی سرباز) دیده می‌شوند
+        if _mmi != null:
+                _mmi.visible = on and not _blocks.is_empty()
         if _pad_mat != null:
-                _pad_mat.set_shader_parameter("intensity", 0.9 if on else 0.62)
+                _pad_mat.set_shader_parameter("intensity", 0.8 if on else 0.62)
         if not on:
                 _clear_hover()
 

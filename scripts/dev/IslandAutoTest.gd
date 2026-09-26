@@ -91,6 +91,7 @@ var _cam_rotated := false
 var _arrow_rotated := false
 # گام ۶R۱۲ — پنِ عمودیِ محدودِ نما
 var _pan_before := 0.0
+var _pan_h_before_v := 0.0   # گام ۶R۱۳ — علامتِ پن افقی قبل از فشردن کلید
 var _torch_peltast: PeltastUnit = null
 var _max_torches := 0
 var _torch_house: BuildingBase = null
@@ -111,6 +112,7 @@ var _fleet_d1 := -1
 var _fleet_d2 := -1
 var _fleet_d3 := -1
 var _drag_yaw0 := 0.0
+var _drag_pan_h0 := 0.0
 var _sep_min := 1e9                 # کمترین فاصله‌ی جفتی قایق‌ها حین شنا (۶R3)
 var _dis_latched := {}              # id مهاجم‌های «خشکی‌دیده» — چک پیاده‌شدن (۶R3)
 var _dis_near := 0                  # تعداد پیاده‌شده‌های نزدیک قایق
@@ -1821,10 +1823,17 @@ func _phase16_flags_and_camera() -> void:
                 2:
                         if _t - _sub_t >= 0.4:
                                 _push_key_release(KEY_RIGHT)
-                                var dyaw2: float = absf(wrapf(deg_to_rad(target_scene._yaw
-                                                - _yaw_before), -PI, PI))
-                                _check("camera_rotates_with_arrow_keys", rad_to_deg(dyaw2) > 10.0,
-                                                "%.1f deg" % rad_to_deg(dyaw2))
+                                # گام ۶R۱۳ — جهت‌نما دیگر نمی‌چرخاند؛ خودِ دوربین را
+                                # جابه‌جا می‌کند (پنِ افقی) — چرخش فقط Q/E است
+                                _check("arrow_keys_pan_camera_not_rotate",
+                                                target_scene._pan_h_target > 0.2 \
+                                                and absf(wrapf(deg_to_rad(target_scene._yaw
+                                                                - _yaw_before), -PI, PI)) < 0.05,
+                                                "h_t=%.2f" % target_scene._pan_h_target)
+                                target_scene._pan_h_target = 0.0
+                                target_scene._pan_h = 0.0
+                                if target_scene._cam_pan != null:
+                                        target_scene._cam_pan.position.x = 0.0
                                 # گام ۶R9 — تسک A: دسته‌ای با حداقل ۲ عضو زنده برای
                                 # آزمونِ انحلال (آخرین دسته — تا دسته‌های ۰..۳ برای فازهای
                                 # بعدی دست‌نخورده بمانند)
@@ -1968,9 +1977,51 @@ func _phase16_flags_and_camera() -> void:
                                                 "t=%.2f" % target_scene._pan_target)
                                 # ریستِ پن برای ادامه‌ی بازی (بازه‌ی آزادی کوچک است)
                                 target_scene._pan_target = 0.0
+                                # گام ۶R۱۳ — پنِ افقی: خودِ دوربین چپ/راست هم می‌رود
+                                _pan_h_before_v = target_scene._pan_h
+                                _push_key(KEY_RIGHT)
+                                _sub = 9
+                                _sub_t = _t
+                9:
+                        if _t - _sub_t >= 0.5:
+                                _push_key_release(KEY_RIGHT)
+                                var pan_right: float = target_scene._pan_h \
+                                                - _pan_h_before_v
+                                _check("camera_pans_right_with_key",
+                                                pan_right > 0.3 \
+                                                and target_scene._pan_h_target \
+                                                                <= GameConstants.CAM_PAN_SIDE_MAX + 1e-4,
+                                                "dh=%.2f t=%.2f" % [pan_right,
+                                                target_scene._pan_h_target])
+                                _push_key(KEY_RIGHT)   # تا سقفِ پنِ افقی
+                                _sub = 10
+                                _sub_t = _t
+                10:
+                        if _t - _sub_t >= 3.0:
+                                _push_key_release(KEY_RIGHT)
+                                var ps: float = GameConstants.CAM_PAN_SIDE_MAX
+                                _check("camera_pan_side_clamped",
+                                                target_scene._pan_h_target <= ps + 1e-4 \
+                                                and target_scene._pan_h <= ps + 0.01,
+                                                "t=%.2f h=%.2f max=%.2f" % [
+                                                target_scene._pan_h_target,
+                                                target_scene._pan_h, ps])
+                                # ریستِ پنِ افقی برای ادامه‌ی بازی
+                                target_scene._pan_h_target = 0.0
+                                target_scene._pan_h = 0.0
+                                if target_scene._cam_pan != null:
+                                        target_scene._cam_pan.position.x = 0.0
                                 _phase = 17
                                 _sub = 0
                                 _sub_t = _t
+
+
+var _pan_h_snapshot := 0.0
+
+## گام ۶R۱۳ — علامتِ شروعِ سنجشِ پن افقی
+func _pan_h_before() -> float:
+        _pan_h_snapshot = target_scene._pan_h
+        return _pan_h_snapshot
 
 
 ## گام ۶R۱۲ — شبیه‌سازی کشیدنِ عمودی رو به بالا (۲۰۰px) برای آزمون پنِ نما:
@@ -2317,8 +2368,18 @@ func _phase19_fleet_touch_gameover() -> void:
                                         target_scene.cmd_grid.beam_instance_count() == ccg,
                                         "blocks=%d count=%d" % [
                                         target_scene.cmd_grid.beam_instance_count(), ccg])
-                        _check("command_blocks_always_visible",
-                                        target_scene.cmd_grid.tiles_visible())
+                        # گام ۶R۱۳ — «پدها نباید معلوم باشند؛ فقط با کلیک روی دسته»:
+                        # پیش‌فرض مخفی + ورود به حالتِ فرمان = نمایان + خروج = مخفی
+                        target_scene._deselect()
+                        _check("pads_hidden_by_default",
+                                        not target_scene.cmd_grid.tiles_visible())
+                        target_scene._select_squad(0)
+                        _check("pads_visible_in_command_mode",
+                                        target_scene.cmd_grid.tiles_visible()
+                                        and target_scene.cmd_grid.is_command_mode())
+                        target_scene._deselect()
+                        _check("pads_hidden_after_deselect",
+                                        not target_scene.cmd_grid.tiles_visible())
                         # گام ۶R۱۲ — پدهای بیضیِ مجزا (زبانِ اسکرین‌شات): پوششِ کاملِ
                         # زمین دیگر هدفِ طراحی نیست؛ چکِ تازه = پوششِ معقولِ خشکی
                         var navw: NavGrid = PathService.nav
@@ -2624,18 +2685,25 @@ func _phase19_fleet_touch_gameover() -> void:
                                 _check("fleet_groups_cleaned",
                                                 target_scene.director.groups_count() == 0,
                                                 "%d groups" % target_scene.director.groups_count())
-                                # — چرخش دوربین با کشیدن دکمه‌ی چپ موس —
+                                # — گام ۶R۱۳: کشیدنِ افقی = پنِ دوربین (نه چرخش) —
                                 # (روی اندروید، لمس با emulate_mouse_from_touch
                                 # به همین دنباله‌ی رویداد تبدیل می‌شود)
                                 _drag_yaw0 = target_scene._yaw
+                                _drag_pan_h0 = target_scene._pan_h_target
                                 _push_left_drag()
                                 _sub = 4
                                 _sub_t = _t
                 4:
                         var dyaw := absf(wrapf(deg_to_rad(target_scene._yaw
                                                         - _drag_yaw0), -PI, PI))
-                        _check("camera_rotates_with_left_drag", rad_to_deg(dyaw) > 10.0,
-                                        "%.1f deg" % rad_to_deg(dyaw))
+                        var dpanh := absf(target_scene._pan_h_target - _drag_pan_h0)
+                        _check("camera_pans_with_left_drag",
+                                        dpanh > 0.3 and rad_to_deg(dyaw) < 1.0,
+                                        "dh=%.2f yaw=%.1f deg" % [dpanh, rad_to_deg(dyaw)])
+                        target_scene._pan_h_target = 0.0
+                        target_scene._pan_h = 0.0
+                        if target_scene._cam_pan != null:
+                                target_scene._cam_pan.position.x = 0.0
                         # — گام ۶R3: سه موج بدون hint → باید از «جهات مختلف» بیایند
                         _fleet_d1 = target_scene.director.spawn_wave({"size": 4, "force": true})
                         _fleet_d2 = target_scene.director.spawn_wave({"size": 4, "force": true})

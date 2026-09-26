@@ -10,7 +10,8 @@ extends RefCounted
 
 const HIT_SFX_RATE := 22050          # نرخ نمونه‌برداری صدای سنتزشده
 ## سقف لکه‌های خون هم‌زمان — قدیمی‌ها محو می‌شوند (ضد انباشت در جنگ‌های طولانی)
-const STAIN_CAP := 64
+## گام ۶R۱۳ — ۴۰ (بازخورد: «خون‌ها مسخره‌اند» — میدانِ سیاهِ لکه نشود)
+const STAIN_CAP := 40
 
 static var _stains: Array = []       # FIFO لکه‌ها — فقط آخرین STAIN_CAP می‌ماند
 static var _sfx_cache := {}
@@ -18,7 +19,8 @@ static var _sfx_played := 0
 
 
 ## پاشش خون در نقطه‌ی برخورد — dir جهت ضربه است (صفر = پاشش عمودی)
-## گام ۶R۱۲ — «خون و ضربه باید باشه»: پاششِ پرتُر و بزرگ‌تر (۲۲ ذره، قطر ۲×)
+## گام ۶R۱۳ — بازخورد کاربر: «خون‌ها مسخره‌تر از همه» — پاششِ ۲۲ ذره‌ایِ
+## بزرگِ ۶R۱۲ به پفِ کوچکِ ۹ ذره‌ایِ کوتاه تبدیل شد؛ لکه هم ریز و کم‌رنگ است
 static func blood_burst(host: Node, at: Vector3, dir: Vector3, col: Color) -> void:
         if host == null or not host.is_inside_tree():
                 return
@@ -26,19 +28,19 @@ static func blood_burst(host: Node, at: Vector3, dir: Vector3, col: Color) -> vo
         p.add_to_group("blood_burst")
         p.one_shot = true
         p.explosiveness = 1.0
-        p.amount = 22
-        p.lifetime = 0.6
-        p.direction = Vector3(dir.x, 0.55, dir.z) if dir.length() > 0.01 \
+        p.amount = 9
+        p.lifetime = 0.45
+        p.direction = Vector3(dir.x, 0.5, dir.z) if dir.length() > 0.01 \
                         else Vector3.UP
-        p.spread = 52.0
-        p.initial_velocity_min = 1.7
-        p.initial_velocity_max = 3.2
-        p.gravity = Vector3(0.0, -9.0, 0.0)
-        p.scale_amount_min = 0.8
-        p.scale_amount_max = 1.7
+        p.spread = 40.0
+        p.initial_velocity_min = 1.0
+        p.initial_velocity_max = 1.9
+        p.gravity = Vector3(0.0, -8.0, 0.0)
+        p.scale_amount_min = 0.55
+        p.scale_amount_max = 1.1
         var sm := SphereMesh.new()
-        sm.radius = 0.05
-        sm.height = 0.1
+        sm.radius = 0.03
+        sm.height = 0.06
         sm.radial_segments = 6
         sm.rings = 3
         p.mesh = sm
@@ -51,7 +53,7 @@ static func blood_burst(host: Node, at: Vector3, dir: Vector3, col: Color) -> vo
         p.global_position = at
         p.emitting = true
         var tw := p.create_tween()
-        tw.tween_interval(1.1)
+        tw.tween_interval(0.85)
         tw.tween_callback(p.queue_free)
 
 
@@ -63,14 +65,15 @@ static func blood_stain(host: Node, xz: Vector2, ground_y: float,
         var s := MeshInstance3D.new()
         s.add_to_group("blood_stain")
         var cm := CylinderMesh.new()
-        cm.top_radius = 0.3 + randf() * 0.2
+        # گام ۶R۱۳ — لکه‌ی ریز و کم‌رنگ (قبلاً دیسکِ ۰٫۳-۰٫۵mِ نپاخ ۸۵٪ بود)
+        cm.top_radius = 0.14 + randf() * 0.08
         cm.bottom_radius = cm.top_radius
         cm.height = 0.012
         cm.radial_segments = 12
         s.mesh = cm
         var m := StandardMaterial3D.new()
-        var c := col.darkened(randf() * 0.25)
-        c.a = 0.85
+        var c := col.darkened(randf() * 0.2)
+        c.a = 0.42
         m.albedo_color = c
         m.roughness = 0.65
         m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

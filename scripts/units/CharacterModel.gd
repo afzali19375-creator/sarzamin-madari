@@ -69,6 +69,9 @@ var _attack_anim := "SwordSlash"
 ## آخرین تینتِ اعمال‌شده — برای تست خودکار و دیباگ (display_color)
 var _tint := Color.WHITE
 var _tint_k := 0.0
+## گام ۶R۱۳ — مقیاسِ نرمال‌شده‌ی قد (set_crouch روی همین ضرب می‌شود تا
+## «غول‌شدن» هنگام نبرد رخ ندهد — بازخورد کاربر)
+var _norm_scale := 1.0
 
 
 ## ساخت و آماده‌سازی — قبل از add_child صدا زده می‌شود (به درخت نیاز ندارد)
@@ -173,8 +176,17 @@ func freeze_pose() -> void:
 func _normalize_height() -> void:
         var top := _scan_top(_root, Transform3D.IDENTITY)
         if top > 0.1:
-                var s := TARGET_HEIGHT / top
-                _root.scale = Vector3(s, s, s)
+                _norm_scale = TARGET_HEIGHT / top
+                _root.scale = Vector3(_norm_scale, _norm_scale, _norm_scale)
+
+
+## گام ۶R۱۳ — نشستنِ کوتاهِ زانو در حالتِ سپر — بدونِ نابودیِ مقیاسِ نرمال:
+## زیرکلاس‌ها دیگر هرگز مستقیم _body.scale را دستکاری نمی‌کنند (ریشه‌ی
+## «یهو مثل غول بزرگ میشن» — مقیاسِ نرمال ~۰٫۲۵ با Vector3.ONE پاک می‌شد)
+func set_crouch(k: float) -> void:
+        if _root == null:
+                return
+        _root.scale = Vector3(_norm_scale, _norm_scale * k, _norm_scale)
 
 
 func _scan_top(node: Node3D, xf: Transform3D) -> float:
@@ -250,7 +262,14 @@ func play_death() -> void:
         _dead = true
         if _anim != null and _anim.has_animation(A_DEATH):
                 _busy = true
-                _play(A_DEATH, 1.0, 0.12)
+                # گام ۶R۱۳ — «دشمن ایستاده می‌میرد» (بازخورد کاربر): پک‌ها Death
+                # کش‌دار دارند (Ultimate ~۲٫۳s که نیمی‌اش سکوتِ اولیه است) —
+                # کلِ افتادن در ≤۰٫۹ ثانیه کامل می‌شود تا مرگ همیشه دیده شود
+                var speed := 1.0
+                var ln := _anim.get_animation(A_DEATH).length
+                if ln > 0.05:
+                        speed = clampf(ln / 0.9, 1.0, 2.6)
+                _play(A_DEATH, speed, 0.08)
 
 
 # ---------------- افکت‌های ضربه و مرگ ----------------

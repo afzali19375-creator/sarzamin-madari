@@ -456,6 +456,9 @@ func _combat_move_toward(delta: float, hostile: Node3D, stop_at: float,
                 speed: float) -> bool:
         var d := _dist_xz_to(hostile)
         if d <= stop_at:
+                # گام ۶R۱۳ — «سربازها دائم راه می‌روند» (بازخورد کاربر):
+                # وقتی به فاصله‌ی ایست رسید، انیمیشن Walk باید Idle شود
+                _bob_visual(false)
                 return false
         var pos := Vector2(global_position.x, global_position.z)
         var up := Vector2(hostile.global_position.x, hostile.global_position.z)
@@ -597,6 +600,10 @@ func _process(delta: float) -> void:
                         # ایست در آرایش — گام ۶R12: بدنه‌ی اسکلتی با انیمیشن Idle
                         # خودش نفس می‌کشد؛ bobِ قدیمیِ چینی لرزش می‌ساخت (حذف شد)
                         _tick_fidget_timer(delta)
+                        # گام ۶R۱۳ — «واحدها دائم در حال راه رفتن‌اند» (بازخورد
+                        # کاربر): با رسیدن، Walk هیچ‌وقت Idle نمی‌شد چون هیچ‌کس
+                        # set_moving(false) را صدا نمی‌زد — اینجا تضمین می‌شود
+                        _bob_visual(false)
                 return
 
         var pos := Vector2(global_position.x, global_position.z)
@@ -615,6 +622,8 @@ func _process(delta: float) -> void:
                         _arrived = true
                         _vel = Vector2.ZERO
                         _set_color(GameConstants.COL_ARRIVED)  # سرخ روشن = رسیده به هدف
+                        # گام ۶R۱۳ — رسیدن = پایانِ راه رفتن؛ Idle از همین فریم
+                        _bob_visual(false)
                         return
 
         # گام ۶R4 — حرکتِ دوحالته با «چسبندگی»: داخلِ حبابِ هدایتِ مستقیم، اسلات
@@ -917,7 +926,13 @@ func _on_goal_changed(_new_goal: Vector2) -> void:
 ## و با لغو انتخاب به رنگ منطقیِ جاری (تولد/خاکستری بی‌فرمانده) برمی‌گردد.
 ## نکته: رنگ منطقی در _base_color زندگی می‌کند؛ تینتِ انتخاب فقط شیدر را عوض
 ## می‌کند تا با فلشِ ضربه (یونیفرم flash) و حالت «رسیده» تداخل نکند.
+## گام ۶R۱۳ — بازخورد کاربر: «وقتی در حال انتخاب‌اند فقط رنگی بشن؛ وقتی
+## حرکت کردند سمت پد خودشان رنگشان عوض شود» → با فرمانِ حرکت، تینتِ انتخاب
+## پاک می‌شود (clear_selected_tint) ولی حلقه/پدها سرِ جایشان می‌مانند.
+var _sel_tinted := false
+
 func set_selected_ring(on: bool) -> void:
+        _sel_tinted = on
         if _ring != null:
                 _ring.visible = on
                 var rm := _ring.material_override as StandardMaterial3D
@@ -937,6 +952,17 @@ func set_selected_ring(on: bool) -> void:
                         _model.apply_team_tint(_base_color, 0.42)
                 if fl != null:
                         fl.set_color(_base_color)
+
+
+## گام ۶R۱۳ — شروعِ حرکت به پد: تینتِ انتخابی حذف، رنگِ دسته برمی‌گردد
+## (حلقه و پدها هنوز نمایان‌اند تا مقصدِ در جریان خوانا بماند)
+func clear_selected_tint() -> void:
+        _sel_tinted = false
+        if _model != null:
+                _model.apply_team_tint(_base_color, 0.42)
+        var fl := _find_squad_flag()
+        if fl != null:
+                fl.set_color(_base_color)
 
 
 ## پرچمِ فرمانده — فقط فرماندهِ دسته SquadFlag دارد (صحنه به فرزندش وصل می‌کند)
@@ -1127,7 +1153,9 @@ func _set_color(c: Color) -> void:
         _base_color = c
         # گام ۶R10 — حینِ انتخابِ Bad North بدنه فیروزه‌ای می‌ماند؛ رنگِ منطقی
         # (رسیده/تولد) فقط ثبت می‌شود تا با لغو انتخاب برگردد
-        if is_ring_visible():
+        # گام ۶R۱۳ — تا وقتی تینتِ انتخاب برقرار است؛ وقتی فرمانِ حرکت آمد
+        # clear_selected_tint رنگِ دسته را برمی‌گرداند
+        if _sel_tinted:
                 return
         if _model != null:
                 _model.apply_team_tint(c, 0.42)
@@ -1165,6 +1193,8 @@ func _process_fidget(delta: float) -> void:
                 _fidget_state = 0
                 return
         _fidget_t += delta
+        # گام ۶R۱۳ — قدمِ وول = انیمیشن Walk واقعی؛ پایانِ قدم = Idle
+        _bob_visual(true)
         var k := clampf(_fidget_t / _fidget_dur, 0.0, 1.0)
         var target := (_fidget_to if _fidget_state == 1 else _fidget_from)
         var pos := _fidget_from.lerp(target, k) if _fidget_state == 1 \

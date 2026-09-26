@@ -49,9 +49,12 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
         if not shield_up:
                 shield_up = true
                 # سپر بالا می‌آید (انیمیشن Blocking مدل) + نشستنِ کوتاه زانو
+                # گام ۶R۱۳ — set_crouch: مقیاسِ نرمالِ قد حفظ می‌شود (باگِ
+                # «غول‌شدن هنگام حمله» — _body.scale مستقیم مقیاسِ ~۰٫۲۵ را
+                # با ۱٫۰ بازنویسی می‌کرد)
                 if _model != null:
                         _model.set_blocking(true)
-                _body.scale = Vector3(1.0, 0.94, 1.0)
+                        _model.set_crouch(0.94)
         # گام ۶R2 — شمشیرزن تیرانداز را تعقیب می‌کند (بازخورد کاربر:
         # «سرباز شمشیرزن به سرباز تیرانداز نزدیک نمی‌شود») — یورش با سپرِ بالا
         if _combat_move_toward(delta, hostile, GameConstants.IMMORTAL_ENGAGE_RANGE,
@@ -69,7 +72,7 @@ func _combat_end() -> void:
         shield_up = false
         if _model != null:
                 _model.set_blocking(false)
-        _body.scale = Vector3.ONE
+                _model.set_crouch(1.0)
 
 
 ## یورش کوتاه به جلو هنگام ضربه (حسِ نبرد بدون انیمیشن اسکلتی)

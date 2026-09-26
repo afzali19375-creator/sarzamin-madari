@@ -88,6 +88,9 @@ var _yaw := GameConstants.CAM_YAW0_DEG
 var _target_height := GameConstants.CAM_HEIGHT0
 var _pan_v := 0.0             # پنِ اعمال‌شده (متر؛ + = نما به بالای صفحه)
 var _pan_target := 0.0        # پنِ درخواستی — همیشه در بازه‌ی محدود نگه داشته می‌شود
+## گام ۶R۱۳ — پنِ افقیِ محدود: خودِ دوربین چپ/راست هم می‌رود
+var _pan_h := 0.0             # پنِ افقیِ اعمال‌شده (متر؛ + = دوربین به راستِ صفحه)
+var _pan_h_target := 0.0
 var _middle_drag := false
 var _keys_held := {}
 
@@ -147,34 +150,53 @@ func _ready() -> void:
                 _run_screenshot_probe()
 
 
-## پراب اسکرین‌شات ۶R9 — رندر واقعی (زیر Xvfb) برای بازبینی بصری:
-## نمای کلی آرایش متراکم + کلوزآپ دسته + موج دشمن (شبح‌ها)
+## پراب اسکرین‌شات ۶R۱۳ — رندر واقعی (زیر Xvfb) برای بازبینی بصری:
+## ۱) نمای کلی (پدها مخفی — پیش‌فرض تازه) ۲) حالت فرمان (پدها + تینت انتخاب)
+## ۳) نبرد با مهاجمان انسانی ۴) کلوزآپ مهاجم
 ## اجرا:
 ##   SHOT_DIR=/abs/path xvfb-run godot --path . res://scenes/dev/IslandTest.tscn -- --screenshot
 func _run_screenshot_probe() -> void:
         var out_dir := OS.get_environment("SHOT_DIR")
         if out_dir.is_empty():
                 out_dir = "/tmp"
-        # ۱) نمای کلی — دسته‌ها متراکم در بلوک‌هایشان (۸ ثانیه برای آرایش‌گیری)
+        # گام ۶R۱۳ — پراب تشخیصی: بدونِ آب (SHOT_NOWATER=1) — زمینِ زیر آب
+        # دیده می‌شود؟ (ریشه‌یابیِ «جزیره و دریا یکی شدن»)
+        if OS.get_environment("SHOT_NOWATER") != "":
+                for c in ground.get_children():
+                        if c.name != "WaterCollider" and c is MeshInstance3D \
+                                        and c != ground._terrain_mesh:
+                                c.visible = false
+                ground._water.visible = false
+                ground._foam.visible = false
+                await get_tree().create_timer(2.0).timeout
+                _snap(out_dir + "/shot0_nowater.png")
+                print("[SHOT] nowater diag done")
+                get_tree().quit(0)
+                return
+        # ۱) نمای کلی — دسته‌ها متراکم در پست‌هایشان؛ پدها مخفی (۶R۱۳)
         await get_tree().create_timer(8.0).timeout
         _snap(out_dir + "/shot1_overview.png")
-        # ۲) کلوزآپ دسته‌ی صفر — جزئیات چینی‌ها، پرچم بزرگ فرمانده
+        # ۲) حالت فرمان — انتخاب دسته: پدهای نمایان + تینت فیروزه‌ای + حلقه
+        _select_squad(0)
+        await get_tree().create_timer(1.2).timeout
+        _snap(out_dir + "/shot2_command_pads.png")
+        # ۳) کلوزآپ همان دسته — مقیاس کاراکترها و پدها
         var post: Vector2 = _squad_posts[0]
         _cam_pivot.position = Vector3(post.x, ground.height_at_world(post), post.y)
         _target_height = 6.5
         _cam_arm.rotation_degrees.x = -62.0
         await get_tree().create_timer(1.5).timeout
-        _snap(out_dir + "/shot2_squad_close.png")
-        # ۳) موج دشمن — قایق‌ها از افق و شبح‌های پیاده‌شده (قایق‌ها آهسته‌اند: ۶۰ ثانیه)
-        if director != null:
-                director.spawn_wave()
-        await get_tree().create_timer(58.0).timeout
+        _snap(out_dir + "/shot3_squad_close.png")
+        # ۴) نبرد — موج دشمن + بازگشت دوربین به نمای کلی
+        _deselect()
         _cam_pivot.position = Vector3.ZERO
         _target_height = GameConstants.CAM_HEIGHT0
         _cam_arm.rotation_degrees.x = GameConstants.CAM_PITCH_DEG
-        await get_tree().create_timer(1.5).timeout
-        _snap(out_dir + "/shot3_wave.png")
-        # ۴) کلوزآپ مهاجم پیاده‌شده؛ اگر موج نرسیده بود، مستقیم کنار دسته اسپاون می‌کنیم
+        if director != null:
+                director.spawn_wave()
+        await get_tree().create_timer(42.0).timeout
+        _snap(out_dir + "/shot4_battle.png")
+        # ۵) کلوزآپ مهاجم پیاده‌شده؛ اگر موج نرسیده بود، مستقیم کنار دسته اسپاون می‌کنیم
         var e := _first_landed_enemy()
         if e == null and director != null:
                 var near := _squad_posts[0] + Vector2(2.2, 1.4)
@@ -187,7 +209,7 @@ func _run_screenshot_probe() -> void:
                 _cam_pivot.position = Vector3(p2.x, e.global_position.y, p2.y)
                 _target_height = 5.0
                 await get_tree().create_timer(1.5).timeout
-                _snap(out_dir + "/shot4_ghost_close.png")
+                _snap(out_dir + "/shot5_enemy_close.png")
         print("[SHOT] done -> ", out_dir)
         get_tree().quit(0)
 
@@ -293,8 +315,11 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         # گام ۶R۱۲ — جزیره‌ی تازه = نما به مرکز برمی‌گردد (پنِ عمودی هم صفر)
         _pan_target = 0.0
         _pan_v = 0.0
+        _pan_h = 0.0
+        _pan_h_target = 0.0
         if _cam_pan != null:
                 _cam_pan.position.z = 0.0
+                _cam_pan.position.x = 0.0
         Engine.time_scale = 1.0
         # گام ۶R9 (رفع باگی که فاز ۲۰ آشکار کرد): ریستِ باخت باید «قبل از»
         # اسپاون دسته‌ها باشد — وگرنه فرمانِ اولیه‌ی آرایش در گاردِ
@@ -564,7 +589,9 @@ func _build_environment() -> void:
         env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
         env.fog_enabled = true
         env.fog_light_color = Color("cfe0ea")            # مه ملایم آبی کمرنگ — عمق
-        env.fog_density = 0.011
+        # گام ۶R۱۳ — مهِ رقیق‌تر: خطِ ساحل و دریا شسته‌شدنی نمی‌شود (بازخورد
+        # «جزیره و دریا یکی شدن» — مهِ ۰٫۰۱۱ رنگ‌ها را به‌هم می‌خورد)
+        env.fog_density = 0.006
         env.fog_sky_affect = 0.35
         var we := WorldEnvironment.new()
         we.environment = env
@@ -784,7 +811,7 @@ func _refresh_stats() -> void:
                         if u.is_arrived():
                                 a += 1
                 sq += "%s(%d/%d) " % [_squad_label(si), a, squads[si].size()]
-        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f pan %+.1f%s" % [
+        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f pan %+.1f/%+.1f%s" % [
                 GameConstants.BUILD_ID, Engine.get_frames_per_second(), field_state, mode_str,
                 sel_str, ("ON" if Engine.time_scale < 0.99 else "off"),
                 sq,
@@ -797,7 +824,7 @@ func _refresh_stats() -> void:
                 int(round(100.0 * float(island.get("land_count", 0)) / float(GRID * GRID))),
                 cmd_grid.cell_count if cmd_grid != null else 0,
                 computes, str(info["channels"]), Engine.time_scale,
-                _target_height, _yaw, _pan_v, gar,
+                _target_height, _yaw, _pan_v, _pan_h, gar,
         ]
         # گام ۶R2 — نشان باخت روی پنل آمار
         if game_over:
@@ -817,24 +844,33 @@ func _process(delta: float) -> void:
         Engine.time_scale = move_toward(Engine.time_scale, target, raw / dur)
 
         # §۷ — چرخش دوربین Q/E/جهت‌نما (نگه‌داشتن) + زوم نرم — دور به دور جزیره
-        if _keys_held.get(KEY_Q, false) or _keys_held.get(KEY_LEFT, false):
+        if _keys_held.get(KEY_Q, false):
                 _yaw -= GameConstants.CAM_ROTATE_SPEED * raw
-        if _keys_held.get(KEY_E, false) or _keys_held.get(KEY_RIGHT, false):
+        if _keys_held.get(KEY_E, false):
                 _yaw += GameConstants.CAM_ROTATE_SPEED * raw
         _cam_pivot.rotation.y = deg_to_rad(_yaw)
         _cam.position.z = move_toward(_cam.position.z, _target_height,
                         GameConstants.CAM_ZOOM_SPEED * raw)
 
-        # گام ۶R۱۲ — پنِ عمودیِ محدود: کلیدهای بالا/پایین هدف را در بازه‌ی کوچک
-        # جابه‌جا می‌کنند و مقدار اعمالی با نرمی دنبال می‌شود (مثل زوم)
+        # گام ۶R۱۲/۶R۱۳ — جابه‌جاییِ خودِ دوربین (پنِ محدودِ دو محور):
+        # جهت‌نما بالا/پایین = لغزش عمودی، چپ/راست = لغزش افقی؛ بازه‌ها کوچک
+        # و clamp شده‌اند (آزادیِ کامل ممنوع — بازخورد قبلی کاربر)
         if _keys_held.get(KEY_UP, false):
                 _pan_target = clampf(_pan_target + GameConstants.CAM_PAN_SPEED * raw,
                                 -GameConstants.CAM_PAN_BACK_MAX, GameConstants.CAM_PAN_FWD_MAX)
         if _keys_held.get(KEY_DOWN, false):
                 _pan_target = clampf(_pan_target - GameConstants.CAM_PAN_SPEED * raw,
                                 -GameConstants.CAM_PAN_BACK_MAX, GameConstants.CAM_PAN_FWD_MAX)
+        if _keys_held.get(KEY_RIGHT, false):
+                _pan_h_target = clampf(_pan_h_target + GameConstants.CAM_PAN_SPEED * raw,
+                                -GameConstants.CAM_PAN_SIDE_MAX, GameConstants.CAM_PAN_SIDE_MAX)
+        if _keys_held.get(KEY_LEFT, false):
+                _pan_h_target = clampf(_pan_h_target - GameConstants.CAM_PAN_SPEED * raw,
+                                -GameConstants.CAM_PAN_SIDE_MAX, GameConstants.CAM_PAN_SIDE_MAX)
         _pan_v = move_toward(_pan_v, _pan_target, GameConstants.CAM_PAN_SPEED * raw)
+        _pan_h = move_toward(_pan_h, _pan_h_target, GameConstants.CAM_PAN_SPEED * raw)
         _cam_pan.position.z = -_pan_v
+        _cam_pan.position.x = _pan_h
 
         # گام ۶R۹ — تسک A: اعمالِ لرزشِ در حالِ افت روی بازوی دوربین (با دلتای واقعی
         # تا در اسلوموشن هم طبیعی بماند)؛ صفر شدن = بازگشتِ بی‌لرزش
@@ -945,20 +981,25 @@ func _input(event: InputEvent) -> void:
                                         _middle_drag = false
         elif event is InputEventMouseMotion:
                 if _middle_drag:
-                        _yaw += event.relative.x * GameConstants.CAM_DRAG_SENS
-                        # گام ۶R۱۲ — کشیدن عمودی = پنِ محدود نما (پایین = نما پایین)
+                        # گام ۶R۱۳ — کشیدن = جابه‌جاییِ خودِ دوربین (پنِ محدود دو محور)
+                        _pan_h_target = clampf(
+                                        _pan_h_target - event.relative.x * GameConstants.CAM_PAN_DRAG_SENS,
+                                        -GameConstants.CAM_PAN_SIDE_MAX, GameConstants.CAM_PAN_SIDE_MAX)
                         _pan_target = clampf(
                                         _pan_target - event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
                                         -GameConstants.CAM_PAN_BACK_MAX, GameConstants.CAM_PAN_FWD_MAX)
                 elif _left_down:
                         # گام ۶R2 — کشیدن با دکمه‌ی چپ (یا انگشت روی اندروید —
-                        # لمس با emulate_mouse_from_touch همین‌جا می‌رسد) = چرخش
-                        # گام ۶R۱۲ — مؤلفه‌ی عمودیِ همان کشیدن = پنِ محدود نما
+                        # لمس با emulate_mouse_from_touch همین‌جا می‌رسد)
+                        # گام ۶R۱۳ — کشیدن = پنِ دوربین (چپ/راست + بالا/پایین)
                         if not _left_dragging and event.position.distance_to(
                                         _left_start) > GameConstants.CAM_DRAG_START_PX:
                                 _left_dragging = true
                         if _left_dragging:
-                                _yaw += event.relative.x * GameConstants.CAM_DRAG_SENS
+                                _pan_h_target = clampf(
+                                                _pan_h_target - event.relative.x * GameConstants.CAM_PAN_DRAG_SENS,
+                                                -GameConstants.CAM_PAN_SIDE_MAX,
+                                                GameConstants.CAM_PAN_SIDE_MAX)
                                 _pan_target = clampf(
                                                 _pan_target - event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
                                                 -GameConstants.CAM_PAN_BACK_MAX,
@@ -1143,6 +1184,10 @@ func _issue_move_to(center: Vector2, idx: int, silent: bool) -> void:
                 waypoints.clear()
         _assign_slots(center, idx)
         PathService.set_goal_for(idx, center)
+        # گام ۶R۱۳ — «وقتی حرکت کردند سمت پد خودشان رنگشان عوض شود»: شروعِ
+        # حرکت = تینتِ انتخابی پاک، رنگِ دسته برمی‌گردد (حتی در Waypoint)
+        for u in squads[idx]:
+                u.clear_selected_tint()
         var y := ground.height_at_world(center)
         _flash_ping(Vector3(center.x, y + 0.08, center.y))
         _last_input_msg = "squad %d move -> (%.1f, %.1f) slots %d" % [

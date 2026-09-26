@@ -24,6 +24,9 @@ var _corners := PackedFloat32Array()   # (size+1)² — ارتفاع گوشه‌
 var _terrain_mesh: MeshInstance3D
 var _water: MeshInstance3D
 var _foam: MeshInstance3D
+## گام ۶R۱۳ — مرکز/شعاعِ جزیره برای گرادیانِ عمقِ شعاعیِ آب
+var _island_center := Vector2.ZERO
+var _island_radius := 12.0
 
 
 ## ساخت/بازسازی کامل زمین از نتیجه‌ی WfcIsland (در regenerate دوباره صدا زده می‌شود)
@@ -34,10 +37,34 @@ func build(island: Dictionary, cell_size: float, world_origin: Vector2) -> void:
         _cell = cell_size
         _origin = world_origin
         size = int(island["size"])
+        _compute_island_bounds()
         _build_corners()
         _build_terrain_mesh()
         _build_water()
         _build_foam()
+
+
+## گام ۶R۱۳ — مرکز و شعاعِ تقریبیِ خشکی (از سلول‌های walkable) —
+## شیدرِ آب با آن «حلقه‌ی کم‌عمقِ روشن» دور جزیره می‌سازد تا جزیره و دریا
+## هرگز یکی دیده نشوند (بازخورد: «جزیره و دریا یکی شدن»)
+func _compute_island_bounds() -> void:
+        var min_c := Vector2(1e9, 1e9)
+        var max_c := Vector2(-1e9, -1e9)
+        var any := false
+        for cy in size:
+                for cx in size:
+                        if int(_island["walkable"][cy * size + cx]) != 1:
+                                continue
+                        any = true
+                        var w := Vector2(_origin.x + float(cx) * _cell,
+                                        _origin.y + float(cy) * _cell)
+                        min_c = min_c.min(w)
+                        max_c = max_c.max(w)
+        if not any:
+                return
+        _island_center = (min_c + max_c) * 0.5
+        _island_radius = maxf((max_c - _island_center).length(),
+                        (min_c - _island_center).length()) + _cell * 0.5
 
 
 # ---------------- ارتفاع گوشه‌ها ----------------
@@ -84,6 +111,26 @@ func _build_terrain_mesh() -> void:
         var st := SurfaceTool.new()
         st.begin(Mesh.PRIMITIVE_TRIANGLES)
         var colors: Array = _island["meta_colors"]
+        # گام ۶R۱۳ — نرم‌سازیِ رنگِ همسایه‌ها: الگوی شطرنجیِ ماژول‌های WFC
+        # کم‌پشت‌تر می‌شود و جزیره حسِ ارگانیکِ اسکرین‌شات را می‌گیرد
+        var smooth_colors: Array = []
+        smooth_colors.resize(size * size)
+        for cyy in size:
+                for cxx in size:
+                        var ci2 := cyy * size + cxx
+                        var own: Color = colors[int(_island["modules"][ci2])]
+                        var acc := Color(0, 0, 0)
+                        var cnt := 0
+                        for dd in [Vector2i(1, 0), Vector2i(-1, 0),
+                                        Vector2i(0, 1), Vector2i(0, -1)]:
+                                var nx2: int = cxx + dd.x
+                                var ny2: int = cyy + dd.y
+                                if nx2 < 0 or ny2 < 0 or nx2 >= size or ny2 >= size:
+                                        continue
+                                acc += colors[int(_island["modules"][ny2 * size + nx2])]
+                                cnt += 1
+                        smooth_colors[ci2] = own.lerp(
+                                        acc / float(maxi(cnt, 1)), 0.45)
         var hsh := int(_island["hash"]) % 100000
         var up := Vector3.UP
         for cy in size:
@@ -97,7 +144,7 @@ func _build_terrain_mesh() -> void:
                         if is_land:
                                 # لرزش رنگی قطعی برای حس ارگانیک (مثل نسخه‌ی قبل)
                                 var j := fposmod(sin(float(ci) * 12.9898 + float(hsh) * 0.017) * 43758.5453, 1.0)
-                                var col: Color = colors[int(_island["modules"][ci])]
+                                var col: Color = smooth_colors[ci]
                                 col = col * (0.93 + 0.13 * j)
                                 _add_tri(st, a, b, d, col, up)
                                 _add_tri(st, a, d, c2, col, up)
@@ -146,11 +193,15 @@ func _add_wall(st: SurfaceTool, p1: Vector3, p2: Vector3, col: Color) -> void:
         _add_tri(st, p1, b2, b1, col, outward)
 
 
-## مثلث با جهت‌گیری قطعی (نرمال در سمتِ دلخواه) — flat-shaded
+## مثلث با جهت‌گیری قطعی — گام ۶R۱۳: قراردادِ winding در Godot 4 برعکسِ
+## حدسِ قبلی بود و «نیمی از مثلث‌های» زمین back-face می‌شدند (بازخورد کاربر:
+## «جزیره نابود شد و جزیره و دریا یکی شدن» — فقط تکه‌های پراکنده دیده می‌شد).
+## پرابِ رندر اثبات کرد: با CULL_DISABLED کل جزیره سالم است → جهتِ نهایی باید
+## برعکس می‌شد. اکنون flip برای قراردادِ رسمیِ Godot (CW = رویه‌ی جلو) انجام می‌شود.
 func _add_tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, col: Color,
                 desired: Vector3) -> void:
         var n := (b - a).cross(c - a)
-        if n.dot(desired) < 0.0:
+        if n.dot(desired) > 0.0:
                 var t := b
                 b = c
                 c = t
@@ -171,46 +222,64 @@ func _build_water() -> void:
         pm.subdivide_width = 96
         pm.subdivide_depth = 96
         _water.mesh = pm
+        # گام ۶R۱۳ — بازنویسی کاملِ آب (بازخورد: «دریا ضعیفه؛ حسِ واقعی و آرامش
+        # نمیده؛ جزیره و دریا یکی شدن»):
+        #   * گرادیانِ عمقِ شعاعی: حلقه‌ی فیروزه‌ایِ کم‌عمقِ روشن چسبیده به ساحل
+        #     → آبیِ عمیقِ آرام دورتر — خطِ ساحل همیشه خوانا
+        #   * موجِ کوچکِ کند (آرامش) + مواجِ ریزِ دوم روی نرمال‌ها (زندگی)
+        #   * براقیتِ خورشید (ROUGHNESS پایین + SPECULAR بالا) — حسِ واقعیِ آب
         var sh := Shader.new()
         sh.code = """
 shader_type spatial;
-uniform vec3 shallow_col : source_color = vec3(0.290, 0.565, 0.643);
-uniform vec3 deep_col : source_color = vec3(0.173, 0.373, 0.451);
-uniform float wave_speed = 0.3;
-uniform float wave_height = 0.05;
-uniform float wave_freq = 0.8;
-uniform float normal_strength = 0.4;
-uniform float fresnel = 0.3;
+uniform vec3 shallow_col : source_color = vec3(0.490, 0.706, 0.659);
+uniform vec3 deep_col : source_color = vec3(0.216, 0.412, 0.470);
+uniform vec2 island_center = vec2(0.0, 0.0);
+uniform float island_radius = 12.0;
+uniform float wave_speed = 0.22;
+uniform float wave_height = 0.034;
+uniform float wave_freq = 0.7;
+uniform float normal_strength = 0.5;
+uniform float fresnel = 0.38;
 varying float vwave;
+varying vec3 vwp;
 float wave_h(vec2 p, float t) {
-        return sin(p.x * wave_freq + t * wave_speed * 2.0) * 0.7
-                + cos(p.y * wave_freq * 1.3 + t * wave_speed * 1.6) * 0.3;
+        return sin(p.x * wave_freq + t * wave_speed * 2.0) * 0.65
+                + cos(p.y * wave_freq * 1.35 + t * wave_speed * 1.55) * 0.35;
 }
 void vertex() {
         vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+        vwp = wp;
         float h = wave_h(wp.xz, TIME);
         VERTEX.y += h * wave_height;
         vwave = h;
-        float e = 0.4;
+        float e = 0.45;
         float hx = wave_h(wp.xz + vec2(e, 0.0), TIME) - wave_h(wp.xz - vec2(e, 0.0), TIME);
         float hz = wave_h(wp.xz + vec2(0.0, e), TIME) - wave_h(wp.xz - vec2(0.0, e), TIME);
         NORMAL = normalize(vec3(-hx * wave_height / e * 40.0 * normal_strength, 1.0,
                         -hz * wave_height / e * 40.0 * normal_strength));
 }
 void fragment() {
+        // عمقِ شعاعی دور جزیره + لرزشِ زاویه‌ای تا لبه، ساحلیِ ارگانیک بماند
+        float d = length(vwp.xz - island_center);
+        float ang = atan(vwp.z - island_center.y, vwp.x - island_center.x);
+        float wob = sin(ang * 4.0) * 0.6 + sin(ang * 7.0 + 1.7) * 0.4;
+        float shore = 1.0 - smoothstep(island_radius + 0.5 + wob,
+                        island_radius + 5.0 + wob, d);
         float m = smoothstep(-0.8, 1.0, vwave);
-        vec3 col = mix(deep_col, shallow_col, 0.45 + 0.35 * m);
+        vec3 col = mix(deep_col, shallow_col, clamp(shore + 0.12 * m, 0.0, 1.0));
         float fr = pow(1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0), 3.0);
-        col = mix(col, vec3(0.90, 0.94, 0.92), fr * fresnel);
+        col = mix(col, vec3(0.93, 0.96, 0.95), fr * fresnel);
         ALBEDO = col;
-        ROUGHNESS = 0.5;
-        SPECULAR = 0.25;
+        ROUGHNESS = 0.28;
+        SPECULAR = 0.62;
 }
 """
         var mat := ShaderMaterial.new()
         mat.shader = sh
         mat.set_shader_parameter("shallow_col", GameConstants.COL_WATER_SHALLOW)
         mat.set_shader_parameter("deep_col", GameConstants.COL_WATER_DEEP)
+        mat.set_shader_parameter("island_center", _island_center)
+        mat.set_shader_parameter("island_radius", _island_radius)
         _water.material_override = mat
         _water.position = Vector3(0, SEA_Y, 0)
         add_child(_water)
@@ -283,9 +352,9 @@ void vertex() {
         vwp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment() {
-        float pulse = 0.62 + 0.38 * sin(TIME * 1.7 + (vwp.x + vwp.z) * 0.9);
+        float pulse = 0.62 + 0.38 * sin(TIME * 1.1 + (vwp.x + vwp.z) * 0.9);
         ALBEDO = vec3(0.97, 0.99, 0.98);
-        ALPHA = 0.52 * pulse;
+        ALPHA = 0.45 * pulse;
 }
 """
         var mat := ShaderMaterial.new()
