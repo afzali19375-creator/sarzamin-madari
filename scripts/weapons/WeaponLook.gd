@@ -200,7 +200,7 @@ static func bow(radius := 0.3) -> Node3D:
 
 
 ## نیزه‌ی پرتاب — ساقِ استخوانی + سره‌ی هرمی + پرِ دم؛ مبدأ جای دست
-static func javelin(total_len := 0.66, bone_col: Color = GameConstants.COL_GHOST_BONE) -> Node3D:
+static func javelin(total_len := 0.66, bone_col: Color = Color("d8d8c4")) -> Node3D:
         var root := Node3D.new()
         var butt := -0.26
         var shaft := MeshInstance3D.new()

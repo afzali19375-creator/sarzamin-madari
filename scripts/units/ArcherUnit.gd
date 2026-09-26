@@ -21,7 +21,7 @@ func _default_hp() -> int:
 
 
 func _model_kind() -> StringName:
-        return &"rogue_hooded"
+        return &"ranger"
 
 
 func _build_gear() -> void:

@@ -427,6 +427,9 @@ func spawn_enemy(kind: String, at: Vector2, group: int = -1,
                 pos = nav.cell_center(_nearest_walkable_cell(at))
         var e: EnemyBase = script.new()
         e.raid_group = group % 4 if group >= 0 else 3
+        if group < 0:
+                # گام ۶R۱۲ — مهاجمِ تنی: میدانِ کانالِ موجِ قبلی را نمی‌خواند
+                e.has_raid_field = false
         var raid := Vector2.ZERO
         if group >= 0 and _groups.has(group):
                 raid = _groups[group]["raid_target"]

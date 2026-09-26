@@ -81,10 +81,13 @@ var squad_dissolved: Array[bool] = []
 
 # دوربین (§۷ پرامت)
 var _cam_pivot: Node3D
+var _cam_pan: Node3D          # گام ۶R۱۲ — پنِ عمودیِ محدود (بین pivot و arm)
 var _cam_arm: Node3D
 var _cam: Camera3D
 var _yaw := GameConstants.CAM_YAW0_DEG
 var _target_height := GameConstants.CAM_HEIGHT0
+var _pan_v := 0.0             # پنِ اعمال‌شده (متر؛ + = نما به بالای صفحه)
+var _pan_target := 0.0        # پنِ درخواستی — همیشه در بازه‌ی محدود نگه داشته می‌شود
 var _middle_drag := false
 var _keys_held := {}
 
@@ -287,6 +290,11 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         selected = -1
         _slow_select = false
         _slow_space = false
+        # گام ۶R۱۲ — جزیره‌ی تازه = نما به مرکز برمی‌گردد (پنِ عمودی هم صفر)
+        _pan_target = 0.0
+        _pan_v = 0.0
+        if _cam_pan != null:
+                _cam_pan.position.z = 0.0
         Engine.time_scale = 1.0
         # گام ۶R9 (رفع باگی که فاز ۲۰ آشکار کرد): ریستِ باخت باید «قبل از»
         # اسپاون دسته‌ها باشد — وگرنه فرمانِ اولیه‌ی آرایش در گاردِ
@@ -363,12 +371,14 @@ func _clear_units() -> void:
 # ---------------- اسپاون سه دسته ----------------
 
 ## سه پست (سلول فرمان) دور از هم: اولی نزدیک مرکز خشکی، بقیه دورترین به قبلی‌ها
+## گام ۶R۱۲ — «دسته‌ها در ابتدا وسط صفحه باشند»: پست‌ها نزدیکِ مرکزِ خشکی
+## چیده می‌شوند (قبلاً ماکسیمینِ پخش — دسته‌ها گوشه‌ی تصویر می‌افتادند)
 func _pick_cluster_cells() -> Array[Vector2]:
         var nav := PathService.nav
         var pts: Array[Vector2] = []
         for i in cmd_grid.cell_count:
                 var p: Vector2 = cmd_grid.cell_info(i)["center"]
-                # گام ۶R — پست اولیه روی/کنار خانه نیفتد (وگرنه گاریسون خودبه‌خودی می‌شود)
+                # پست اولیه روی/کنار خانه نیفتد (وگرنه گاریسون خودبه‌خودی می‌شود)
                 if _alive_house_near(p) == null:
                         pts.append(p)
         if pts.is_empty():
@@ -377,25 +387,23 @@ func _pick_cluster_cells() -> Array[Vector2]:
         for p in pts:
                 acc += p
         var centroid := acc / float(pts.size())
-        var first := pts[0]
-        var best_d := 1e9
+        # مرتب‌سازی نزدیک‌ترین به مرکز + انتخاب حریصانه با فاصله‌ی متقابلِ حداقلی
+        pts.sort_custom(func(a: Vector2, b: Vector2) -> bool:
+                return a.distance_to(centroid) < b.distance_to(centroid))
+        var picked: Array[Vector2] = []
         for p in pts:
-                var d: float = p.distance_to(centroid)
-                if d < best_d:
-                        best_d = d
-                        first = p
-        var picked: Array[Vector2] = [first]
+                if picked.size() >= SQUAD_DEFS.size():
+                        break
+                var far := true
+                for q in picked:
+                        if p.distance_to(q) < 3.2:
+                                far = false
+                                break
+                if far:
+                        picked.append(p)
+        # پشتیبان: هر چه داریم + تکرارِ نزدیک‌ترین
         while picked.size() < SQUAD_DEFS.size():
-                var far := first
-                var far_score := -1.0
-                for p in pts:
-                        var min_d := 1e9
-                        for q in picked:
-                                min_d = minf(min_d, p.distance_to(q))
-                        if min_d > far_score:
-                                far_score = min_d
-                                far = p
-                picked.append(far)
+                picked.append(picked[picked.size() % maxi(picked.size(), 1)])
         return picked
 
 
@@ -441,7 +449,9 @@ func _make_unit(def: Dictionary, si: int, center: Vector2,
         u.squad_color = GameConstants.UNIT_PALETTE[int(def["color"])]
         u.speed_mult = 1.0 - GameConstants.SPEED_VARIATION \
                         + rng.randf() * 2.0 * GameConstants.SPEED_VARIATION
-        u.fidget_enabled = true
+        # گام ۶R۱۲ — «همش تکان می‌خوردن»: وول‌خوردنِ دوره‌ای با کاراکترهای
+        # واقعی‌نما حسِ عصبی می‌داد — آیدلِ اسکلتی جای آن را می‌گیرد
+        u.fidget_enabled = false
         u.position = Vector3(center.x, ground.height_at_world(center), center.y)
         u.ground_provider = Callable(ground, "height_at_world")
         _units_root.add_child(u)
@@ -460,18 +470,20 @@ func _make_commander(u: UnitBase, squad_col: Color) -> void:
 ## «سربازها به جای هر کدام در یک بلوک، همه در یک بلوک جمع می‌شوند» —
 ## شانه‌به‌شانه دورِ پرچم؛ هم‌پوشانیِ جزئی مجاز است. فرمانده = مرکز.
 ## min_r > 0 یعنی بدونِ اسلاتِ مرکز (خوشه‌ی دورِ خانه — حلقه از min_r شروع)
+## گام ۶R۱۲ — حلقه‌های پهن‌تر (ضدِ «سربازها توی هم فشرده شدن»):
+## فاصله‌ی مماسیِ هر حلقه ≥ ~۰٫۹m با شعاع جداسازی ۰٫۷۲ هم‌خوان است
 func _dense_slots(center: Vector2, n: int, min_r := 0.0) -> Array[Vector2]:
         var nav := PathService.nav
         var slots: Array[Vector2] = []
         if min_r <= 0.0:
-                # اسلاتِ مرکز — روی نزدیک‌ترین نقطه‌ی قابل‌عبور (پرچم/فرمانده)
+                # اسلاتِ مرکز — روی نزدیک‌ترین نقطه‌ی قابل‌عبور
                 var c0 := _nearest_walkable_point(nav, center, 1.2)
                 slots.append(c0 if c0 != Vector2.INF else center)
         var rings := [
-                [min_r + 0.55, 6, PI / 6.0],
-                [min_r + 1.05, 10, 0.0],
-                [min_r + 1.5, 14, 0.22],
-                [min_r + 1.9, 18, 0.4],
+                [min_r + 0.85, 6, PI / 6.0],
+                [min_r + 1.45, 10, 0.0],
+                [min_r + 2.0, 14, 0.22],
+                [min_r + 2.55, 18, 0.4],
         ]
         for rdef in rings:
                 if slots.size() >= n:
@@ -569,8 +581,12 @@ func _build_environment() -> void:
         _cam_pivot = Node3D.new()
         add_child(_cam_pivot)
         _cam_pivot.rotation.y = deg_to_rad(_yaw)
+        # گام ۶R۱۲ — پنِ عمودیِ محدود: گره‌ای بین چرخش و بازو که فقط روی محور
+        # عمودیِ صفحه (به سمت دور/نزدیک) چند متر جابه‌جا می‌شود — آزادیِ کم و کافی
+        _cam_pan = Node3D.new()
+        _cam_pivot.add_child(_cam_pan)
         _cam_arm = Node3D.new()
-        _cam_pivot.add_child(_cam_arm)
+        _cam_pan.add_child(_cam_arm)
         _cam_arm.rotation_degrees.x = GameConstants.CAM_PITCH_DEG
         _cam = Camera3D.new()
         _cam.fov = GameConstants.CAM_FOV
@@ -768,7 +784,7 @@ func _refresh_stats() -> void:
                         if u.is_arrived():
                                 a += 1
                 sq += "%s(%d/%d) " % [_squad_label(si), a, squads[si].size()]
-        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f%s" % [
+        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f pan %+.1f%s" % [
                 GameConstants.BUILD_ID, Engine.get_frames_per_second(), field_state, mode_str,
                 sel_str, ("ON" if Engine.time_scale < 0.99 else "off"),
                 sq,
@@ -781,7 +797,7 @@ func _refresh_stats() -> void:
                 int(round(100.0 * float(island.get("land_count", 0)) / float(GRID * GRID))),
                 cmd_grid.cell_count if cmd_grid != null else 0,
                 computes, str(info["channels"]), Engine.time_scale,
-                _target_height, _yaw, gar,
+                _target_height, _yaw, _pan_v, gar,
         ]
         # گام ۶R2 — نشان باخت روی پنل آمار
         if game_over:
@@ -808,6 +824,17 @@ func _process(delta: float) -> void:
         _cam_pivot.rotation.y = deg_to_rad(_yaw)
         _cam.position.z = move_toward(_cam.position.z, _target_height,
                         GameConstants.CAM_ZOOM_SPEED * raw)
+
+        # گام ۶R۱۲ — پنِ عمودیِ محدود: کلیدهای بالا/پایین هدف را در بازه‌ی کوچک
+        # جابه‌جا می‌کنند و مقدار اعمالی با نرمی دنبال می‌شود (مثل زوم)
+        if _keys_held.get(KEY_UP, false):
+                _pan_target = clampf(_pan_target + GameConstants.CAM_PAN_SPEED * raw,
+                                -GameConstants.CAM_PAN_BACK_MAX, GameConstants.CAM_PAN_FWD_MAX)
+        if _keys_held.get(KEY_DOWN, false):
+                _pan_target = clampf(_pan_target - GameConstants.CAM_PAN_SPEED * raw,
+                                -GameConstants.CAM_PAN_BACK_MAX, GameConstants.CAM_PAN_FWD_MAX)
+        _pan_v = move_toward(_pan_v, _pan_target, GameConstants.CAM_PAN_SPEED * raw)
+        _cam_pan.position.z = -_pan_v
 
         # گام ۶R۹ — تسک A: اعمالِ لرزشِ در حالِ افت روی بازوی دوربین (با دلتای واقعی
         # تا در اسلوموشن هم طبیعی بماند)؛ صفر شدن = بازگشتِ بی‌لرزش
@@ -919,14 +946,23 @@ func _input(event: InputEvent) -> void:
         elif event is InputEventMouseMotion:
                 if _middle_drag:
                         _yaw += event.relative.x * GameConstants.CAM_DRAG_SENS
+                        # گام ۶R۱۲ — کشیدن عمودی = پنِ محدود نما (پایین = نما پایین)
+                        _pan_target = clampf(
+                                        _pan_target - event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
+                                        -GameConstants.CAM_PAN_BACK_MAX, GameConstants.CAM_PAN_FWD_MAX)
                 elif _left_down:
                         # گام ۶R2 — کشیدن با دکمه‌ی چپ (یا انگشت روی اندروید —
                         # لمس با emulate_mouse_from_touch همین‌جا می‌رسد) = چرخش
+                        # گام ۶R۱۲ — مؤلفه‌ی عمودیِ همان کشیدن = پنِ محدود نما
                         if not _left_dragging and event.position.distance_to(
                                         _left_start) > GameConstants.CAM_DRAG_START_PX:
                                 _left_dragging = true
                         if _left_dragging:
                                 _yaw += event.relative.x * GameConstants.CAM_DRAG_SENS
+                                _pan_target = clampf(
+                                                _pan_target - event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
+                                                -GameConstants.CAM_PAN_BACK_MAX,
+                                                GameConstants.CAM_PAN_FWD_MAX)
         elif event is InputEventKey:
                 if event.pressed and not event.echo:
                         _keys_held[event.physical_keycode] = true
@@ -1370,7 +1406,18 @@ func _assign_slots(center: Vector2, idx: int) -> void:
         if n == 0:
                 return
         var slots := _dense_slots(center, n)
-        members[0].set_slot(slots[0])   # فرمانده + پرچم = مرکز
+        # گام ۶R۱۲ — فرمانده دیگر همیشه مرکزِ خوشه نیست (بازخورد: «فرمانده
+        # همیشه آخرین نفر کشته میشه»): اسلاتِ تصادفیِ غیرمرکزی می‌گیرد تا جانِ
+        # مستقلِ هر سرباز معنا پیدا کند
+        var cmd_slot := 0
+        if n > 2:
+                var ring_count := mini(n - 1, 6)
+                if ring_count > 0:
+                        cmd_slot = 1 + (randi() % ring_count)
+        var tmp := slots[0]
+        slots[0] = slots[cmd_slot]
+        slots[cmd_slot] = tmp
+        members[0].set_slot(slots[0])   # فرمانده + پرچم = اسلاتِ تصادفی
         # اختصاص حریصانه‌ی بقیه: هر اسلات به نزدیک‌ترین سربازِ آزاد
         var used := {0: true}
         for si in range(1, slots.size()):
@@ -1495,17 +1542,41 @@ func spawn_training_dummy(squad_idx: int = -1, offset: Vector2 = Vector2(2.2, 0.
 func spawn_dummy_at_range(squad_idx: int, radius: float = 6.5) -> TrainingDummy:
         var center := _squad_center_xz(squad_idx)
         var from_y := ground.height_at_world(center) + 0.5
-        for k in 12:
-                var ang := TAU * float(k) / 12.0
-                var candidate := center + Vector2(cos(ang), sin(ang)) * radius
-                var p := _nearest_walkable_point(PathService.nav, candidate, 2.0)
-                if p == Vector2.INF:
-                        continue
-                if p.distance_to(center) < radius - 2.0:
-                        continue
-                if not _los_clear_from_center(center, from_y, p):
-                        continue
-                return spawn_dummy_near_world(p, Vector2.ZERO)
+        # گام ۶R۱۲ — جزیره‌ی کوچک‌تر + آرایشِ متراکم: هدفِ کماندار باید
+        #   ۱) از «جای خودِ تیراندازها» هم دیدِ باز داشته باشد (نه فقط مرکز دسته)
+        #   ۲) داخلِ بردِ مطمئن بماند (≤ ۷٫۲m — زیرِ ARCHER_RANGE با حاشیه)
+        #   ۳) کریدورِ آتشش با هم‌رزمی بسته نشده باشد (همان دروازه‌ی خودِ بازی)
+        var shooters: Array = []
+        for u in squads[squad_idx]:
+                if u is ArcherUnit and is_instance_valid(u) \
+                                and not (u as UnitBase).is_dead():
+                        shooters.append(u)
+        for r: float in [radius, 6.0, 5.5]:
+                for k in 24:
+                        var ang := TAU * float(k) / 24.0
+                        var candidate := center + Vector2(cos(ang), sin(ang)) * r
+                        var p := _nearest_walkable_point(PathService.nav, candidate, 2.0)
+                        if p == Vector2.INF:
+                                continue
+                        var dc := p.distance_to(center)
+                        if dc < r - 2.0 or dc > 6.8:
+                                continue
+                        if not _los_clear_from_center(center, from_y, p):
+                                continue
+                        var shooter_ok := true
+                        for s in shooters:
+                                var sp: Vector3 = (s as Node3D).global_position
+                                var sxz := Vector2(sp.x, sp.z)
+                                if not _los_clear_from_center(sxz,
+                                                ground.height_at_world(sxz) + 0.5, p):
+                                        shooter_ok = false
+                                        break
+                                if (s as UnitBase).friendly_in_corridor(p):
+                                        shooter_ok = false
+                                        break
+                        if not shooter_ok:
+                                continue
+                        return spawn_dummy_near_world(p, Vector2.ZERO)
         # هیچ جهتی مسیر باز نداشت — نزدیک‌ترین تلاش
         return spawn_dummy_near_world(center + Vector2(radius, 0.0), Vector2(0.0, 0.0))
 
@@ -1609,15 +1680,15 @@ func _on_corpse_laid(c: Node) -> void:
 
 
 ## محوِ نرمِ قدیمی‌ترین جنازه — دفنِ آرام، بدون ناپدیدیِ ناگهانی
+## گام ۶R۱۲ — از طریق fade_corpseِ خود یونیت (مدل اسکلتی) — بدون ChibiLook
 func _fade_corpse(c: Node) -> void:
-        var parts := ChibiLook.fade_parts(c)
-        if parts.is_empty():
+        if c.has_method("fade_corpse"):
+                c.fade_corpse(2.0)
+                var tw := c.create_tween()
+                tw.tween_interval(2.4)
+                tw.tween_callback(c.queue_free)
+        else:
                 c.queue_free()
-                return
-        var tw := c.create_tween()
-        for p in parts:
-                tw.tween_property(p, "transparency", 1.0, 2.0)
-        tw.chain().tween_callback(c.queue_free)
 
 
 ## گام ۶R9 — تسک A (بازخورد کاربر): مرگ فرمانده → «پرتره‌ی» گروه خاکستری می‌شود

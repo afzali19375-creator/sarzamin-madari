@@ -11,7 +11,7 @@ hint_island_move,"Click a white cell: squad moves and stands there (Shift+click:
 hint_select,"Left click on soldiers: select squad — slow-mo + white grid","کلیک چپ روی سربازها: انتخاب دسته — اسلوموشن و شبکه‌ی سفید"
 hint_regen,"R: new island | T: training dummy | D: clear dummies | N: invasion wave","کلید R: جزیره‌ی جدید | T: کوله‌ی تمرین | D: پاک‌کردن | N: موج هجوم"
 hint_wave,"N: Greek invasion wave (boat + raiders)","کلید N: موج هجوم یونانی (قایق + مهاجمان)"
-hint_camera,"Q / E / ← → : rotate around the island — Middle-drag: orbit","Q / E / جهت‌نما: چرخش دور به دور جزیره — کشیدن با کلیک وسط: چرخش آزاد"
+hint_camera,"Q / E / ← → : rotate — ↑ ↓ or vertical drag: small vertical pan — Wheel: zoom","Q / E / جهت‌نما: چرخش دور به دور جزیره — بالا/پایین یا کشیدن عمودی: جابه‌جایی کمِ عمودی نما — چرخ موس: زوم"
 hint_garrison,"Command onto a house: squad moves in — full squad after 20s","فرمان روی خانه: دسته وارد می‌شود — پس از ۲۰ ثانیه دسته تکمیل می‌شود"
 debug_worker,"Worker compute","محاسبه‌ی نخ کارگر"
 debug_main_read,"Main-thread read","خواندن در نخ اصلی"

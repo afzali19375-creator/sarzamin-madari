@@ -17,12 +17,13 @@ var strikes_done := 0           # برای تست خودکار (گام ۶)
 
 
 func _model_kind() -> StringName:
-        return &"knight"
+        return &"warrior"
 
 
 func _model_special() -> Dictionary:
-        # سپر مستطیلیِ مدل → کاشی فیروزه‌ای (هویت بصری جاویدان)
-        return {"Rectangle_Shield": GameConstants.COL_DOME_TILE}
+        # گام ۶R۱۲ — پک Quaternius گره‌ی سپر ندارد؛ خالی (سپرِ هویتیِ جاویدان
+        # با تینتِ فیروزه‌ایِ دسته خوانا می‌ماند)
+        return {}
 
 
 func _combat_wants(hostile: Node3D) -> bool:

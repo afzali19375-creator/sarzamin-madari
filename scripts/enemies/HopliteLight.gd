@@ -18,13 +18,16 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_GHOST_LIGHT
+        return GameConstants.COL_ENEMY_LIGHT
+
+
+## گام ۶R12 — مهاجمِ انسانی: وایکینگِ تبر‌دار (Quaternius Ultimate)
+func _model_kind() -> StringName:
+        return &"viking"
 
 
 func _build_gear() -> void:
-        # شمشیرِ مرجع — تیغه‌ی سبز-سفیدِ کم‌رنگ؛ مبدأ = جای دست؛ سوئینگ با _hand
-        _swing_weapon = WeaponLook.sword(GameConstants.COL_GHOST_BLADE, 0.5)
+        # شمشیرِ برنزی در دست — سوئینگ با انیمیشن Sword_Attack هم‌خوان است
+        _swing_weapon = WeaponLook.sword(Color("c9963c"), 0.48)
         _swing_weapon.rotation_degrees.z = -12.0   # تیغه کمی به بیرونِ بدن
         _hand.add_child(_swing_weapon)
-        # دستِ خاکستریِ گیرنده‌ی دسته (مرجعِ تصویر) — روی مچِ پیوتِ دست
-        GhostLook.add_hand(self, Vector3(0.19, 0.4, 0.1))

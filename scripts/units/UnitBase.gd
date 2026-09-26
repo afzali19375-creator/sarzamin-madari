@@ -18,7 +18,9 @@ const ARRIVE_RADIUS := 1.0        # حالت بدون اسلات (صحنه‌ی 
 const SLOT_ARRIVE_RADIUS := 0.45  # رسیدن واقعی روی اسلات آرایش
 const DIRECT_STEER_RADIUS := 1.6  # نزدیک هدفِ جریان، flow صفر است → مستقیم
 const SLOT_STEER_RADIUS := 2.2    # نزدیک اسلات → مستقیم به اسلات خودش
-const SEPARATION_DIST := 0.5
+## گام ۶R12 — «سربازها توی هم فشرده می‌شدن»: شعاع جداسازی با کاراکترهای
+## واقعی‌نما هم‌قد شده (بدنه‌ی پهن‌تر از چینیِ قبلی)
+const SEPARATION_DIST := 0.72
 
 # ---------------- شناسه و کانال (گام ۵) ----------------
 ## کانال میدان جریان این واحد = شناسه‌ی دسته (0..3)
@@ -112,9 +114,8 @@ var _spawn_color: Color
 var _base_color: Color
 var _body: Node3D
 var _ring: MeshInstance3D
-## کاراکتر Low-Poly واقعی (پک KayKit «Adventurers» — CC0، ۷۶ انیمیشن اسکلتی)
-## گام ۶R11 — بازخورد کاربر: «حرکت‌ها/ضربه‌ها/جنگ خیلی ابتدایی است» →
-## راه‌رفتن/حمله/ضربه‌خوردن/مرگِ واقعی از اسکلتِ پک — بدنه‌ی چینی حذف شد
+## کاراکتر Low-Poly واقعی — گام ۶R۱۲: پک Quaternius (CC0) با انیمیشن اسکلتی کامل
+## (Idle/Walk/حمله/ضربه/مرگ) — بازخورد: «کیفیت کاراکترها خوب نیست»
 var _model: CharacterModel
 
 
@@ -135,8 +136,8 @@ func _ready() -> void:
         # (رفع باگ «گیر کردن در آیدل بعد از رسیدن») — فقط برای کانال ۰/بدون اسلات
         GameEvents.goal_changed.connect(_on_goal_changed)
 
-        # گام ۶R11 — کاراکتر اسکلتی KayKit با انیمیشن کامل؛ تینتِ ۴۲٪ رنگ دسته
-        # روی بافت پالت کاراکتر (قابل‌تفکیک از دور، شکل کاراکتر زیر رنگ گم نمی‌شود)
+        # گام ۶R۱۲ — کاراکتر اسکلتی Quaternius با انیمیشن کامل؛ تینتِ ۴۲٪ رنگ دسته
+        # روی پالت کاراکتر (قابل‌تفکیک از دور، شکل کاراکتر زیر رنگ گم نمی‌شود)
         _model = CharacterModel.new()
         _model.setup(_model_kind(), _spawn_color, 0.42, _model_special())
         add_child(_model)
@@ -161,7 +162,7 @@ func _ready() -> void:
         # تجهیزات اختصاصی کلاس (سپر/نیزه/کمان — در زیرکلاس‌ها)
         # گام ۶R9 — پیوتِ دستِ راست: سلاح فرزندِ این است تا با ضربه سوئینگ کند
         _hand = Node3D.new()
-        _hand.position = Vector3(0.17, 0.42, 0.08)
+        _hand.position = Vector3(0.15, 0.5, 0.1)
         add_child(_hand)
         _build_gear()
 
@@ -169,12 +170,13 @@ func _ready() -> void:
         if is_commander:
                 var band := MeshInstance3D.new()
                 var bm := TorusMesh.new()
-                bm.inner_radius = 0.10
-                bm.outer_radius = 0.15
+                bm.inner_radius = 0.11
+                bm.outer_radius = 0.16
                 bm.rings = 10
                 bm.ring_segments = 5
                 band.mesh = bm
-                band.position.y = 0.62
+                # گام ۶R12 — سرِ کاراکتر واقعی‌نما (قد ۰٫۸۲) نه قدِ چینیِ قبلی
+                band.position.y = 0.88
                 var gm := StandardMaterial3D.new()
                 gm.albedo_color = GameConstants.COL_GOLD
                 gm.metallic = 0.5
@@ -191,10 +193,10 @@ func _build_gear() -> void:
         pass
 
 
-## نقشِ کاراکتر KayKit این یونیت — زیرکلاس‌ها override می‌کنند:
-##   knight=جاویدان | barbarian=نیزه‌دار | rogue_hooded=کماندار
+## نقشِ کاراکتر این یونیت — زیرکلاس‌ها override می‌کنند:
+##   warrior=جاویدان | viking=نیزه‌دار | ranger=کماندار (پک Quaternius)
 func _model_kind() -> StringName:
-        return &"knight"
+        return &"warrior"
 
 
 ## تینتِ ویژه‌ی گره‌های مدل (مثلاً سپر فیروزه‌ای جاویدان) — زیرکلاس‌ها override
@@ -276,10 +278,6 @@ func die() -> void:
         set_process(false)
         # گام ۶R9 — فلشِ در جریان روی جسد نمی‌ماند (مدل خودش بازیابی می‌کند)
         _flashing = false
-        # گام ۶R11 — توقفِ انیمیشنِ اسکلتی در ژستِ فعلی؛ افتادن با چرخشِ کلِ نود
-        # انجام می‌شود (تجهیزِ پروسیجرالِ زیرِ نود هم هماهنگ می‌افتد)
-        if _model != null:
-                _model.freeze_pose()
         # گام ۶R9 — خون: لکه‌ی دائمی جای سقوط + صدای افتادن
         var gy := position.y
         if ground_provider.is_valid():
@@ -287,13 +285,10 @@ func die() -> void:
         BattleFX.blood_stain(get_parent(), Vector2(position.x, position.z), gy,
                         _blood_color)
         BattleFX.play_sfx(get_tree(), &"fall", -6.0)
-        # انیمیشن مرگ: افتادن — گام ۶R9 (بازخورد کاربر: «جنازه‌ها باقی بمونن»):
-        # جسد روی زمین می‌ماند؛ نه محو می‌شود نه آزاد. پاکسازی با سقفِ جنازه‌ی صحنه.
-        var y0 := position.y
-        var tw := create_tween()
-        tw.set_parallel(true)
-        tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
-        tw.tween_property(self, "position:y", y0 - 0.1, 0.42)
+        # گام ۶R12 — مرگ با انیمیشن Death واقعیِ پک (افتادنِ طبیعی؛ نه چرخش
+        # خشکِ کلِ نود) — آخرین فریمِ افتادن روی زمین می‌ماند (جنازه‌ی دائمی)
+        if _model != null:
+                _model.play_death()
         add_to_group("corpses")
         GameEvents.corpse_laid.emit(self)
         # گام ۶R9 — تسک A: افتادنِ سرباز = تکونِ محسوس‌ترِ دوربین
@@ -523,7 +518,6 @@ func set_slot(world_xz: Vector2) -> void:
         if _arrived:
                 _arrived = false
                 _set_color(_spawn_color)
-                _body.position.y = 0.0
 
 
 func clear_slot() -> void:
@@ -600,8 +594,8 @@ func _process(delta: float) -> void:
                 if _fidget_state != 0:
                         _process_fidget(delta)
                 else:
-                        # ایست در آرایش + تیک Fidget
-                        _body.position.y = absf(sin(_bob_t * 6.0)) * 0.07
+                        # ایست در آرایش — گام ۶R12: بدنه‌ی اسکلتی با انیمیشن Idle
+                        # خودش نفس می‌کشد؛ bobِ قدیمیِ چینی لرزش می‌ساخت (حذف شد)
                         _tick_fidget_timer(delta)
                 return
 
@@ -763,10 +757,11 @@ func _flee_despawn() -> void:
         remove_from_group("units")
         set_selected_ring(false)
         GameEvents.unit_fled_island.emit(self)
-        var parts := ChibiLook.fade_parts(self)
+        # گام ۶R۱۲ — محوِ مدلِ اسکلتی (جایگزین ChibiLook)
+        if _model != null:
+                _model.fade_out(0.7)
         var tw := create_tween()
-        for p in parts:
-                tw.tween_property(p, "transparency", 1.0, 0.7)
+        tw.tween_interval(1.1)
         tw.chain().tween_callback(queue_free)
 
 
@@ -779,6 +774,12 @@ func gray_out_body() -> void:
 
 func is_arrived() -> bool:
         return _arrived
+
+
+## گام ۶R۱۲ — محوِ نرمِ جنازه (سقفِ جنازه‌ها) — از صحنه صدا زده می‌شود
+func fade_corpse(secs: float) -> void:
+        if _model != null:
+                _model.fade_out(secs)
 
 
 func is_fidgeting() -> bool:
@@ -855,6 +856,22 @@ func has_clear_shot(from_xz: Vector2, from_y: float, to_xz: Vector2, to_y: float
         return true
 
 
+## آیا این واحد «عملاً سرِ جایش» است؟ (رسیده یا چسبیده به اسلاتش)
+## گام ۶R۱۲ — خانه‌نشین‌ها بخشی از چشم‌اندازِ آرایش‌اند: جداسازی آنها را سد
+## نمی‌کند و تیرِ بالستیک از فرازشان رد می‌شود (وگرنه کماندار تا ابد ساکت
+## می‌ماند — یک هم‌رزمیِ سرِ پستِ دسته‌ی دیگر در امتدادِ تیر کافی بود)
+func _is_practically_home(n: Node3D) -> bool:
+        var u := n as UnitBase
+        if u == null:
+                return false
+        if u.is_arrived():
+                return true
+        if not u.has_slot():
+                return false
+        return u.slot_pos().distance_to(Vector2(u.global_position.x,
+                        u.global_position.z)) <= SLOT_ARRIVE_RADIUS + 0.25
+
+
 ## آیا بین این واحد و هدف، هم‌رزمی ایستاده؟ (قانون «آسیب دوستانه ندارد»)
 ## برای جلوگیری از بن‌بستِ آرایشِ فشرده، فقط هم‌رزمیِ «میانه‌ی مسیر» مانع است:
 ##   * هم‌رزمیِ شانه‌به‌شانه در ۲۰٪ ابتدای مسیر سد نیست (تیر از فراز سرشان می‌رود)
@@ -870,9 +887,15 @@ func friendly_in_corridor(target_xz: Vector2) -> bool:
                 var u := n as Node3D
                 if u == null or u == self:
                         continue
+                # خانه‌نشین‌ها سد نیستند — تیر از فرازِ آرایش رد می‌شود (۶R۱۲)
+                if _is_practically_home(u):
+                        continue
                 var up := Vector2(u.global_position.x, u.global_position.z)
                 var t := clampf((up - from).dot(seg) / (seg_len * seg_len), 0.0, 1.0)
-                if t < 0.2 or t > 0.85:
+                # گام ۶R۱۲ — سرِ مسیر تا ۳۰٪ آزاد است: تیرِ بالستیک از فرازِ
+                # آرایشِ متراکمِ خودی (حلقه‌های ۰٫۵۵m) رد می‌شود؛ بندِ ۲۰٪ قدیمی
+                # با جداسازیِ ۰٫۷۲m تقریباً همه‌ی شلیک‌های نزدیک را می‌بست
+                if t < 0.3 or t > 0.85:
                         continue
                 var proj := from + seg * t
                 if proj.distance_to(up) <= GameConstants.FRIENDLY_CORRIDOR_HALF_W \
@@ -887,7 +910,6 @@ func _on_goal_changed(_new_goal: Vector2) -> void:
                 _arrived = false
                 _vel = Vector2.ZERO
                 _set_color(_spawn_color)  # برگشت به رنگ تولد
-                _body.position.y = 0.0
 
 
 ## حلقه‌ی انتخاب دسته — گام ۶R10: زبان انتخاب Bad North از اسکرین‌شات‌های کاربر:
@@ -959,7 +981,6 @@ func exit_house(at: Vector3) -> void:
         _vel = Vector2.ZERO
         _arrived = false
         _set_color(_spawn_color)
-        _body.position.y = 0.0
         if not is_in_group("units"):
                 add_to_group("units")
 
@@ -988,19 +1009,28 @@ func spawn_color() -> Color:
 
 ## جداسازی ساده بین واحدها (تا روی هم نلغزند) — هزینه با ≤۱۶ واحد ناچیز است
 func _separate(pos: Vector2) -> Vector2:
+        var out := pos
         var others := get_tree().get_nodes_in_group("units")
         for other in others:
                 if other == self:
                         continue
-                # رسیده‌ها جا می‌دهند: دورِ اسلات جمع می‌شوند ولی مانع رسيدن بقیه نمی‌شوند
-                if other is UnitBase and other.is_arrived():
+                # رسیده‌ها و خانه‌نشین‌ها جا می‌دهند (۶R۱۲): دورِ اسلات جمع می‌شوند
+                # ولی مانع رسیدن بقیه نمی‌شوند
+                if other is UnitBase and _is_practically_home(other):
                         continue
                 var op := Vector2(other.global_position.x, other.global_position.z)
-                var diff := pos - op
+                var diff := out - op
                 var d := diff.length()
                 if d > 0.001 and d < SEPARATION_DIST:
-                        pos += (diff / d) * (SEPARATION_DIST - d) * 0.5
-        return pos
+                        out += (diff / d) * (SEPARATION_DIST - d) * 0.5
+        # گام ۶R۱۲ — میراییِ نزدیکِ اسلاتِ خود: واحدی که به اسلاتش چسبیده
+        # فشارِ جداسازی را ۵۵٪ کم می‌کند تا نوسانِ «رسیدن ← هل خوردن ← برگشتن»
+        # تمام شود و آرایشِ متراکمِ اسکرین‌شات سرِ جایش بنشیند
+        # (حلقه‌های ۰٫۵۵m شانه‌به‌شانه، نه روی هم)
+        if _has_slot and pos.distance_to(_slot) <= SLOT_ARRIVE_RADIUS * 2.0:
+                var corr := out - pos
+                out = pos + corr * 0.45
+        return out
 
 
 ## گام ۶R4 — انتخابِ سمتِ دورزدن: سمتی که قدمِ اولش بازتر است (۶۶° چرخیده)؛
@@ -1087,12 +1117,10 @@ func _avoid_step(from: Vector2, step: Vector2, to_dir: Vector2,
 
 
 func _bob_visual(moving: bool) -> void:
-        # گام ۶R11 — انیمیشن راه‌رفتنِ اسکلتی (Walking_A) بر اساس وضعیت حرکت
+        # گام ۶R12 — فقط انیمیشن اسکلتی؛ bobِ عمودی حذف شد (ریشه‌ی «همش تکان
+        # می‌خوردن» — بازخورد کاربر)
         if _model != null:
                 _model.set_moving(moving)
-        var target := absf(sin(_bob_t * 9.0)) * 0.05 if moving else 0.0
-        var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
-        _body.position.y = lerpf(_body.position.y, target, k)
 
 
 func _set_color(c: Color) -> void:
@@ -1146,7 +1174,7 @@ func _process_fidget(delta: float) -> void:
                 gy = ground_provider.call(pos)
         _y_smooth = lerpf(_y_smooth, gy, clampf(10.0 * delta, 0.0, 1.0))
         global_position = Vector3(pos.x, _y_smooth, pos.y)
-        _body.position.y = absf(sin(_bob_t * 7.0)) * 0.03
+        _body.position.y = 0.0
         if k >= 1.0:
                 if _fidget_state == 1:
                         _fidget_state = 2  # بازگشت به آرایش

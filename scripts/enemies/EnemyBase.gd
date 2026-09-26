@@ -13,12 +13,14 @@ extends Node3D
 ##      نزدیک می‌شوند و از آن‌جا مشعل پرتاب می‌کنند؛ نزدیک‌تر از حدِ ایمن عقب
 ##      می‌روند. غارت نمایشیِ گام ۶ حذف شد.
 ##
-## رنگ‌ها فقط از پالتِ شبح (COL_GHOST_* — تصویرِ مرجعِ کاربر گام ۶R8).
+## رنگ‌ها: گام ۶R12 — «اسکلت‌ها/شبح‌ها مسخره‌اند؛ دشمن انسانی باشد» →
+## مهاجمان انسان‌های واقعی KayKit/Quaternius با تینتِ قرمزِ مهاجم‌اند (اسکرین‌شات‌ها).
 ## صفر عدد و نوار سلامت روی صفحه (§۱۰) — فلش سفید ضربه + افتادن هنگام مرگ.
 ## قانون §۷: مرگ دائمی است.
 
 const DIRECT_STEER_RADIUS := 2.0
-const SEPARATION_DIST := 0.55
+## گام ۶R12 — هم‌قد با جداسازی خودی‌ها (ضدِ «توی هم فشرده شدن»)
+const SEPARATION_DIST := 0.72
 
 signal died(enemy: EnemyBase)
 
@@ -50,8 +52,8 @@ var engaged_unit: Node3D = null     # سربازِ درگیر (برای تست/�
 ## گام ۶R6 — سوارِ قایق: موجودیت واقعیِ روی عرشه — AI و گروهِ hostiles
 ## غیرفعال‌اند تا قایق با خیال راحت حمل‌شان کند؛ با پیاده‌شدن فعال می‌شوند
 var riding := false
-## گام ۶R9 — خونِ شبح: بنفشِ ژرف‌تر از بدنه (خوانا روی چمنِ پاستلی)
-var _blood_color: Color = Color("43215e")
+## گام ۶R۹ — خونِ مهاجمِ انسانی: سرخِ تیره (قبلاً شبحِ بنفش بود)
+var _blood_color: Color = GameConstants.BLOOD_ENEMY
 ## گام ۶R9 — پیوتِ دستِ راست برای سوئینگِ سلاح (هم‌امای UnitBase)
 var _hand: Node3D
 ## سلاحِ در دست — زیرکلاس‌ها روی _hand می‌سازند (پلتاست برای ژستِ پرتاب)
@@ -65,6 +67,9 @@ var _torch_cd := 1.2                # تاخیر اول کوتاه تا مشعل
 var _chase_t := 0.0
 
 var _channel := 4
+## گام ۶R۱۲ — مهاجمِ «تنی» (بدونِ گروهِ موج — اسپاونِ آزمایشی) میدانِ کانال
+## ندارد: میدانِ کهنه‌ی موجِ قبلی او را در ~۳ متریِ هدفِ تازه چرخانده بود
+var has_raid_field := true
 var _scan_accum := 0.0
 var _atk_cd := 0.0
 var _striking := false                    # در چرخه‌ی ضربه (آماده‌گیری→یورش→بازگشت)
@@ -75,6 +80,12 @@ var _flash_t := 10.0
 var _flashing := false
 var _flash_restore := Color.WHITE
 
+## گام ۶R12 — کاراکتر انسانی واقعی (جایگزین بدنه‌ی شبحِ ۶R8 — بازخورد کاربر:
+## «اسکلت‌ها خیلی مسخره بودن؛ اگر انسان باشن بهتره»)
+var _model: CharacterModel
+var _body: Node3D
+var _body_color: Color
+
 # گام ۶R5 — ضدِ گیرِ پیشروی (الگوی پیروی از دیوارِ UnitBase ۶R4):
 # مهاجمی که میدانِ کانال ندارد و مستقیم می‌رود، در گوشه‌ی مقعر (خانه+صخره)
 # با گاردِ لغزشِ تک‌محوره پین می‌شد — ریشه‌ی «مشعل هرگز پرتاب نشد»
@@ -82,10 +93,6 @@ var _march_stall_t := 0.0         # ساعتِ بی‌پیشرفتی نسبت ب
 var _march_best_gd := 1e9         # بهترین فاصله تا هدف از آخرین ریست
 var _march_avoid_side := 0        # ‎+۱‎ پادساعتگرد / ‎−۱‎ ساعتگرد — تعهد سمت
 var _march_avoid_hold := 0.0      # ثانیه‌ی باقی‌مانده‌ی تعهد
-
-var _mat: ShaderMaterial
-var _body: MeshInstance3D
-var _body_color: Color
 
 
 func _init() -> void:
@@ -104,19 +111,16 @@ func _ready() -> void:
         _heading = rotation.y
         _channel = GameConstants.ENEMY_CHANNEL_BASE + raid_group
         _body_color = _default_color()
-        # گام ۶R8 — بدنه‌ی شبحِ شنل‌پوش (تصویرِ مرجعِ کاربر) — بدونِ پا، شناور
-        _mat = GhostLook.shader_mat(_body_color)
+        # گام ۶R12 — کاراکتر انسانی با انیمیشن کامل (Idle/Walk/Attack/Hit/Death)
+        # تینتِ قرمزِ تیم مهاجم — از دور قابل‌تفکیک از دسته‌های پاستلیِ خودی
+        _model = CharacterModel.new()
+        _model.setup(_model_kind(), _body_color, 0.55)
+        add_child(_model)
+        _body = _model.body_root()
 
-        _body = MeshInstance3D.new()
-        _body.mesh = GhostLook.body_mesh()
-        _body.position.y = 0.0
-        _body.material_override = _mat
-        add_child(_body)
-        GhostLook.add_face(_body)
-
-        # گام ۶R۹ — پیوتِ دستِ راست برای سوئینگِ سلاح (هم‌امای UnitBase)
+        # پیوتِ دستِ راست برای سلاحِ پروسیجرال (نیزه‌ی پلتاست و ...)
         _hand = Node3D.new()
-        _hand.position = Vector3(0.17, 0.42, 0.08)
+        _hand.position = Vector3(0.15, 0.5, 0.1)
         add_child(_hand)
 
         # تجهیزات اختصاصی کلاس (کلاه‌خود/سپر/نیزه‌ی پرتاب)
@@ -130,7 +134,13 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_GHOST_LIGHT
+        return GameConstants.COL_ENEMY_LIGHT
+
+
+## نقشِ کاراکتر انسانیِ این مهاجم — زیرکلاس‌ها override می‌کنند
+## (۶R12: سبک=وایکینگ تبر‌دار، سنگین=شهسوار سپردار، پلتاست=رُگِ خنجر‌دار)
+func _model_kind() -> StringName:
+        return &"viking"
 
 
 func _build_gear() -> void:
@@ -161,6 +171,17 @@ func _process(delta: float) -> void:
                 return
 
         # ---- لایه ۳: درگیری با سرباز ----
+        # گام ۶R۱۲ — «ایستگاهِ مشعل» اولویت دارد: مهاجمی که به فاصله‌ی ایستِ
+        # خانه‌ی هدفش رسیده، مأموریتش آتش‌زدن است؛ دوئلِ بی‌پایان با سربازِ
+        # دورتر نباید خانه را برای همیشه از آتش باز دارد (ریشه‌ی «مشعل پرتاب نشد»)
+        var pos_now := Vector2(global_position.x, global_position.z)
+        if target_house != null and is_instance_valid(target_house) \
+                        and pos_now.distance_to(Vector2(
+                        target_house.global_position.x,
+                        target_house.global_position.z)) \
+                        <= GameConstants.ENEMY_RAID_STANDOFF + 0.7:
+                if _house_tick(pos_now, delta):
+                        return
         if is_instance_valid(engaged_unit) and not _unit_dead(engaged_unit):
                 _combat_tick(delta)
                 return
@@ -189,7 +210,7 @@ func _combat_tick(delta: float) -> void:
                 _move_with((up - pos).normalized(), delta, move_speed)
                 return
         _face_toward(up, delta)
-        _bob_visual(false)
+        _model_set_moving(false)
         if _striking:
                 return
         if _atk_cd <= 0.0:
@@ -203,36 +224,15 @@ func _perform_strike(target: Node3D) -> void:
         _atk_cd = attack_cooldown \
                         * (1.0 + randf_range(-GameConstants.CADENCE_VARIANCE,
                         GameConstants.CADENCE_VARIANCE))
-        # کشش: تیغه به پشتِ شانه
-        if _hand != null:
-                var hw := create_tween()
-                hw.set_parallel(true)
-                hw.tween_property(_hand, "rotation:y", 1.0,
-                                GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
-                hw.tween_property(_hand, "rotation:z", 0.5,
-                                GameConstants.STRIKE_WINDUP)
-        var tw := create_tween()
-        tw.tween_property(_body, "position:z", -0.1,
-                        GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
-        tw.tween_property(_body, "position:z", 0.17,
-                        GameConstants.STRIKE_LUNGE).set_ease(Tween.EASE_IN)
+        # گام ۶R12 — انیمیشن حمله‌ی اسکلتی (شمشیر/تبر/خنجر) جای ژستِ کششِ بدنه
+        if _model != null:
+                _model.play_attack()
         # weakref — هدفِ آزادشده bind را نمی‌شکند و _striking گیر نمی‌کند
         var wr: WeakRef = weakref(target)
+        var tw := create_tween()
+        tw.tween_interval(GameConstants.STRIKE_WINDUP + GameConstants.STRIKE_LUNGE)
         tw.tween_callback(_strike_impact.bind(wr))
-        tw.tween_property(_body, "position:z", 0.0, GameConstants.STRIKE_RECOVER)
         tw.tween_callback(func() -> void: _striking = false)
-        # اسلش: قوسِ تند در لحظه‌ی یورش + بازگشت نرم
-        if _hand != null:
-                var hs := create_tween()
-                hs.tween_interval(GameConstants.STRIKE_WINDUP)
-                hs.tween_property(_hand, "rotation:y", -1.35,
-                                GameConstants.STRIKE_LUNGE + 0.05) \
-                                .set_ease(Tween.EASE_OUT)
-                hs.set_parallel(true)
-                hs.tween_property(_hand, "rotation:y", 0.0,
-                                GameConstants.STRIKE_RECOVER)
-                hs.tween_property(_hand, "rotation:z", 0.0,
-                                GameConstants.STRIKE_RECOVER)
 
 
 ## لحظه‌ی ضربه — هدف در اوجِ یورش اعتبارسنجی می‌شود (فراری تا بردِ کشیده می‌خورد)
@@ -325,15 +325,19 @@ func _house_tick(pos: Vector2, delta: float) -> bool:
         if d < GameConstants.ENEMY_RAID_STANDOFF - 0.6:
                 _move_with((pos - hxz).normalized(), delta, move_speed)
                 return true
-        # هنوز دور است → جلو (گام ۶R2: نزدیک‌تر از قبل)
-        if d > GameConstants.ENEMY_RAID_STANDOFF:
+        # گام ۶R۱۲ — باندِ ایست [۲٫۰..۳٫۲]: از ۳٫۲ متر دورتر → مارس؛ داخل باند
+        # رو به خانه و پرتاب (پس‌زنیِ تیر از ایستِ ۲٫۶ بیرون نمی‌آورد)
+        if d > GameConstants.ENEMY_RAID_STANDOFF + 0.6:
                 return false
         _face_toward(hxz, delta)
-        _bob_visual(false)
+        _model_set_moving(false)
         if h.burning:
                 return true
         _torch_cd -= delta
-        if _torch_cd <= 0.0:
+        # گام ۶R۱۲ — پرتاب تا ۰٫۶م دورترِ ایست هم مجاز است: پس‌زنیِ تیرِ
+        # کماندار نباید یورشِ آتش را برای همیشه فلج کند (ایستِ بی‌مزاحمت
+        # همچنان ۲٫۶m است — بازخورد کاربر «نزدیک‌تر بیایند»)
+        if _torch_cd <= 0.0 and d <= GameConstants.ENEMY_RAID_STANDOFF + 0.6:
                 _torch_cd = GameConstants.TORCH_COOLDOWN
                 torches_thrown += 1
                 _torch_throw_anim()
@@ -356,7 +360,8 @@ func _march_tick(delta: float) -> void:
         var to_goal := raid_target - pos
         var gd := to_goal.length()
         var dir := to_goal.normalized() if gd < DIRECT_STEER_RADIUS \
-                        else PathService.sample_direction(pos, _channel)
+                        else (PathService.sample_direction(pos, _channel)
+                                        if has_raid_field else Vector2.ZERO)
         if dir == Vector2.ZERO:
                 dir = to_goal.normalized()  # میدان هنوز منتشر نشده — مستقیم
         if dir != Vector2.ZERO:
@@ -386,7 +391,7 @@ func _march_tick(delta: float) -> void:
                         _march_stall_t = 0.0
                         _march_best_gd = minf(_march_best_gd, gd)
         else:
-                _bob_visual(false)
+                _model_set_moving(false)
 
 
 ## پیشرویِ همین فریم (متر) — صفر بودن یعنی گاردِ لغزش قدم را بلعید
@@ -464,7 +469,13 @@ func _move_with(dir: Vector2, delta: float, speed: float) -> void:
         _y_smooth = lerpf(_y_smooth, gy, clampf(10.0 * delta, 0.0, 1.0))
         global_position = Vector3(pos.x, _y_smooth, pos.y)
         _turn_to(atan2(dir.x, dir.y), delta)
-        _bob_visual(true)
+        _model_set_moving(true)
+
+
+## گام ۶R12 — وضعیت انیمیشن حرکت روی مدل اسکلتی (جایگزین شناوریِ شبح)
+func _model_set_moving(moving: bool) -> void:
+        if _model != null:
+                _model.set_moving(moving)
 
 
 ## نزدیک‌ترین سلول قابل‌عبور (مارپیچ کوچک) — برای فرار از سلول بسته (گام ۶R3)
@@ -521,34 +532,27 @@ func _turn_to(target: float, delta: float) -> void:
         rotation.y = _heading
 
 
-func _bob_visual(moving: bool) -> void:
-        # گام ۶R8 — شناوریِ شبح: ایست = شنایِ آهسته دورِ ۰٫۰۶؛ حرکت = بُبِ گام
-        var target := 0.06 + (absf(sin(_bob_t * 7.0)) * 0.05 if moving \
-                        else sin(_bob_t * 2.1) * 0.02)
-        var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
-        _body.position.y = lerpf(_body.position.y, target, k)
-
-
-## رنگ پایه‌ی بدنه (گرادیانِ شبح از همین مشتق می‌شود)
+## رنگ پایه‌ی بدنه — گام ۶R12: تینتِ تیمِ مهاجم روی مدل انسانی
 func _set_color(c: Color) -> void:
         _body_color = c
-        GhostLook.set_base(_mat, c)
+        if _model != null:
+                _model.apply_team_tint(c, 0.55)
 
 
 ## یورش کوتاه به جلو هنگام ضربه/پرتاب
 func _strike_anim() -> void:
-        var tw := create_tween()
-        tw.tween_property(_body, "position:z", 0.14, 0.08).set_ease(Tween.EASE_OUT)
-        tw.tween_property(_body, "position:z", 0.0, 0.14)
+        if _model != null:
+                _model.play_attack()
 
 
 func _tick_flash(delta: float) -> void:
+        # گام ۶R12 — فلشِ سفید داخل CharacterModel مدیریت و بازیابی می‌شود؛
+        # اینجا فقط رنگِ منطقی بعد از فلش برگردانده می‌شود
         if not _flashing:
                 return
         _flash_t += delta
         if _flash_t >= 0.12:
                 _flashing = false
-                GhostLook.set_flash(_mat, 0.0)
                 _set_color(_flash_restore)
 
 
@@ -556,6 +560,12 @@ func _tick_flash(delta: float) -> void:
 
 func is_dead() -> bool:
         return dead
+
+
+## گام ۶R۱۲ — محوِ نرمِ جنازه (سقفِ جنازه‌ها) — از صحنه صدا زده می‌شود
+func fade_corpse(secs: float) -> void:
+        if _model != null:
+                _model.fade_out(secs)
 
 
 func is_alive() -> bool:
@@ -608,11 +618,14 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
                 return
         hp -= dmg
         _flash_restore = _body_color
-        GhostLook.set_flash(_mat, 1.0)
+        if _model != null:
+                _model.flash_white()
         _flash_t = 0.0
         _flashing = true
+        if _model != null:
+                _model.play_hit()
         _knockback(from_dir)
-        # گام ۶R9 — خونِ شبح: پاششِ بنفش در سینه + صدای برخورد (بازخورد کاربر)
+        # گام ۶R9 — خونِ سرخِ مهاجمِ انسانی + صدای برخورد (بازخورد کاربر)
         BattleFX.blood_burst(get_parent(), global_position + Vector3(0, 0.5, 0),
                         from_dir, _blood_color)
         BattleFX.play_sfx(get_tree(), &"hit")
@@ -621,9 +634,17 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
         if attacker != null and is_instance_valid(attacker) \
                         and attacker.is_in_group("units") \
                         and not _unit_dead(attacker):
-                engaged_unit = attacker
-                _atk_cd = maxf(_atk_cd, 0.3)   # لحظه‌ی روکردن به سمت شلیک‌کننده
-                _chase_t = GameConstants.ENEMY_CHASE_SECONDS
+                # گام ۶R۱۲ — مأموریتِ مشعل مقدم بر تلافی: مهاجمی که خانه‌ی
+                # زنده‌ای برای آتش‌زدن دارد، تیراندازِ دور را رها می‌کند و به
+                # ایستگاه برمی‌گردد؛ سربازها باید «فیزیکی» جلویش را بگیرند
+                var mission_house: BuildingBase = target_house
+                var on_mission := mission_house != null \
+                                and is_instance_valid(mission_house) \
+                                and not mission_house.burned
+                if not on_mission:
+                        engaged_unit = attacker
+                        _atk_cd = maxf(_atk_cd, 0.3)   # لحظه‌ی روکردن به سمت شلیک‌کننده
+                        _chase_t = GameConstants.ENEMY_CHASE_SECONDS
         if hp <= 0:
                 die()
 
@@ -652,7 +673,9 @@ func die() -> void:
         set_process(false)
         # گام ۶R9 — فلشِ در جریان روی جسد نمی‌ماند
         _flashing = false
-        GhostLook.set_flash(_mat, 0.0)
+        # گام ۶R12 — مرگ با انیمیشن Death واقعی (افتادن طبیعی؛ جنازه‌ی دائمی)
+        if _model != null:
+                _model.play_death()
         # گام ۶R9 — لکه‌ی خونِ بنفش جای سقوط + صدای افتادن
         var gy := position.y
         if ground_provider.is_valid():
@@ -660,13 +683,6 @@ func die() -> void:
         BattleFX.blood_stain(get_parent(), Vector2(position.x, position.z), gy,
                         _blood_color)
         BattleFX.play_sfx(get_tree(), &"fall", -10.0)
-        # انیمیشن مرگ: افتادن — گام ۶R9 (بازخورد کاربر: «جنازه‌های دشمن باقی بمونه»):
-        # شبحِ افتاده روی زمین می‌ماند؛ نه محو، نه آزاد. پاکسازی با سقفِ صحنه.
-        var y0 := position.y
-        var tw := create_tween()
-        tw.set_parallel(true)
-        tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
-        tw.tween_property(self, "position:y", y0 - 0.08, 0.42)
         add_to_group("corpses")
         GameEvents.corpse_laid.emit(self)
         # گام ۶R9 — تسک A: سقوطِ شبح = تکونِ دوربین

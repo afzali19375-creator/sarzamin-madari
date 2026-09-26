@@ -23,13 +23,13 @@ const SPEAR_BRACE_DEG := 6.0
 
 
 func _model_kind() -> StringName:
-        return &"barbarian"
+        return &"viking"
 
 
 func _build_gear() -> void:
-        # پیوت نیزه روی شانه‌ی راست (قدِ مدلِ اسکلتی KayKit ≈ ۰٫۹۵m)
+        # پیوت نیزه روی شانه‌ی راست (قدِ مدلِ Quaternius نرمال‌شده ≈ ۰٫۸۲m)
         _spear_pivot = Node3D.new()
-        _spear_pivot.position = Vector3(0.22, 0.5, 0.0)
+        _spear_pivot.position = Vector3(0.2, 0.48, 0.0)
         add_child(_spear_pivot)
         # گام ۶R9 — پیوتِ دست = پیوتِ نیزه؛ سوئینگِ THRUST پایه با آن کار می‌کند
         _hand = _spear_pivot

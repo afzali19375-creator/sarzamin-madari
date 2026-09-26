@@ -7,8 +7,8 @@ extends EnemyBase
 ## (_house_tick — بدون اشغال خانه، بازخورد کاربر)؛ اینجا فقط:
 ##   * مشعل روشن در دست (بصری)
 ##   * ژست اختصاصی پرتاب مشعل (بالا بردن دست)
-## بصری (گام ۶R8): شبحِ آلویِ گرم (COL_GHOST_PELTAST) — نیزه‌ی پرتابِ استخوانی در
-## یک دست، مشعلِ روشن در دستِ دیگر (آتشِ مشعل سیگنالِ گیم‌پلی می‌ماند).
+## بصری (گام ۶R۱۲): انسانِ پرتاب‌گرِ قرمزِ روشن — نیزه‌ی پرتاب در یک دست،
+## مشعلِ روشن در دستِ دیگر (آتشِ مشعل سیگنالِ گیم‌پلی می‌ماند).
 
 var javelins_thrown := 0     # برای تست خودکار
 var _torch_in_hand: MeshInstance3D
@@ -28,27 +28,27 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_GHOST_PELTAST
+        return GameConstants.COL_ENEMY_PELTAST
+
+
+## گام ۶R12 — پرتاب‌گرِ انسانی (Soldier پک Quaternius Ultimate)
+func _model_kind() -> StringName:
+        return &"soldier"
 
 
 func _build_gear() -> void:
-        # گام ۶R8 — بدونِ نوارِ سر (مرجعِ شبح کلاهِ لخت دارد)
-
-        # گام ۶R9 — نیزه‌ی پرتابِ چندقطعه‌ای (ساقِ استخوانی + سره‌ی هرمی + پر)
-        # روی پیوتِ دست — ژستِ پرتاب اکنون کلِ بازو را می‌چرخاند
+        # نیزه‌ی پرتابِ چندقطعه‌ای روی پیوتِ دست — ژستِ پرتاب کلِ بازو را می‌چرخاند
         _swing_weapon = WeaponLook.javelin(0.66)
         _swing_weapon.rotation_degrees = Vector3(-30.0, 0.0, -8.0)
         _hand.add_child(_swing_weapon)
-        # دستِ خاکستریِ گیرنده‌ی نیزه (مرجع)
-        GhostLook.add_hand(self, Vector3(0.19, 0.4, 0.1))
 
-        # گام ۶R — مشعل روشن در دست دیگر (سمت چپ مدل)
+        # مشعل روشن در دست دیگر (سمت چپ مدل) — روی کاراکترِ ۰٫۸۲ متری
         _torch_in_hand = MeshInstance3D.new()
         var st := BoxMesh.new()
         st.size = Vector3(0.035, 0.035, 0.4)
         _torch_in_hand.mesh = st
         _torch_in_hand.rotation_degrees = Vector3(-18.0, 0.0, 0.0)
-        _torch_in_hand.position = Vector3(-0.24, 0.48, 0.1)
+        _torch_in_hand.position = Vector3(-0.26, 0.52, 0.1)
         var stick_mat := StandardMaterial3D.new()
         stick_mat.albedo_color = GameConstants.COL_DOOR_WOOD
         stick_mat.roughness = 0.9
@@ -60,7 +60,7 @@ func _build_gear() -> void:
         fm.radius = 0.06
         fm.height = 0.12
         fl.mesh = fm
-        fl.position = Vector3(-0.24, 0.7, 0.02)
+        fl.position = Vector3(-0.26, 0.74, 0.02)
         var flm := StandardMaterial3D.new()
         flm.albedo_color = GameConstants.COL_GOLD
         flm.emission_enabled = true
@@ -82,7 +82,7 @@ func _combat_tick(delta: float) -> void:
                 return
 
         _face_toward(up, delta)
-        _bob_visual(false)
+        _model_set_moving(false)
         if _atk_cd <= 0.0 and d <= GameConstants.PELTAST_RANGE and _los_clear(up):
                 # گام ۶R3 — آهنگ پرتاب هم ±۱۵٪ پراکنده می‌شود (ضربه‌های ماشینی نه)
                 _atk_cd = attack_cooldown \

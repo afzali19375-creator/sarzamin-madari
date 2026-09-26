@@ -5,7 +5,7 @@ class_name GameConstants
 
 # ---------- هویت بیلد ----------
 ## روی صفحه‌ی تست و منو نمایش داده می‌شود تا همیشه مشخص باشد کاربر کدام نسخه را اجرا می‌کند
-const BUILD_ID := "2026-09-26-r17"
+const BUILD_ID := "2026-09-26-r18"
 
 # ---------- گام ۶R10 — زبان انتخاب Bad North (اسکرین‌شات‌های کاربر) ----------
 ## در تصاویر مرجع کاربر: دسته‌ی انتخابی «تمام‌قد» فیروزه‌ای روشن می‌شود (بدنه +
@@ -69,13 +69,21 @@ const COL_WAYPOINT := Color("3ab0a0")     # خط مسیر فیروزه‌ای، 
 const CAM_FOV := 55.0
 const CAM_PITCH_DEG := -55.0
 const CAM_YAW0_DEG := 45.0                # قابل چرخش ۳۶۰ درجه
-const CAM_HEIGHT0 := 18.0
-const CAM_MIN_HEIGHT := 12.0
-const CAM_MAX_HEIGHT := 26.0
+## گام ۶R۱۲ — «جزیره زیاده بزرگ بود»: جزیره کوچک‌تر شد → دوربین پایین‌تر/نزدیک‌تر
+const CAM_HEIGHT0 := 13.0
+const CAM_MIN_HEIGHT := 8.0
+const CAM_MAX_HEIGHT := 20.0
 const CAM_ZOOM_SPEED := 6.0               # m/s
 const CAM_ROTATE_SPEED := 120.0           # درجه بر ثانیه (Q/E/جهت‌نما) — بازخورد کاربر: چرخش حس‌بهتر
 const CAM_DRAG_SENS := 0.35               # حساسیت چرخش با کشیدن موس/لمس (اندروید) — گام ۶R2
 const CAM_DRAG_START_PX := 12.0           # آستانه‌ی تفکیک «تپ» از «کشیدن» (px)
+## گام ۶R۱۲ — پنِ عمودیِ «محدود» نما (درخواست کاربر: «به مقدار خیلی کم کاربر
+## بتواند صفحه را عمودی هم جابه‌جا کند — آزادی کامل ممنوع»)
+## نما فقط چند متر روی محور عمودیِ صفحه لغزانده می‌شود؛ نه چرخش آزاد، نه پرواز
+const CAM_PAN_FWD_MAX := 2.2              # متر — بیشترین لغزش نما به «بالای صفحه»
+const CAM_PAN_BACK_MAX := 1.2             # متر — بیشترین لغزش نما به «پایین صفحه»
+const CAM_PAN_SPEED := 4.0                # m/s — نرمی پن (کلیدهای بالا/پایین)
+const CAM_PAN_DRAG_SENS := 0.012          # متر بر پیکسل — کشیدنِ عمودی موس/لمس
 const CAM_NEAR := 0.1
 const CAM_FAR := 200.0
 
@@ -233,8 +241,15 @@ const COL_SKY := Color("d4e4ec")              # آسمان
 const COL_WATER_SHALLOW := Color("8fb3b0")    # گام ۶R11 — آبِ مه‌آلودِ فیروزه‌ایِ ملایم
 const COL_WATER_DEEP := Color("5f8689")       # آب عمیق
 const COL_BEACH_SAND := Color("e8d5a8")       # شن ساحل
-const COL_GRASS_LIGHT := Color("a2c17c")      # گام ۶R11 — چمنِ پاستلیِ زرد-سبز
-const COL_GRASS_DARK := Color("87a565")       # چمن تیره
+## گام ۶R۱۲ — زمینِ پایه‌ی «خشک و کمرنگ» (اسکرین‌شات: جزیره‌ی پاستلی با پدهای
+## سبزِ مجزا) — چمنِ پایه از سبزِ اشباع به خشکِ کاهی تغییر کرد؛ پدهای بیضی
+## سبزِ تازه روی آن می‌نشینند
+const COL_GRASS_LIGHT := Color("a8b072")      # چمنِ خشکِ روشن (زمینِ پایه)
+const COL_GRASS_DARK := Color("8e9a62")       # چمنِ خشکِ تیره
+## پدهای بیضی سبز — لکه‌های چمنِ زنده‌ی جزیره (VoronoiBlocks ۶R۱۲)
+const COL_PAD_LIGHT := Color("7fae62")
+const COL_PAD_DARK := Color("6a9650")
+const COL_PAD_EDGE := Color("547c40")
 const COL_ROCK := Color("8b8073")             # صخره
 const COL_ROCK_DARK := Color("5e5548")        # صخره تیره
 const COL_SUN := Color("fff4d6")              # نور خورشید
@@ -247,18 +262,16 @@ const COL_DOOR_WOOD := Color("6b4a2e")        # در چوبی
 const COL_WINDCATCHER := Color("d4b483")      # بادگیر
 const COL_FIRETEMPLE := Color("c4b5a0")       # آتشکده (سنگ)
 
-# --- گام ۶R8 — پالتِ شبحِ مهاجم (تصویرِ مرجعِ کاربر — سربازِ شنل‌پوشِ مرگ) ---
-const COL_GHOST_LIGHT := Color("3a2440")      # شبحِ سبک — بنفش
-const COL_GHOST_HEAVY := Color("241428")      # شبحِ سنگین — بنفشِ عمیق
-const COL_GHOST_PELTAST := Color("3c1f33")    # شبحِ پرتابگر — آلوی گرم
-const COL_GHOST_BONE := Color("d8d8c4")       # ماسکِ استخوانی
-const COL_GHOST_BLADE := Color("dff0e0")      # تیغه‌ی کم‌رنگِ سبز-سفید (مرجع)
-const COL_GHOST_HAND := Color("8a8088")       # دستِ خاکستری (مرجع)
+# --- گام ۶R۱۲ — پالتِ مهاجمِ انسانی (بازخورد: «اسکلت/شبح مسخره بود؛ انسان باشد» +
+# «دشمن قرمز» در اسکرین‌شات‌ها): سه‌رخِ قرمز — سبک/سنگین/پرتاب‌گر
+const COL_ENEMY_LIGHT := Color("b0524a")      # وایکینگ سبک — سرخِ روشن
+const COL_ENEMY_HEAVY := Color("7c2f28")      # شهسوار سنگین — سرخِ تیره
+const COL_ENEMY_PELTAST := Color("b06f45")    # پرتاب‌گر — سرخِ آجری
+const COL_ENEMY_SHIELD := Color("5a2420")     # سپرِ شهسوار
 const STEEL_BLADE := Color("e3e9ef")          # گام ۶R9 — فولادِ سردِ سلاحِ خودی
 const BLOOD_FRIENDLY := Color("7c1610")       # گام ۶R9 — خونِ سرخِ سربازِ خودی
-const BLOOD_GHOST := Color("43215e")          # گام ۶R9 — خونِ بنفشِ شبح
+const BLOOD_ENEMY := Color("6e1410")          # گام ۶R۱۲ — خونِ سرخِ مهاجمِ انسانی
 const CORPSE_CAP := 48                        # گام ۶R9 — سقفِ جنازه‌های روی زمین
-const COL_GHOST_SHIELD := Color("2a1a30")     # سپرِ شبحِ سنگین
 const COL_FLAG_GRAY := Color("8b8b84")        # گام ۶R9 — پرتره‌ی خاکستریِ گروهِ بی‌فرمانده
 const FLEE_SPEED_MULT := 1.35                 # گام ۶R9 — فرارِ اضطراریِ اعضای گروهِ منحل
 const FLEE_ARRIVE_RADIUS := 1.0               # گام ۶R9 — رسیدن به ساحل = خروج از جزیره

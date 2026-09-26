@@ -1,75 +1,62 @@
 class_name CharacterModel
 extends Node3D
-## کاراکتر Low-Poly واقعی (پک KayKit «Adventurers» — لایسنس CC0) جایگزین
-## استوانه‌ی ساده‌ی قبلی — بازخورد کاربر: «گرافیک واقعا ساده است؛ برو پروژه‌های
-## اپن‌سورس پیدا کن و از کاراکترهای آنها استفاده کن».
+## کاراکتر Low-Poly واقعی — گام ۶R۱۲: پک «Quaternius» (لایسنس CC0) جایگزین
+## KayKit — بازخورد کاربر: «کیفیت کاراکترها خوب نیست؛ باکیفیت‌تر پیدا کن».
 ##
-## پک گیت‌هاب: KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0
-##   * هر کاراکتر یک AnimationPlayer کامل دارد (۷۶ انیمیشن): راه‌رفتن، حمله،
-##     ضربه‌خوردن، مرگ، پرتاب، سپر و ...
-##   * اسلحه‌های همه‌ی واریانت‌ها داخل GLB روی دست‌ها سوارند → در setup پاکسازی
-##     می‌شوند (فقط سلاحِ نقشِ این یونیت دیده می‌شود)
-##   * رنگ تیم: همه‌ی متریال‌ها per-instance دوباره‌سازی و به رنگ دسته می‌گرایند
-##     (۳۵-۵۰٪ میکس — بافت پالت کاراکتر حفظ می‌شود)
+## پک‌ها (هر دو CC0، فایل glTF با بافت/بافر embed — تک‌فایلی):
+##   * RPG Character Pack: Warrior / Ranger / Rogue / Wizard / Cleric / Monk
+##   * Ultimate Animated Character Pack: Viking_Male / Knight_Male / Soldier_Male …
 ##
-## نقش‌ها (بازخورد اسکرین‌شات‌های Bad North):
-##   knight        → جاویدان (شمشیر + سپر مستطیلی فیروزه‌ای)
-##   knight_round  → هوپلیت سنگین دشمن (شمشیر + سپر گرد)
-##   barbarian     → نیزه‌دار خودی / هوپلیت سبک دشمن (تبر + سپر گرد + نیزه‌ی پروسیجرال)
-##   rogue_hooded  → کماندار خودی (کاتاپولت دوشی)
-##   rogue_thrower → پرتاب‌گر دشمن (سنگ پرتابی در دست)
+##   * هر کاراکتر AnimationPlayer کامل دارد: Idle / Walk / Run / حمله /
+##     RecieveHit / Death — انیمیشن واقعی اسکلتی (لرزشِ bobِ قدیمی حذف شد)
+##   * رنگ تیم: همه‌ی متریال‌ها per-instance و به رنگ دسته می‌گرایند
+##   * قد نرمال می‌شود به TARGET_HEIGHT (مدل‌ها ~۲٫۹–۳٫۶m ایمپورت می‌شوند)
+##
+## نقش‌ها:
+##   warrior      → جاویدان (شمشیر + سپر پروسیجرال، انیمیشن Sword_Attack)
+##   ranger       → کماندار (انیمیشن Bow_Shoot واقعی — ارتقای بزرگِ ۶R۱۲)
+##   viking       → نیزه‌دار خودی / مهاجم سبک (تبر + نیزه‌ی پروسیجرال)
+##   knight_heavy → هوپلیت سنگین دشمن (شمشیر + سپر مستطیلی)
+##   soldier      → پرتاب‌گر دشمن (نیزه‌ی پرتابِ پروسیجرال)
 
-const MODEL_DIR := "res://assets/models/kaykit/"
-const TARGET_HEIGHT := 0.95   # بلندی نهایی کاراکتر (m) — متناسب با تایل ۲ متری
+const MODEL_DIR := "res://assets/models/quaternius/"
+## گام ۶R۱۲ — بازخورد کاربر «کاراکترها یکهو بزرگ شدند»: قد نهایی کوچک‌تر تا
+## نسبت سرباز به پد/خانه مثل اسکرین‌شات‌های Bad North باشد (سرباز ریزِ جزیره)
+const TARGET_HEIGHT := 0.82   # بلندی نهایی کاراکتر (m)
 
-## نام انیمیشن‌های مشترک در همه‌ی کاراکترهای پک
+## نام انیمیشن‌های مشترک — پک‌های Quaternius هر دو همین نام‌ها را دارند
 const A_IDLE := "Idle"
-const A_WALK := "Walking_A"
-const A_RUN := "Running_A"
-const A_HIT := "Hit_A"
-const A_DEATH := "Death_A"
-const A_BLOCK := "Blocking"   # حالتِ نگه‌داشتن سپر (لوپ)
+const A_WALK := "Walk"
+const A_HIT := "RecieveHit"
+const A_DEATH := "Death"
 
-## پیکربندی هر نقش: فایل + پاکسازی تجهیز + انیمیشن حمله
+## پیکربندی هر نقش: فایل + انیمیشن حمله
 const KINDS := {
-        &"knight": {
-                "file": "Knight.glb",
-                "show": ["1H_Sword", "Rectangle_Shield"],
-                "hide": ["1H_Sword_Offhand", "Badge_Shield", "Round_Shield",
-                                "Spike_Shield", "2H_Sword"],
-                "attack": "1H_Melee_Attack_Stab",
+        &"warrior": {
+                "file": "Warrior.gltf",
+                "attack": "Sword_Attack",
         },
-        &"knight_round": {
-                "file": "Knight.glb",
-                "show": ["1H_Sword", "Round_Shield"],
-                "hide": ["1H_Sword_Offhand", "Badge_Shield", "Rectangle_Shield",
-                                "Spike_Shield", "2H_Sword"],
-                "attack": "1H_Melee_Attack_Stab",
+        &"ranger": {
+                "file": "Ranger.gltf",
+                "attack": "Bow_Shoot",
         },
-        &"barbarian": {
-                "file": "Barbarian.glb",
-                "show": ["1H_Axe", "Barbarian_Round_Shield"],
-                "hide": ["1H_Axe_Offhand", "2H_Axe", "Mug"],
-                "attack": "1H_Melee_Attack_Stab",
+        &"viking": {
+                "file": "Viking_Male.gltf",
+                "attack": "SwordSlash",
         },
-        &"rogue_hooded": {
-                "file": "Rogue_Hooded.glb",
-                "show": ["2H_Crossbow"],
-                "hide": ["1H_Crossbow", "Knife", "Knife_Offhand"],
-                "attack": "1H_Ranged_Shoot",
+        &"knight_heavy": {
+                "file": "Knight_Male.gltf",
+                "attack": "SwordSlash",
         },
-        &"rogue_thrower": {
-                "file": "Rogue.glb",
-                "show": [],
-                "hide": ["1H_Crossbow", "2H_Crossbow", "Knife", "Knife_Offhand",
-                                "Throwable"],
-                "attack": "Throw",
+        &"soldier": {
+                "file": "Soldier_Male.gltf",
+                "attack": "SwordSlash",
         },
 }
 
 static var _scene_cache: Dictionary = {}
 
-var _kind: StringName = &"knight"
+var _kind: StringName = &"warrior"
 var _root: Node3D
 var _anim: AnimationPlayer
 var _mats: Array[StandardMaterial3D] = []
@@ -78,7 +65,7 @@ var _tex: Texture2D = null
 var _moving := false
 var _busy := false             # انیمیشن یک‌باره در جریان است (حمله/ضربه)
 var _dead := false
-var _attack_anim := "1H_Melee_Attack_Stab"
+var _attack_anim := "SwordSlash"
 ## آخرین تینتِ اعمال‌شده — برای تست خودکار و دیباگ (display_color)
 var _tint := Color.WHITE
 var _tint_k := 0.0
@@ -87,7 +74,7 @@ var _tint_k := 0.0
 ## ساخت و آماده‌سازی — قبل از add_child صدا زده می‌شود (به درخت نیاز ندارد)
 func setup(kind: StringName, tint: Color, tint_k := 0.42,
                 special: Dictionary = {}) -> void:
-        _kind = kind if KINDS.has(kind) else &"knight"
+        _kind = kind if KINDS.has(kind) else &"warrior"
         var cfg: Dictionary = KINDS[_kind]
         var path: String = MODEL_DIR + String(cfg["file"])
         if not _scene_cache.has(path):
@@ -99,10 +86,12 @@ func setup(kind: StringName, tint: Color, tint_k := 0.42,
         _root = ps.instantiate() as Node3D
         if _root == null:
                 return
+        # گام ۶R۱۲ — ضدِ کرش: آزادشدنِ مدل، انیمیشن‌پلیر را null می‌کند تا
+        # هیچ فریمِ بعدی روی شیءِ مرده کار نکند
+        _root.tree_exiting.connect(_on_root_freed)
         add_child(_root)
         if cfg.has("attack"):
                 _attack_anim = String(cfg["attack"])
-        _prune_gear(cfg)
         _setup_anim()
         _collect_and_tint(tint, tint_k, special)
         _normalize_height()
@@ -112,26 +101,13 @@ func body_root() -> Node3D:
         return _root
 
 
+func _on_root_freed() -> void:
+        _anim = null
+        _mats.clear()
+        _mat_colors.clear()
+
+
 # ---------------- آماده‌سازی ----------------
-
-## حذفِ سلاح‌های واریانت‌های دیگر — فقط تجهیزِ این نقش دیده می‌شود
-func _prune_gear(cfg: Dictionary) -> void:
-        var hide: Array = cfg.get("hide", [])
-        for n in hide:
-                var node := _find_by_name(_root, String(n))
-                if node != null:
-                        node.visible = false
-
-
-func _find_by_name(root: Node, wanted: String) -> Node:
-        if root.name == StringName(wanted):
-                return root
-        for c in root.get_children():
-                var r := _find_by_name(c, wanted)
-                if r != null:
-                        return r
-        return null
-
 
 func _setup_anim() -> void:
         var players := _root.find_children("*", "AnimationPlayer", true, false)
@@ -139,11 +115,14 @@ func _setup_anim() -> void:
                 return
         _anim = players[0] as AnimationPlayer
         # لوپِ حالت‌های پیوسته
-        for a in [A_IDLE, A_WALK, A_RUN, A_BLOCK, "Unarmed_Idle"]:
+        for a in [A_IDLE, A_WALK, "Run"]:
                 if _anim.has_animation(a):
                         _anim.get_animation(a).loop_mode = Animation.LOOP_LINEAR
         _anim.animation_finished.connect(_on_anim_finished)
         _play(A_IDLE)
+        # گام ۶R۱۲ — فازِ تصادفیِ آیدل: سربازها هم‌زمان و ماشینی نفس نمی‌کشند
+        if _anim.has_animation(A_IDLE):
+                _anim.seek(_anim.get_animation(A_IDLE).length * randf(), true)
 
 
 ## متریال‌ها per-instance + گِرَش رنگ تیم
@@ -164,27 +143,11 @@ func _collect_and_tint(tint: Color, tint_k: float, special: Dictionary) -> void:
                                 if _tex == null and sm.albedo_texture != null:
                                         _tex = sm.albedo_texture
         apply_team_tint(tint, tint_k)
-        # تینت ویژه‌ی یک گره (مثلاً سپر فیروزه‌ای جاویدان)
-        for node_name in special:
-                var node := _find_by_name(_root, String(node_name))
-                if node is MeshInstance3D:
-                        var mi2 := node as MeshInstance3D
-                        var col: Color = special[node_name]
-                        for i in mi2.mesh.get_surface_count():
-                                var m2 := mi2.get_active_material(i)
-                                if m2 is StandardMaterial3D:
-                                        var sm2 := (m2 as StandardMaterial3D) \
-                                                        .duplicate() \
-                                                        as StandardMaterial3D
-                                        sm2.albedo_color = Color.WHITE.lerp(col, 0.8)
-                                        mi2.set_surface_override_material(i, sm2)
 
 
-## گِرَش همه‌ی متریال‌ها به رنگ تیم — میکس پیش‌فرض ۴۲٪ تا بافت پالت کاراکتر
-## حفظ شود (بازخورد اسکرین‌شات‌های Bad North: دسته‌ها باید از دور قابل‌تفکیک
-## باشند ولی «شکل» کاراکتر زیر رنگ گم نشود).
-## رنگِ تینت‌شده جایگزین رنگ پایه در حافظه می‌شود تا فلشِ سفیدِ ضربه بعد از
-## بازیابی، تینتِ تیم را از دست ندهد.
+## گِرَش همه‌ی متریال‌ها به رنگ تیم — میکس پیش‌فرض ۴۲٪ تا شکلِ کاراکتر زیر رنگ
+## گم نشود. رنگِ تینت‌شده جایگزین رنگ پایه در حافظه می‌شود تا فلشِ سفیدِ ضربه
+## بعد از بازیابی، تینتِ تیم را از دست ندهد.
 func apply_team_tint(tint: Color, tint_k := 0.42) -> void:
         _tint = tint
         _tint_k = tint_k
@@ -199,14 +162,14 @@ func display_color() -> Color:
         return _tint
 
 
-## توقفِ فوریِ انیمیشن در ژستِ فعلی — هنگام مرگ (افتادن با چرخشِ کلِ نود)
+## توقفِ فوریِ انیمیشن در ژستِ فعلی — برای جسدِ یخ‌زده (اگر لازم شود)
 func freeze_pose() -> void:
         _busy = false
         if _anim != null:
                 _anim.pause()
 
 
-## هم‌ارزسازی قد — GLB پک حدود ۱٫۹ واحد است؛ به TARGET_HEIGHT می‌رسیم
+## هم‌ارزسازی قد — مدل‌ها ~۲٫۹–۳٫۶ واحد ایمپورت می‌شوند؛ به TARGET_HEIGHT می‌رسیم
 func _normalize_height() -> void:
         var top := _scan_top(_root, Transform3D.IDENTITY)
         if top > 0.1:
@@ -275,15 +238,10 @@ func play_hit() -> void:
                 _play(A_HIT, 1.4, 0.08)
 
 
-## ایستِ سپری جاویدان — لوپِ Blocking تا پایان نبرد
-func set_blocking(on: bool) -> void:
-        if _dead or _anim == null:
-                return
-        if on and _anim.has_animation(A_BLOCK):
-                _busy = false
-                _play(A_BLOCK)
-        elif not on:
-                _apply_locomotion()
+## ایستِ سپری — پک‌های Quaternius انیمیشن Blocking ندارند؛ no-op امن
+## (حالتِ نبردِ جاویدان با play_attack و تینت سپر خوانا می‌ماند)
+func set_blocking(_on: bool) -> void:
+        pass
 
 
 func play_death() -> void:
@@ -315,7 +273,7 @@ func _restore_flash() -> void:
                 _mats[i].albedo_color = _mat_colors[i]
 
 
-## محوِ جسد — متریال‌ها ALPHA و آلفا به صفر (جایگزین فیدِ متریالِ تکی)
+## محوِ جسد — متریال‌ها ALPHA و آلفا به صفر (فرار از جزیره)
 func fade_out(secs: float) -> void:
         if _mats.is_empty():
                 return

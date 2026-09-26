@@ -242,7 +242,9 @@ func generate(seed_value: int, grid_size: int = 32) -> Dictionary:
                 rng.seed = hash("%d:%d" % [seed_value, attempt])
                 _phase1 = rng.randf() * TAU
                 _phase2 = rng.randf() * TAU
-                _radius0 = 0.72 + rng.randf() * 0.08  # §۸.۳: خشکیِ بازی‌پذیر ≥ ~۴۰٪ مساحت
+                ## گام ۶R۱۲ — «جزیره زیاده بزرگ بود»: شعاع پایه ۰٫۷۲→۰٫۵۶
+                ## (قطرِ خشکی ~۱۷–۱۹m به‌جای ~۲۳m — نسبت سرباز/جزیره مثل مرجع)
+                _radius0 = 0.56 + rng.randf() * 0.06
                 var grid := _attempt(rng)
                 if grid.is_empty():
                         last_stats["contradiction"] += 1
@@ -278,10 +280,11 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
                 if walkable[i] == 1:
                         walk += 1
         var frac := float(land) / float(n)
-        if frac < 0.20 or frac > 0.62:
+        # گام ۶R۱۲ — جزیره‌ی کوچک‌تر: کرانِ خشکی ۰٫۱۴–۰٫۵۵ (قبلاً ۰٫۲۰–۰٫۶۲)
+        if frac < 0.14 or frac > 0.55:
                 return {"reason": "land_fraction"}
-        # §۸.۳ پرامت: «منطقه‌ی قابل‌عبور ≥ ۴۰٪ کل مساحت»
-        if float(walk) < float(n) * 0.40:
+        # §۸.۳ — نسخه‌ی ۶R۱۲: «قابل‌عبور ≥ ۲۱٪» با جزیره‌ی کوچک‌تر (قبلاً ۴۰٪)
+        if float(walk) < float(n) * 0.21:
                 return {"reason": "walkable_fraction"}
         # --- پس‌پردازش اتصال: «جزیره‌های شنیِ ریز» را در آب ذوب کن ---
         # در نوار ساحلی گاهی یک تک‌کاشی شن وسط آب می‌ماند؛ این جزیره‌های کوچک
@@ -320,7 +323,7 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
         for ci in comps.size():
                 if comps[ci].size() > comps[biggest].size():
                         biggest = ci
-        if comps[biggest].size() < 100:
+        if comps[biggest].size() < 90:
                 return {"reason": "too_small"}
         var water_module := -1
         for m in _mods.size():

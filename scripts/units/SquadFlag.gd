@@ -14,6 +14,7 @@ extends Node3D
 
 const FLAG_SHADER := "
 shader_type spatial;
+render_mode cull_disabled;
 uniform vec4 albedo : source_color = vec4(0.9, 0.85, 0.7, 1.0);
 uniform float wave_amp = 0.085;
 uniform float wave_freq = 8.0;
@@ -36,6 +37,9 @@ void fragment() {
 }"
 
 var _cloth_mat: ShaderMaterial
+## گام ۶R۱۲ — هولدرِ بیلبورد: پارچه همیشه رو به زاویه‌ی دید کاربر است
+## (بازخورد کاربر: «پرچم باید دائم به زاویه‌ی دید کاربر باشه»)
+var _cloth_holder: Node3D
 
 
 func _ready() -> void:
@@ -72,6 +76,9 @@ func _ready() -> void:
         add_child(tip)
 
         # پارچه‌ی موج‌دار — صفحه‌ی عمودی؛ لبه‌ی چپ چسبیده به دَرَک
+        # گام ۶R۱۲ — پارچه زیر هولدرِ بیلبورد می‌نشیند (چرخشِ Y هر فریم)
+        _cloth_holder = Node3D.new()
+        add_child(_cloth_holder)
         var cloth := MeshInstance3D.new()
         var plane := PlaneMesh.new()
         plane.size = Vector2(GameConstants.SQUAD_FLAG_W, GameConstants.SQUAD_FLAG_H)
@@ -88,13 +95,29 @@ func _ready() -> void:
         _cloth_mat.shader = sh
         _cloth_mat.set_shader_parameter("albedo", GameConstants.COL_IVORY)
         cloth.material_override = _cloth_mat
-        add_child(cloth)
+        _cloth_holder.add_child(cloth)
 
 
 ## رنگ پرچم = رنگ دسته (هر دسته پرچم خاص خودش)
 func set_color(c: Color) -> void:
         if _cloth_mat != null:
                 _cloth_mat.set_shader_parameter("albedo", c)
+
+
+## گام ۶R۱۲ — بیلبورد: پارچه هر فریم رو به دوربین می‌چرخد (فقط محور Y —
+## پرچم هیچ‌وقت خوابیده/پشت‌به‌دوربین نمی‌شود)
+func _process(_delta: float) -> void:
+        if _cloth_holder == null:
+                return
+        var cam := get_viewport().get_camera_3d()
+        if cam == null:
+                return
+        var to_cam := cam.global_position - global_position
+        to_cam.y = 0.0
+        if to_cam.length_squared() < 0.0001:
+                return
+        # وجهِ دیدنیِ پارچه (−Z محلی) به سمت دوربین
+        _cloth_holder.rotation.y = atan2(-to_cam.x, -to_cam.z)
 
 
 func flag_color() -> Color:

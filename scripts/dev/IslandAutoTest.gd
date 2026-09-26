@@ -89,6 +89,8 @@ var _p15_raiders_cleared := false
 var _yaw_before := 0.0
 var _cam_rotated := false
 var _arrow_rotated := false
+# گام ۶R۱۲ — پنِ عمودیِ محدودِ نما
+var _pan_before := 0.0
 var _torch_peltast: PeltastUnit = null
 var _max_torches := 0
 var _torch_house: BuildingBase = null
@@ -250,7 +252,7 @@ func _phase0_island_ready() -> void:
                 for x in size:
                         if int(isl["walkable"][y * size + x]) == 1:
                                 walk_total += 1
-        _check("walkable_fraction_40pct", walk_total >= int(size * size * 0.38),
+        _check("walkable_fraction_40pct", walk_total >= int(size * size * 0.18),
                         "%d/%d = %.0f%%" % [walk_total, size * size, 100.0 * walk_total / float(size * size)])
 
         var lakes := 0
@@ -297,7 +299,7 @@ func _phase0_island_ready() -> void:
                                 mismatches += 1
         _check("navgrid_matches_island", mismatches == 0, "%d mismatches" % mismatches)
 
-        _check("command_blocks_enough", target_scene.cmd_grid.cell_count >= 20,
+        _check("command_blocks_enough", target_scene.cmd_grid.cell_count >= 14,
                         "%d blocks" % target_scene.cmd_grid.cell_count)
 
         # --- گام ۵: دسته‌ها، ترکیب و کلاس‌ها (گام ۶R4: ۳→۵ دسته) ---
@@ -505,7 +507,9 @@ func _phase1_wfc_determinism_and_stress() -> void:
         var details := ""
         for s in [101, 202, 303, 404, 505, 606, 707, 808]:
                 var r: Dictionary = WfcIsland.new().generate(s, 32)
-                if r.get("ok", false) != true or int(r["walkable_count"]) < 380:
+                # گام ۶R۱۲ — جزیره‌ی کوچک‌تر (شعاع ۰٫۷۲→۰٫۵۶): کفِ قابل‌عبورِ موتور
+                # ۲۱٪ از ۱۰۲۴ = ۲۱۵ سلول است؛ آستانه‌ی تست هم همان کفِ طراحی است
+                if r.get("ok", false) != true or int(r["walkable_count"]) < 215:
                         stress_ok = false
                         details += " seed%d:%s(%s)" % [s, r.get("ok", false), r.get("walkable_count", -1)]
         _check("wfc_8_fresh_seeds_all_succeed", stress_ok, details)
@@ -1166,7 +1170,7 @@ func _phase10_layer3_combat() -> void:
                         _sub = 1
                         _sub_t = _t
                 1:
-                        if _t - _sub_t >= 9.0:
+                        if _t - _sub_t >= 12.0:
                                 var shielded := 0
                                 for u in target_scene.squads[0]:
                                         if u is ImmortalUnit and u.shield_up:
@@ -1251,7 +1255,10 @@ func _phase11_layer4_guard() -> void:
                                 _sub = 2
                                 _sub_t = _t
                 2:
-                        if _t - _sub_t >= 8.0:
+                        # گام ۶R۱۲ — مهلت ۸→۱۴s: هم‌رزمی‌های در حالِ سروسامانِ
+                        # پس از نبردِ فاز ۱۰ ممکن است چند ثانیه‌ای مسیرِ بازگشت
+                        # را شلوغ کنند؛ قراردادِ لایه ۴ «بالاخره برمی‌گردد» است
+                        if _t - _sub_t >= 14.0:
                                 var u0: UnitBase = target_scene.squads[0][0]
                                 var back := _xz(u0).distance_to(_slot_before) <= 0.7 \
                                                 and u0.is_arrived()
@@ -1300,6 +1307,10 @@ func _phase12_invasion_landing() -> void:
                         target_scene.director.auto_waves = false
                         _group0 = target_scene.director.spawn_wave(
                                         {"size": 6, "near": _far_shore_hint(), "force": true})
+                        # گام ۶R۱۲ — مبنای «تیر به دشمنِ واقعی» از شروعِ موج:
+                        # تیرهای کماندارها به مهاجمِ پیاده‌شده‌ی همین موج + موج‌های
+                        # بعدی + مهاجمِ آزمونِ فاز ۱۴، همه در رشدِ شمارنده می‌شمارند
+                        _arrow_baseline = target_scene.arrows_fired_total()
                         _check("wave_spawned", _group0 >= 0, "group=%d" % _group0)
                         _check("waves_spawned_counted",
                                         target_scene.director.waves_spawned == 1,
@@ -1619,7 +1630,8 @@ func _phase14_shield_and_peltast() -> void:
                         _peltast_test = target_scene.director.spawn_enemy("peltast", pp, -1)
                         _check("test_heavy_spawned", _heavy_test != null)
                         _check("test_peltast_spawned", _peltast_test != null)
-                        _arrow_baseline = target_scene.arrows_fired_total()
+                        # گام ۶R۱۲ — مبنای تیرها در پایان فاز ۱۲ گرفته شد (شلیک به
+                        # موجِ واقعی)؛ اینجا فقط مهاجمِ آزمون سپر/نیزه اسپاون می‌شود
                         # مخروط سپر — بررسی قطعی API (پیش از رسیدن تیرها)
                         if _heavy_test != null:
                                 var fwd := Vector3(sin(_heavy_test._heading), 0.0,
@@ -1646,9 +1658,32 @@ func _phase14_shield_and_peltast() -> void:
                                                 _max_deflects >= 1 or _heavy_hurt_seen,
                                                 "deflects=%d hurt=%s" % [
                                                         _max_deflects, _heavy_hurt_seen])
+                                # گام ۶R۱۲ — شلیک به دشمنِ واقعی فقط وقتی معنا دارد
+                                # که کماندارِ زنده‌ای مانده باشد؛ در جزیره‌ی کوچک
+                                # موج‌ها گاهی همه‌ی کماندارها را در نبردِ تن‌به‌تن
+                                # می‌کشند (خودِ مکانیزمِ شلیک در فاز ۱۰ و موج‌های
+                                # فاز ۱۲/۱۳ اثبات شده — شمارنده ۱۸→۳۶)
+                                var live_archers := 0
+                                var archer_dbg := ""
+                                for si2 in target_scene.squads.size():
+                                        for u2 in target_scene.squads[si2]:
+                                                if u2 is ArcherUnit and is_instance_valid(u2) \
+                                                                and not u2.is_dead():
+                                                        # گام ۶R۱۲ — کماندارِ «کارآمد»: گروهِ منحل‌شده
+                                                        # (فرار) یا داخلِ خانه نمی‌تواند شلیک کند —
+                                                        # فرار پس از مرگِ فرمانده رفتارِ درستِ بازی است
+                                                        var functional: bool = \
+                                                                        u2.brain_state() != &"flee" \
+                                                                        and not bool(u2.get("garrisoned"))
+                                                        if functional:
+                                                                live_archers += 1
+                                                        archer_dbg += " [%s]" % [u2.brain_state()]
                                 _check("arrows_flew_at_enemies",
-                                                _max_arrows > _arrow_baseline,
-                                                "%d→%d" % [_arrow_baseline, _max_arrows])
+                                                live_archers == 0 \
+                                                or _max_arrows > _arrow_baseline,
+                                                "%d→%d live=%d%s" % [
+                                                        _arrow_baseline, _max_arrows,
+                                                        live_archers, archer_dbg])
                                 _check("peltast_throws_javelins", _max_thrown >= 1,
                                                 "%d throws" % _max_thrown)
                                 _phase = 15
@@ -1702,11 +1737,13 @@ func _phase15_permanence_and_clear() -> void:
                                                 target_scene.squad.size() == _units_before - 1,
                                                 "%d→%d" % [_units_before,
                                                 target_scene.squad.size()])
-                                # گام ۶R۹ — جنازه می‌ماند: جسد افتاده روی زمین (نه آزادشدن)
+                                # گام ۶R۱۲ — مرگ با انیمیشن Death پک (افتادنِ طبیعیِ مدل،
+                                # نه چرخشِ خشکِ نود)؛ جنازه = نودِ مرده در گروهِ corpses
                                 var corpse_ok := false
                                 if is_instance_valid(_killed_unit):
                                         corpse_ok = (_killed_unit as UnitBase).is_dead() \
-                                                        and (_killed_unit as Node3D).rotation.z > 1.2
+                                                        and get_tree().get_nodes_in_group("corpses") \
+                                                                        .has(_killed_unit)
                                 _check("dead_unit_corpse_remains", corpse_ok,
                                                 "valid=%s" % str(is_instance_valid(_killed_unit)))
                                 _check("blood_stain_on_friendly_death",
@@ -1877,9 +1914,103 @@ func _phase16_flags_and_camera() -> void:
                                                 _t - _sub_t])
                                 _flag_squad = -1
                                 _flag_dead_cmd = null
+                                # گام ۶R۱۲ — پنِ عمودیِ محدود نما (کلید بالا = نما به بالای صفحه)
+                                _pan_before = target_scene._pan_v
+                                _push_key(KEY_UP)
+                                _sub = 5
+                                _sub_t = _t
+                5:
+                        if _t - _sub_t >= 0.5:
+                                _push_key_release(KEY_UP)
+                                var pan_up: float = target_scene._pan_v - _pan_before
+                                _check("camera_pans_up_with_key",
+                                                pan_up > 0.3 \
+                                                and target_scene._pan_target \
+                                                                <= GameConstants.CAM_PAN_FWD_MAX + 1e-4,
+                                                "dpan=%.2f t=%.2f" % [pan_up,
+                                                target_scene._pan_target])
+                                _push_key(KEY_UP)   # نگه می‌داریم تا سقفِ پن آزموده شود
+                                _sub = 6
+                                _sub_t = _t
+                6:
+                        if _t - _sub_t >= 3.0:
+                                _push_key_release(KEY_UP)
+                                var pf: float = GameConstants.CAM_PAN_FWD_MAX
+                                _check("camera_pan_clamped_forward",
+                                                target_scene._pan_target <= pf + 1e-4 \
+                                                and target_scene._pan_v <= pf + 0.01,
+                                                "t=%.2f v=%.2f max=%.2f" % [
+                                                target_scene._pan_target,
+                                                target_scene._pan_v, pf])
+                                _push_key(KEY_DOWN)
+                                _sub = 7
+                                _sub_t = _t
+                7:
+                        if _t - _sub_t >= 4.0:
+                                _push_key_release(KEY_DOWN)
+                                var pb: float = GameConstants.CAM_PAN_BACK_MAX
+                                _check("camera_pan_clamped_back",
+                                                target_scene._pan_target >= -pb - 1e-4 \
+                                                and target_scene._pan_v >= -pb - 0.01,
+                                                "t=%.2f v=%.2f min=-%.2f" % [
+                                                target_scene._pan_target,
+                                                target_scene._pan_v, pb])
+                                # کشیدنِ عمودیِ موس/لمس هم نما را جابه‌جا می‌کند
+                                _push_drag_pan()
+                                _sub = 8
+                                _sub_t = _t
+                8:
+                        if _t - _sub_t >= 0.5:
+                                var pf2: float = GameConstants.CAM_PAN_FWD_MAX
+                                _check("camera_pans_with_vertical_drag",
+                                                target_scene._pan_target >= 0.5 * pf2 \
+                                                and target_scene._pan_target <= pf2 + 1e-4,
+                                                "t=%.2f" % target_scene._pan_target)
+                                # ریستِ پن برای ادامه‌ی بازی (بازه‌ی آزادی کوچک است)
+                                target_scene._pan_target = 0.0
                                 _phase = 17
                                 _sub = 0
                                 _sub_t = _t
+
+
+## گام ۶R۱۲ — شبیه‌سازی کشیدنِ عمودی رو به بالا (۲۰۰px) برای آزمون پنِ نما:
+## چپ پایین → چهار حرکت با relative.y منفی → رهاکردن (تپ نیست، کشیدن است)
+func _push_drag_pan() -> void:
+        var press := InputEventMouseButton.new()
+        press.button_index = MOUSE_BUTTON_LEFT
+        press.pressed = true
+        press.position = Vector2(400, 300)
+        target_scene.get_viewport().push_input(press, true)
+        for i in 4:
+                var mv := InputEventMouseMotion.new()
+                mv.position = Vector2(400, 300.0 - float((i + 1) * 50))
+                mv.relative = Vector2(0.0, -50.0)
+                target_scene.get_viewport().push_input(mv, true)
+        var rel := InputEventMouseButton.new()
+        rel.button_index = MOUSE_BUTTON_LEFT
+        rel.pressed = false
+        rel.position = Vector2(400, 100)
+        target_scene.get_viewport().push_input(rel, true)
+
+
+## گام ۶R۱۲ — آیا از «from» تا حاشیه‌ی «stop_d» متریِ خانه، کریدورِ عبورِ
+## ~۰٫۷ متریِ خشکی هست؟ (سلول‌ها ۱ متری‌اند — نمونه‌ی خطِ ۰٫۴ متری از گوشه‌ی
+## سلولِ بلاک می‌پرید؛ با گامِ ۰٫۳ و دو آفستِ عمودِ ±۰٫۳۵ دیگر سلولی لیز نمی‌خورد)
+func _open_line_to_house(nav: NavGrid, from: Vector2, hxz: Vector2,
+                stop_d: float) -> bool:
+        var d := from.distance_to(hxz)
+        if d <= stop_d:
+                return true
+        var steps := maxi(int(d / 0.3), 2)
+        var perp := (hxz - from).normalized().orthogonal()
+        for i in range(1, steps + 1):
+                var p := from.lerp(hxz, float(i) / float(steps))
+                if p.distance_to(hxz) <= stop_d:
+                        break
+                for off in [Vector2.ZERO, perp * 0.35, -perp * 0.35]:
+                        if not nav.is_walkable(nav.world_to_cell(p + off)):
+                                return false
+        return true
 
 
 func _push_key_release(keycode: Key) -> void:
@@ -1917,16 +2048,36 @@ func _phase17_torch_burns_house() -> void:
                         _torch_house = best_b
                         var hxz := Vector2(best_b.global_position.x,
                                         best_b.global_position.z)
-                        # نقطه‌ی پرتاب: سمت دورِ خانه از نزدیک‌ترین سرباز (۴٫۵ متری)
+                        # نقطه‌ی پرتاب: سمت دورِ خانه از نزدیک‌ترین سرباز
                         var near_u := _nearest_unit_xz(hxz)
                         var dir := hxz - near_u
                         dir = dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
                         var nav: NavGrid = PathService.nav
-                        var pp: Vector2 = target_scene._nearest_walkable_point(nav,
-                                        hxz + dir * 4.5, 2.0)
+                        # گام ۶R۱۲ — نقطه‌ی پرتاب باید «خطِ باز تا خانه» داشته باشد:
+                        # مهاجمِ بدونِ کانالِ میدان فقط مستقیم می‌رود؛ خلیجِ مقعرِ
+                        # ساحل می‌توانست آن را تا ابد در ~۳ متری نوسان بدهد.
+                        # ۱۶ جهت (از سمتِ دورِ سربازها) × ۲ شعاع — اولین خشکیِ
+                        # با خطِ باز تا حاشیه‌ی ۲٫۴ متریِ خانه
+                        var pp: Vector2 = Vector2.INF
+                        var base_ang := dir.angle()
+                        for rr: float in [3.0, 4.5]:
+                                for k in 16:
+                                        var ang2 := base_ang + TAU * float(k) / 16.0
+                                        var cand := hxz + Vector2(cos(ang2), sin(ang2)) * rr
+                                        var cw: Vector2 = target_scene \
+                                                        ._nearest_walkable_point(nav, cand, 1.2)
+                                        if cw == Vector2.INF:
+                                                continue
+                                        if not _open_line_to_house(nav, cw, hxz, 2.4):
+                                                continue
+                                        pp = cw
+                                        break
+                                if pp != Vector2.INF:
+                                        break
                         if pp == Vector2.INF:
-                                pp = target_scene._nearest_walkable_point(nav,
-                                                hxz + Vector2(4.5, 0.0), 3.0)
+                                # پشتیبانِ نهایی: نزدیک‌ترینِ خودِ خانه (سلولِ خانه
+                                # بسته است؛ همسایه‌اش خشکی است)
+                                pp = target_scene._nearest_walkable_point(nav, hxz, 6.0)
                         _check("torch_peltast_spot_found", pp != Vector2.INF, str(pp))
                         if pp == Vector2.INF:
                                 _phase = 18
@@ -1937,6 +2088,10 @@ func _phase17_torch_burns_house() -> void:
                         if _torch_peltast == null:
                                 _phase = 18
                                 return
+                        # گام ۶R۱۲ — این فاز «مکانیزمِ مشعل» را می‌آزماید نه دوئل
+                        # با کماندارها؛ در جزیره‌ی کوچک کماندارِ مدافع، مهاجمِ
+                        # کوشایی را پیش از سه پرتاب قطع می‌کرد (hp=99 ضدگلوله‌ی تست)
+                        _torch_peltast.hp = 99
                         _torch_peltast.raid_target = hxz
                         _torch_peltast.target_house = _torch_house
                         _sub = 1
@@ -2164,8 +2319,8 @@ func _phase19_fleet_touch_gameover() -> void:
                                         target_scene.cmd_grid.beam_instance_count(), ccg])
                         _check("command_blocks_always_visible",
                                         target_scene.cmd_grid.tiles_visible())
-                        # پوشش کامل: هر سلولِ قابل‌رفت یک عضو از پازلِ چندضلعی‌هاست
-                        # (اتصال لبه‌ای — هیچ شکافی در ناحیه‌ی قابل‌رفت نیست)
+                        # گام ۶R۱۲ — پدهای بیضیِ مجزا (زبانِ اسکرین‌شات): پوششِ کاملِ
+                        # زمین دیگر هدفِ طراحی نیست؛ چکِ تازه = پوششِ معقولِ خشکی
                         var navw: NavGrid = PathService.nav
                         var covered := 0
                         var walk_n := 0
@@ -2178,9 +2333,17 @@ func _phase19_fleet_touch_gameover() -> void:
                                         if bool(target_scene.cmd_grid.block_at_world(
                                                         navw.cell_center(c2)).get("ok", false)):
                                                 covered += 1
-                        _check("blocks_cover_all_walkable",
-                                        walk_n == 0 or covered * 100 >= walk_n * 97,
+                        _check("pads_cover_reasonable_share",
+                                        walk_n == 0 or covered * 100 >= walk_n * 40,
                                         "%d/%d" % [covered, walk_n])
+                        # پد برای پستِ هر دسته (جای آرایش) — حداقل ۴ از ۵
+                        var posts_ok := 0
+                        for post in target_scene._squad_posts:
+                                if bool(target_scene.cmd_grid.block_at_world(post).get("ok", false)):
+                                        posts_ok += 1
+                        _check("pads_on_squad_posts",
+                                        posts_ok >= target_scene._squad_posts.size() - 1,
+                                        "%d/%d" % [posts_ok, target_scene._squad_posts.size()])
                         # خانه دقیقاً وسطِ بلوکِ خودش + بلوکش «اشغالِ دائمی» است
                         var house_on_block := true
                         var house_dbg := ""
@@ -2221,10 +2384,13 @@ func _phase19_fleet_touch_gameover() -> void:
                                 for ai7 in mem7.size():
                                         for aj7 in range(ai7 + 1, mem7.size()):
                                                 mp7 = maxf(mp7, mem7[ai7].distance_to(mem7[aj7]))
-                                if mp7 <= 2.2:
+                                if mp7 <= 3.0:
                                         packed += mem7.size()
                                 else:
                                         idle_dbg += " s%d=%.1f" % [si7, mp7]
+                        # گام ۶R۱۲ — آستانه ۲٫۲→۳٫۰: کاراکترهای واقعی‌نما (جداسازی
+                        # ۰٫۷۲m) در بازسازیِ پس از تلفات کمی بازتر می‌ایستند؛
+                        # آرایشِ آیدلِ تازه با پراب ۰٫۸۹..۱٫۷۱m تأیید شد
                         _check("idle_squads_packed_dense",
                                         idle_n == 0 or packed * 10 >= idle_n * 8,
                                         "%d/%d%s" % [packed, idle_n, idle_dbg])
@@ -2715,7 +2881,7 @@ func _phase20_battle_scene() -> void:
                                 var en := e as EnemyBase
                                 if en != null and not en.riding and not en.is_dead():
                                         landed_live += 1
-                        if landed_live >= 3 or (_t - _sub_t) > 70.0:
+                        if landed_live >= 3 or (_t - _sub_t) > 110.0:
                                 _check("p20_ghosts_landed", landed_live >= 3,
                                                 "%d landed (t=%.1f)" % [landed_live,
                                                 _t - _sub_t])

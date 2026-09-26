@@ -3,7 +3,7 @@ extends EnemyBase
 ## هوپلیت سنگین (§۶): کند، جانِ زیاد، «کمان را خنثی می‌کند — فقط از پشت/پهلو آسیب».
 ## سپر بزرگ رو به مدلِ +Z؛ تیر/پرتابی که از مخروطِ پیش‌رو بیاید روی سپر می‌شکند
 ## (جرقه‌ی سفید، بدون آسیب). ضربه‌ی تن‌به‌تن و پرتاب از پهلو-پشت معمولی اثر می‌کند.
-## گام ۶R8 — بصری: شبحِ بنفشِ عمیق + سپرِ لبه‌استخوانی — بدونِ کلاه‌خود (مرجعِ شبح)
+## گام ۶R12 — بصری: شهسوارِ قرمزِ تیره + سپرِ برنزیِ لبه‌دار (انسانی، نه شبح)
 
 var deflects := 0          # شمار تیرهای خنثی‌شده — برای تست خودکار
 var _shield: MeshInstance3D
@@ -23,39 +23,40 @@ func _default_hp() -> int:
 
 
 func _default_color() -> Color:
-        return GameConstants.COL_GHOST_HEAVY
+        return GameConstants.COL_ENEMY_HEAVY
+
+
+## گام ۶R12 — شهسوار (Knight_Male پک Quaternius Ultimate)
+func _model_kind() -> StringName:
+        return &"knight_heavy"
 
 
 func _build_gear() -> void:
-        # تنه‌ی تنومندتر
-        _body.scale = Vector3(1.12, 1.06, 1.12)
-
         # گام ۶R9 — شمشیرِ برنز در دستِ راست: ضربه‌ی سنگینِ او اکنون «دیده می‌شود»
         _swing_weapon = WeaponLook.sword(Color("c9963c"), 0.44)
         _swing_weapon.rotation_degrees.z = -14.0
         _hand.add_child(_swing_weapon)
-        GhostLook.add_hand(self, Vector3(0.19, 0.4, 0.1))
 
-        # سپر بزرگ مستطیلی رو به +Z (سمت نگاه) — جلوی شکمِ چینی
+        # سپر بزرگ مستطیلی رو به +Z (سمت نگاه) — جلوی تنه
         _shield = MeshInstance3D.new()
         var sm := BoxMesh.new()
-        sm.size = Vector3(0.54, 0.64, 0.06)
+        sm.size = Vector3(0.5, 0.6, 0.06)
         _shield.mesh = sm
-        _shield.position = Vector3(-0.04, 0.36, 0.3)
+        _shield.position = Vector3(-0.06, 0.42, 0.28)
         var shield_mat := StandardMaterial3D.new()
-        shield_mat.albedo_color = GameConstants.COL_GHOST_SHIELD
+        shield_mat.albedo_color = GameConstants.COL_ENEMY_SHIELD
         shield_mat.roughness = 0.55
         _shield.material_override = shield_mat
         add_child(_shield)
 
-        # لبه‌ی استخوانی سپر — گام ۶R8 (به‌جای برنزِ طلایی، هماهنگ با مرجعِ شبح)
+        # لبه‌ی برنزی سپر
         var rim := MeshInstance3D.new()
         var rm := BoxMesh.new()
-        rm.size = Vector3(0.6, 0.06, 0.07)
+        rm.size = Vector3(0.56, 0.06, 0.07)
         rim.mesh = rm
-        rim.position = Vector3(-0.04, 0.67, 0.3)
+        rim.position = Vector3(-0.06, 0.71, 0.28)
         var rim_mat := StandardMaterial3D.new()
-        rim_mat.albedo_color = GameConstants.COL_GHOST_BONE
+        rim_mat.albedo_color = Color("b98d4a")
         rim_mat.roughness = 0.5
         rim.material_override = rim_mat
         add_child(rim)

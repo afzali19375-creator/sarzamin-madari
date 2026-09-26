@@ -1,0 +1,4 @@
+Quaternius — Ultimate Animated Character Pack (2020)
+License: CC0 1.0 (public domain) — https://quaternius.com
+Source: quaternius.com/packs/ultimatedanimatedcharacter.html
+Files: Viking_Male.gltf, Knight_Male.gltf, Soldier_Male.gltf

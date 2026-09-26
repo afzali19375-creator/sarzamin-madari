@@ -18,6 +18,7 @@ static var _sfx_played := 0
 
 
 ## پاشش خون در نقطه‌ی برخورد — dir جهت ضربه است (صفر = پاشش عمودی)
+## گام ۶R۱۲ — «خون و ضربه باید باشه»: پاششِ پرتُر و بزرگ‌تر (۲۲ ذره، قطر ۲×)
 static func blood_burst(host: Node, at: Vector3, dir: Vector3, col: Color) -> void:
         if host == null or not host.is_inside_tree():
                 return
@@ -25,19 +26,19 @@ static func blood_burst(host: Node, at: Vector3, dir: Vector3, col: Color) -> vo
         p.add_to_group("blood_burst")
         p.one_shot = true
         p.explosiveness = 1.0
-        p.amount = 14
-        p.lifetime = 0.55
+        p.amount = 22
+        p.lifetime = 0.6
         p.direction = Vector3(dir.x, 0.55, dir.z) if dir.length() > 0.01 \
                         else Vector3.UP
-        p.spread = 48.0
-        p.initial_velocity_min = 1.4
-        p.initial_velocity_max = 2.6
-        p.gravity = Vector3(0.0, -8.5, 0.0)
-        p.scale_amount_min = 0.6
-        p.scale_amount_max = 1.25
+        p.spread = 52.0
+        p.initial_velocity_min = 1.7
+        p.initial_velocity_max = 3.2
+        p.gravity = Vector3(0.0, -9.0, 0.0)
+        p.scale_amount_min = 0.8
+        p.scale_amount_max = 1.7
         var sm := SphereMesh.new()
-        sm.radius = 0.033
-        sm.height = 0.066
+        sm.radius = 0.05
+        sm.height = 0.1
         sm.radial_segments = 6
         sm.rings = 3
         p.mesh = sm
@@ -62,14 +63,14 @@ static func blood_stain(host: Node, xz: Vector2, ground_y: float,
         var s := MeshInstance3D.new()
         s.add_to_group("blood_stain")
         var cm := CylinderMesh.new()
-        cm.top_radius = 0.24 + randf() * 0.16
+        cm.top_radius = 0.3 + randf() * 0.2
         cm.bottom_radius = cm.top_radius
         cm.height = 0.012
         cm.radial_segments = 12
         s.mesh = cm
         var m := StandardMaterial3D.new()
         var c := col.darkened(randf() * 0.25)
-        c.a = 0.82
+        c.a = 0.85
         m.albedo_color = c
         m.roughness = 0.65
         m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
