@@ -27,6 +27,8 @@ const CORNER_R := GameConstants.COMMAND_TILE_CORNER       # نرمی گوشه‌
 const SKIRT_H := GameConstants.COMMAND_TILE_SKIRT_H       # بلندی دیوار نور (m)
 const HOVER_SKIRT_H := SKIRT_H * 1.7
 const OWNER_OCCUPIED := -1        # تایلِ خانه‌ها — هرگز به سرباز نمی‌رسد
+## مالکِ تایلِ «دسته» (گام ۶R6) — شناسه‌های منفیِ دور از instance_idها
+const OWNER_SQUAD_BASE := -100000
 
 var size := 0
 var cell_count := 0
@@ -365,6 +367,35 @@ func claim_unique_tile(xz: Vector2, owner_id: int, max_r := 2.6) -> Vector2:
         release_owner(owner_id)
         if _nav == null or size == 0:
                 return xz
+        var best_cc := _find_free_tile(xz, max_r)
+        if best_cc.x < -100:
+                return xz
+        _claims[best_cc] = owner_id
+        return _cells[_by_cc[best_cc]]["center"]
+
+
+## گام ۶R6 — باگ ۴: «سربازهای یک دسته باید مثل Bad North در یک بلوک متراکم
+## جمع شوند؛ اشکالی ندارد کاملاً فشرده باشند». کل دسته روی «یک تایل» می‌نشیند:
+## خروجی = count موقعیتِ فشرده (شبکه‌ی چلیک بدون خلأ) داخل همان تایل.
+## تایلِ دسته با مالکِ ویژه (OWNER_SQUAD_BASE + squad_key) ثبت می‌شود تا
+## با تایل‌های تک‌سربازه (claim_unique_tile — خروج گاریسون) تداخل نکند.
+func claim_squad_block(xz: Vector2, squad_key: int, count: int,
+                max_r := 3.4) -> Array[Vector2]:
+        var owner_id := OWNER_SQUAD_BASE + squad_key
+        release_owner(owner_id)
+        var out: Array[Vector2] = []
+        var tile_center := xz
+        if _nav != null and size > 0:
+                var best_cc := _find_free_tile(xz, max_r)
+                if best_cc.x > -100:
+                        _claims[best_cc] = owner_id
+                        tile_center = _cells[_by_cc[best_cc]]["center"]
+        _append_dense(out, tile_center, count)
+        return out
+
+
+## جست‌وجوی تایلِ آزادِ نزدیک (مشترکِ claim_unique_tile و claim_squad_block)
+func _find_free_tile(xz: Vector2, max_r: float) -> Vector2i:
         var step := int(GameConstants.COMMAND_CELL / _nav.cell_size)
         var local := (xz - _origin) / GameConstants.COMMAND_CELL
         var base := Vector2i(floori(local.x) * step, floori(local.y) * step)
@@ -383,10 +414,31 @@ func claim_unique_tile(xz: Vector2, owner_id: int, max_r := 2.6) -> Vector2:
                         if d < best_d:
                                 best_d = d
                                 best_cc = cc
-        if best_cc.x < -100:
-                return xz
-        _claims[best_cc] = owner_id
-        return _cells[_by_cc[best_cc]]["center"]
+        return best_cc
+
+
+## شبکه‌ی چلیکِ فشرده دور مرکز — بدون خلأ؛ فاصله ۰٫۵m (تا ۴ نفر) و ۰٫۳۶m
+## بعدش، تا همه داخل شعاع ۰٫۵۵ متریِ مرکز تایل بمانند (چک «سرباز داخل بلوک»)
+func _append_dense(out: Array[Vector2], center: Vector2, count: int) -> void:
+        if count <= 0:
+                return
+        var cols := mini(int(ceil(sqrt(float(count)))), 3)
+        var spacing := 0.5 if cols <= 2 else 0.36
+        var rows := int(ceil(float(count) / float(cols)))
+        var x0 := -spacing * float(cols - 1) * 0.5
+        var y0 := -spacing * float(rows - 1) * 0.5
+        var nav := _nav
+        for i in count:
+                var r := floori(float(i) / float(cols))
+                var c := i - r * cols
+                var p := center + Vector2(x0 + float(c) * spacing,
+                                y0 + float(r) * spacing)
+                # گارد سلولِ بسته: به مرکز تایل کشیده می‌شود (تایلِ مرکزش باز است)
+                if nav != null and not nav.is_walkable(nav.world_to_cell(p)):
+                        p = center + (p - center) * 0.5
+                        if not nav.is_walkable(nav.world_to_cell(p)):
+                                p = center
+                out.append(p)
 
 
 ## آزادسازی تایل‌های یک مالک (سرباز مرد / جابه‌جا شد)

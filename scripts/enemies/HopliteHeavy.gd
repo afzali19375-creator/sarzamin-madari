@@ -5,7 +5,6 @@ extends EnemyBase
 ## (جرقه‌ی سفید، بدون آسیب). ضربه‌ی تن‌به‌تن و پرتاب از پهلو-پشت معمولی اثر می‌کند.
 
 var deflects := 0          # شمار تیرهای خنثی‌شده — برای تست خودکار
-var _shield: MeshInstance3D
 
 
 func _init() -> void:
@@ -25,49 +24,19 @@ func _default_color() -> Color:
         return GameConstants.COL_ROCK_DARK
 
 
+func _model_kind() -> StringName:
+        return &"knight_round"
+
+
+func _model_special() -> Dictionary:
+        # سپر گردِ مدل → سرخ یونانی (تفکیک از جاویدانِ فیروزه‌ای‌سپر)
+        return {"Round_Shield": GameConstants.COL_CRIMSON}
+
+
 func _build_gear() -> void:
-        # تنه‌ی تنومندتر
-        _body.scale = Vector3(1.12, 1.06, 1.12)
-
-        # سپر بزرگ مستطیلی رو به +Z (سمت نگاه)
-        _shield = MeshInstance3D.new()
-        var sm := BoxMesh.new()
-        sm.size = Vector3(0.56, 0.74, 0.06)
-        _shield.mesh = sm
-        _shield.position = Vector3(-0.04, 0.34, 0.3)
-        var shield_mat := StandardMaterial3D.new()
-        shield_mat.albedo_color = GameConstants.COL_FIRETEMPLE
-        shield_mat.roughness = 0.55
-        _shield.material_override = shield_mat
-        add_child(_shield)
-
-        # لبه‌ی برنزی سپر
-        var rim := MeshInstance3D.new()
-        var rm := BoxMesh.new()
-        rm.size = Vector3(0.6, 0.06, 0.07)
-        rim.mesh = rm
-        rim.position = Vector3(-0.04, 0.7, 0.3)
-        var rim_mat := StandardMaterial3D.new()
-        rim_mat.albedo_color = GameConstants.COL_GOLD
-        rim_mat.metallic = 0.5
-        rim_mat.roughness = 0.4
-        rim.material_override = rim_mat
-        add_child(rim)
-
-        # کلاه‌خود کریت‌سپر
-        var helm := MeshInstance3D.new()
-        var hm := CylinderMesh.new()
-        hm.top_radius = 0.02
-        hm.bottom_radius = 0.13
-        hm.height = 0.16
-        helm.mesh = hm
-        helm.position.y = 0.76
-        var hmat := StandardMaterial3D.new()
-        hmat.albedo_color = GameConstants.COL_GOLD
-        hmat.metallic = 0.5
-        hmat.roughness = 0.4
-        helm.material_override = hmat
-        add_child(helm)
+        # تنه‌ی تنومندتر (روی ریشه‌ی مدل)
+        _body.scale = Vector3(1.1, 1.05, 1.1)
+        # سپر و کلاه‌خود داخل مدلِ Knight موجودند — تجهیزِ پروسیجرال حذف شد
 
 
 ## آیا این پرتابه در مخروط سپر پیش‌رو است؟ (سپر روی +Z مدل با heading فعلی)

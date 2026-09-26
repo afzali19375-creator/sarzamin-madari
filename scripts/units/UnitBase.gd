@@ -90,9 +90,12 @@ var is_commander := false
 var garrisoned := false
 
 # ---------------- بصری ----------------
+## کاراکتر Low-Poly واقعی (KayKit CC0 با ۷۶ انیمیشن) — جایگزین استوانه‌ی ساده
+## بازخورد کاربر: «گرافیک واقعا ساده است؛ از کاراکترهای پروژه‌های اپن‌سورس استفاده کن»
 var _spawn_color: Color
-var _mat: StandardMaterial3D
-var _body: MeshInstance3D
+var _model: CharacterModel
+## ریشه‌ی بدن مدل (لِک/یورش/اسکواش زیرکلاس‌ها روی آن اعمال می‌شود)
+var _body: Node3D
 var _ring: MeshInstance3D
 
 
@@ -107,34 +110,16 @@ func _ready() -> void:
                 _spawn_color = squad_color
         else:
                 _spawn_color = GameConstants.UNIT_PALETTE.pick_random()
-        _mat = StandardMaterial3D.new()
-        _mat.albedo_color = _spawn_color
-        _mat.roughness = 0.8
 
         # رسیدن موقتی است: با جابه‌جایی پرچم باید دوباره راه بیفتد
         # (رفع باگ «گیر کردن در آیدل بعد از رسیدن») — فقط برای کانال ۰/بدون اسلات
         GameEvents.goal_changed.connect(_on_goal_changed)
 
-        # تنه
-        _body = MeshInstance3D.new()
-        var body_mesh := CylinderMesh.new()
-        body_mesh.top_radius = 0.14
-        body_mesh.bottom_radius = 0.2
-        body_mesh.height = 0.5
-        _body.mesh = body_mesh
-        _body.position.y = 0.25
-        _body.material_override = _mat
-        add_child(_body)
-
-        # سر
-        var head := MeshInstance3D.new()
-        var head_mesh := SphereMesh.new()
-        head_mesh.radius = 0.11
-        head_mesh.height = 0.22
-        head.mesh = head_mesh
-        head.position.y = 0.58
-        head.material_override = _mat
-        add_child(head)
+        # کاراکتر Low-Poly واقعی (KayKit CC0) با انیمیشن کامل — جای استوانه و گوی
+        _model = CharacterModel.new()
+        _model.setup(_model_kind(), _spawn_color, 0.42, _model_special())
+        add_child(_model)
+        _body = _model.body_root()
 
         # حلقه‌ی انتخاب (فقط دسته‌ی انتخابی — الگوی Bad North)
         _ring = MeshInstance3D.new()
@@ -164,7 +149,7 @@ func _ready() -> void:
                 bm.rings = 10
                 bm.ring_segments = 5
                 band.mesh = bm
-                band.position.y = 0.66
+                band.position.y = 0.88
                 var gm := StandardMaterial3D.new()
                 gm.albedo_color = GameConstants.COL_GOLD
                 gm.metallic = 0.5
@@ -179,6 +164,16 @@ func _ready() -> void:
 ## هوک بصری زیرکلاس‌ها — بین ساخت تنه و شروع Fidget
 func _build_gear() -> void:
         pass
+
+
+## نقشِ کاراکتر KayKit این یونیت (زیرکلاس‌ها override می‌کنند)
+func _model_kind() -> StringName:
+        return &"knight"
+
+
+## تینت ویژه‌ی گره‌های مدل (مثلاً سپر فیروزه‌ای جاویدان) — زیرکلاس‌ها override
+func _model_special() -> Dictionary:
+        return {}
 
 
 # ---------------- سلامت، ضربه و مرگ دائمی (گام ۶) ----------------
@@ -201,6 +196,8 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
                 return
         hp -= dmg
         _flash_hit()
+        if _model != null:
+                _model.play_hit()
         _knockback(from_dir)
         if hp <= 0:
                 die()
@@ -223,10 +220,8 @@ func _knockback(from_dir: Vector3) -> void:
 
 
 func _flash_hit() -> void:
-        _flash_restore = _mat.albedo_color
-        _mat.albedo_color = Color(1, 1, 1, 1)
-        _flash_t = 0.0
-        _flashing = true
+        if _model != null:
+                _model.flash_white()
 
 
 func die() -> void:
@@ -241,16 +236,13 @@ func die() -> void:
         # قانون آهنین سند طراحی §۷: مرگ دائمی است — هرگز برنمی‌گردد
         GameEvents.unit_permanently_died.emit(self)
         set_process(false)
-        # انیمیشن مرگ: افتادن + محو (بدون عدد §۱۰؛ لکه‌ی خون در گام ۷)
-        var y0 := position.y
+        # انیمیشن مرگِ اسکلتی (افتادن) + محوِ جسد (بدون عدد §۱۰؛ لکه‌ی خون در گام ۷)
+        if _model != null:
+                _model.play_death()
+                _model.fade_out(GameConstants.DEATH_FADE_SECONDS)
         var tw := create_tween()
-        tw.set_parallel(true)
-        tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
-        tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
-        _mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-        tw.tween_property(_mat, "albedo_color:a", 0.0, GameConstants.DEATH_FADE_SECONDS) \
-                        .set_delay(0.35)
-        tw.chain().tween_callback(queue_free)
+        tw.tween_interval(GameConstants.DEATH_FADE_SECONDS + 0.6)
+        tw.tween_callback(queue_free)
 
 
 ## ضربه‌ی تن‌به‌تن — true = ضربه آغاز شد (خنک‌شدن تمام). جهتِ ضربه به هدف می‌رود
@@ -424,7 +416,6 @@ func set_slot(world_xz: Vector2) -> void:
         if _arrived:
                 _arrived = false
                 _set_color(_spawn_color)
-                _body.position.y = 0.25
 
 
 func clear_slot() -> void:
@@ -456,13 +447,7 @@ func _process(delta: float) -> void:
                 return
         _bob_t += delta
 
-        # فلش سفید ضربه (§۱۰ — بدون عدد)
-        if _flashing:
-                _flash_t += delta
-                if _flash_t >= 0.12:
-                        _flashing = false
-                        _mat.albedo_color = GameConstants.COL_ARRIVED \
-                                        if _arrived else _flash_restore
+        # فلش سفید ضربه داخل CharacterModel مدیریت می‌شود (§۱۰ — بدون عدد)
 
         # ---- لایه ۳: واکنش نبرد (بالاترین اولویت) ----
         _scan_accum += delta
@@ -488,8 +473,7 @@ func _process(delta: float) -> void:
                 if _fidget_state != 0:
                         _process_fidget(delta)
                 else:
-                        # ایست در آرایش + تیک Fidget
-                        _body.position.y = 0.25 + absf(sin(_bob_t * 6.0)) * 0.1
+                        # ایست در آرایش (انیمیشن Idle مدل) + تیک Fidget
                         _tick_fidget_timer(delta)
                 return
 
@@ -500,7 +484,6 @@ func _process(delta: float) -> void:
         if to_goal.length() <= arrive_r:
                 _arrived = true
                 _vel = Vector2.ZERO
-                _set_color(GameConstants.COL_ARRIVED)  # سرخ روشن = رسیده به هدف
                 return
 
         # گام ۶R4 — حرکتِ دوحالته با «چسبندگی»: داخلِ حبابِ هدایتِ مستقیم، اسلات
@@ -711,7 +694,6 @@ func _on_goal_changed(_new_goal: Vector2) -> void:
                 _arrived = false
                 _vel = Vector2.ZERO
                 _set_color(_spawn_color)  # برگشت به رنگ تولد
-                _body.position.y = 0.25
 
 
 ## حلقه‌ی انتخاب دسته (Bad North: زیر دسته‌ی انتخابی حلقه‌ی سفید)
@@ -747,7 +729,6 @@ func exit_house(at: Vector3) -> void:
         _vel = Vector2.ZERO
         _arrived = false
         _set_color(_spawn_color)
-        _body.position.y = 0.25
         if not is_in_group("units"):
                 add_to_group("units")
 
@@ -765,8 +746,10 @@ func _dist_xz_to(n: Node3D) -> float:
                 Vector2(n.global_position.x, n.global_position.z))
 
 
+## رنگ بدنه — با مدل KayKit، رنگِ تولدِ دسته برمی‌گردد (تینتِ تیم روی آن اعمال
+## شده و فلشِ ضربه موقتی است) — فقط مصرف تست خودکار
 func body_color() -> Color:
-        return _mat.albedo_color
+        return _spawn_color
 
 
 ## رنگ فعلی بدنه — برای تست خودکار (رنگ تولد نباید سرخ «رسیده» باشد)
@@ -875,13 +858,15 @@ func _avoid_step(from: Vector2, step: Vector2, to_dir: Vector2,
 
 
 func _bob_visual(moving: bool) -> void:
-        var target := 0.25 + (absf(sin(_bob_t * 9.0)) * 0.045 if moving else 0.0)
-        var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
-        _body.position.y = lerpf(_body.position.y, target, k)
+        # انیمیشن اسکلتیِ راه‌رفتن/ایستِ مدل، جای بابِ استوانه‌ای را گرفته
+        if _model != null:
+                _model.set_moving(moving)
 
 
+## رنگ فعلی بدنه — دیگر بدنِ تکسچردار بازرنگ نمی‌شود؛ فقط رنگِ منطقی ذخیره می‌شود
+## (وضعیت‌ها با انیمیشن اسکلتی خوانا شده‌اند — سرخِ «رسیده» حذف شد)
 func _set_color(c: Color) -> void:
-        _mat.albedo_color = c
+        _spawn_color = c
 
 
 # ---------------- Fidget (§۵.۳ پرامت — لایه ۲) ----------------

@@ -1173,35 +1173,36 @@ func _trigger_game_over() -> void:
         _last_input_msg = "game over — all houses burned"
 
 
-## اسلات‌های آرایش ۱.۲ متری دور مرکز سلول (§۵.۲) — فقط روی سلول‌های قابل‌عبور
+## گام ۶R6 — باگ ۴ (بازخورد کاربر): «سربازهای یک دسته به‌جای اینکه در یک بلوک
+## جمع شوند، هر کدام در یک بلوک بودند — اشکالی ندارد کاملاً متراکم باشند».
+## مثل Bad North: کل دسته روی «یک تایل» متراکم می‌نشیند (claim_squad_block) —
+## بلوکِ دسته یک تایلِ مشترک است و اسلات‌ها شبکه‌ی چلیکِ داخل همان تایل‌اند.
 func _assign_slots(center: Vector2, idx: int) -> void:
-        var nav := PathService.nav
         var members: Array = squads[idx]
         var n := members.size()
-        var slots: Array[Vector2] = [center]
-        var ring := 1
-        while slots.size() < n and ring <= SLOT_MAX_RING:
-                var r := GameConstants.FORMATION_SPACING * float(ring)
-                var per := 6 * ring
-                for k in per:
-                        var ang := TAU * float(k) / float(per) + 0.4 * float(ring)
-                        var p := center + Vector2(cos(ang), sin(ang)) * r
-                        var np := _nearest_walkable_point(nav, p, 1.3)
-                        if np != Vector2.INF:
-                                slots.append(np)
-                                if slots.size() >= n:
-                                        break
-                ring += 1
-        # تضمین: همیشه به اندازه‌ی سربازها اسلات داریم
-        var guard := 0
-        while slots.size() < n and guard < 60:
-                var ang := _rng_scene() * TAU
-                var rr := 1.2 + float(guard % 3) * 1.2
-                var np := _nearest_walkable_point(nav, center + Vector2(cos(ang), sin(ang)) * rr, 1.6)
-                slots.append(np if np != Vector2.INF else center)
-                guard += 1
-        # اختصاص حریصانه: هر اسلات به نزدیک‌ترین سربازِ آزاد — اسلات روی مرکزِ
-        # بلوکِ آزاد می‌نشیند (گام ۶R5) تا سربازِ آیدل داخل تایل خودش باشد
+        var slots: Array[Vector2] = []
+        if cmd_grid != null:
+                slots = cmd_grid.claim_squad_block(center, idx, n)
+        if slots.size() < n:
+                # پشتیبان (بدون CommandGrid): حلقه‌های ۱٫۲ متری دور مرکز
+                var nav := PathService.nav
+                var ring := 1
+                while slots.size() < n and ring <= SLOT_MAX_RING:
+                        var r := GameConstants.FORMATION_SPACING * float(ring)
+                        var per := 6 * ring
+                        for k in per:
+                                var ang := TAU * float(k) / float(per) \
+                                                + 0.4 * float(ring)
+                                var p := center + Vector2(cos(ang), sin(ang)) * r
+                                var np := _nearest_walkable_point(nav, p, 1.3)
+                                if np != Vector2.INF:
+                                        slots.append(np)
+                                        if slots.size() >= n:
+                                                break
+                        ring += 1
+                while slots.size() < n:
+                        slots.append(center)
+        # اختصاص حریصانه: هر اسلات به نزدیک‌ترین سربازِ آزاد
         var used := {}
         for s in slots:
                 var best := -1
@@ -1214,7 +1215,7 @@ func _assign_slots(center: Vector2, idx: int) -> void:
                                 best_d = d
                                 best = i
                 if best >= 0:
-                        members[best].set_slot(_tile_slot(members[best], s))
+                        members[best].set_slot(s)
                         used[best] = true
 
 

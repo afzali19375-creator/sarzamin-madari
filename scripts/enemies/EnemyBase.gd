@@ -74,8 +74,9 @@ var _march_best_gd := 1e9         # بهترین فاصله تا هدف از آ�
 var _march_avoid_side := 0        # ‎+۱‎ پادساعتگرد / ‎−۱‎ ساعتگرد — تعهد سمت
 var _march_avoid_hold := 0.0      # ثانیه‌ی باقی‌مانده‌ی تعهد
 
-var _mat: StandardMaterial3D
-var _body: MeshInstance3D
+var _model: CharacterModel
+## ریشه‌ی بدن مدل (یورش/اسکواش روی آن)
+var _body: Node3D
 var _body_color: Color
 
 
@@ -90,30 +91,12 @@ func _ready() -> void:
         _heading = rotation.y
         _channel = GameConstants.ENEMY_CHANNEL_BASE + raid_group
         _body_color = _default_color()
-        _mat = StandardMaterial3D.new()
-        _mat.albedo_color = _body_color
-        _mat.roughness = 0.8
 
-        # تنه
-        _body = MeshInstance3D.new()
-        var bm := CylinderMesh.new()
-        bm.top_radius = 0.15
-        bm.bottom_radius = 0.21
-        bm.height = 0.52
-        _body.mesh = bm
-        _body.position.y = 0.26
-        _body.material_override = _mat
-        add_child(_body)
-
-        # سر
-        var head := MeshInstance3D.new()
-        var hm := SphereMesh.new()
-        hm.radius = 0.11
-        hm.height = 0.22
-        head.mesh = hm
-        head.position.y = 0.6
-        head.material_override = _mat
-        add_child(head)
+        # کاراکتر Low-Poly واقعی (KayKit CC0) — همان سیستم سربازهای خودی
+        _model = CharacterModel.new()
+        _model.setup(_model_kind(), _body_color, 0.5, _model_special())
+        add_child(_model)
+        _body = _model.body_root()
 
         # تجهیزات اختصاصی کلاس (کلاه‌خود/سپر/نیزه‌ی پرتاب)
         _build_gear()
@@ -127,6 +110,16 @@ func _default_hp() -> int:
 
 func _default_color() -> Color:
         return GameConstants.COL_ROCK
+
+
+## نقشِ کاراکتر KayKit (زیرکلاس‌ها override می‌کنند)
+func _model_kind() -> StringName:
+        return &"knight_round"
+
+
+## تینت ویژه‌ی گره‌های مدل (مثلاً سپر) — زیرکلاس‌ها override
+func _model_special() -> Dictionary:
+        return {}
 
 
 func _build_gear() -> void:
@@ -198,6 +191,8 @@ func _perform_strike(target: Node3D) -> void:
         _atk_cd = attack_cooldown \
                         * (1.0 + randf_range(-GameConstants.CADENCE_VARIANCE,
                         GameConstants.CADENCE_VARIANCE))
+        if _model != null:
+                _model.play_attack()   # انیمیشن حمله با چرخه‌ی ضربه هم‌گام
         var tw := create_tween()
         tw.tween_property(_body, "position:z", -0.1,
                         GameConstants.STRIKE_WINDUP).set_ease(Tween.EASE_OUT)
@@ -497,25 +492,22 @@ func _turn_to(target: float, delta: float) -> void:
 
 
 func _bob_visual(moving: bool) -> void:
-        var target := 0.26 + (absf(sin(_bob_t * 9.0)) * 0.045 if moving else 0.0)
-        var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
-        _body.position.y = lerpf(_body.position.y, target, k)
+        if _model != null:
+                _model.set_moving(moving)
 
 
 ## یورش کوتاه به جلو هنگام ضربه/پرتاب
 func _strike_anim() -> void:
+        if _model != null:
+                _model.play_attack()
         var tw := create_tween()
         tw.tween_property(_body, "position:z", 0.14, 0.08).set_ease(Tween.EASE_OUT)
         tw.tween_property(_body, "position:z", 0.0, 0.14)
 
 
 func _tick_flash(delta: float) -> void:
-        if not _flashing:
-                return
-        _flash_t += delta
-        if _flash_t >= 0.12:
-                _flashing = false
-                _mat.albedo_color = _flash_restore
+        # فلش سفید داخل CharacterModel مدیریت می‌شود — تیکِ قدیمی خنثی
+        pass
 
 
 # ---------------- آسیب و مرگ (§۷: دائمی) ----------------
@@ -536,10 +528,9 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
         if dead:
                 return
         hp -= dmg
-        _flash_restore = _mat.albedo_color
-        _mat.albedo_color = Color(1, 1, 1, 1)
-        _flash_t = 0.0
-        _flashing = true
+        if _model != null:
+                _model.flash_white()
+                _model.play_hit()
         _knockback(from_dir)
         if attacker != null and is_instance_valid(attacker) \
                         and attacker.is_in_group("units") \
@@ -573,12 +564,10 @@ func die() -> void:
         remove_from_group("hostiles")
         died.emit(self)
         set_process(false)
-        var y0 := position.y
+        # انیمیشن مرگِ اسکلتی + محوِ جسد
+        if _model != null:
+                _model.play_death()
+                _model.fade_out(GameConstants.DEATH_FADE_SECONDS)
         var tw := create_tween()
-        tw.set_parallel(true)
-        tw.tween_property(self, "rotation:z", PI * 0.5, 0.42).set_ease(Tween.EASE_OUT)
-        tw.tween_property(self, "position:y", y0 - 0.14, 0.42)
-        _mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-        tw.tween_property(_mat, "albedo_color:a", 0.0, GameConstants.DEATH_FADE_SECONDS) \
-                        .set_delay(0.35)
-        tw.chain().tween_callback(queue_free)
+        tw.tween_interval(GameConstants.DEATH_FADE_SECONDS + 0.6)
+        tw.tween_callback(queue_free)

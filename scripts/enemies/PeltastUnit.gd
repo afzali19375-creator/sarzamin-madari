@@ -7,7 +7,8 @@ extends EnemyBase
 ## (_house_tick — بدون اشغال خانه، بازخورد کاربر)؛ اینجا فقط:
 ##   * مشعل روشن در دست (بصری)
 ##   * ژست اختصاصی پرتاب مشعل (بالا بردن دست)
-## بصری: پیراهن شنی، نوار سرخ سر، نیزه‌ی پرتاب در یک دست، مشعل روشن در دست دیگر.
+## بصری: کاراکتر Rogue پک KayKit با تینت شنی؛ نیزه‌ی پرتاب + مشعلِ روشنِ
+## دستی حفظ شده‌اند (پرتابه‌ی واقعی)، حمله = انیمیشن Throw مدل.
 
 var javelins_thrown := 0     # برای تست خودکار
 var _javelin: MeshInstance3D
@@ -31,8 +32,12 @@ func _default_color() -> Color:
         return GameConstants.COL_BEACH_SAND
 
 
+func _model_kind() -> StringName:
+        return &"rogue_thrower"
+
+
 func _build_gear() -> void:
-        # نوار سرخ سر
+        # نوار سرخ سر (قدِ مدلِ اسکلتی)
         var band := MeshInstance3D.new()
         var bm := TorusMesh.new()
         bm.inner_radius = 0.1
@@ -40,20 +45,20 @@ func _build_gear() -> void:
         bm.rings = 10
         bm.ring_segments = 5
         band.mesh = bm
-        band.position.y = 0.64
+        band.position.y = 0.82
         var bmat := StandardMaterial3D.new()
         bmat.albedo_color = GameConstants.COL_CRIMSON
         bmat.roughness = 0.6
         band.material_override = bmat
         add_child(band)
 
-        # نیزه‌ی پرتاب در دست
+        # نیزه‌ی پرتاب در دست (پرتابه‌ی واقعی — مدلِ داخل پک پنهان شد)
         _javelin = MeshInstance3D.new()
         var jm := BoxMesh.new()
         jm.size = Vector3(0.025, 0.025, 0.62)
         _javelin.mesh = jm
         _javelin.rotation_degrees = Vector3(-30.0, 0.0, 0.0)
-        _javelin.position = Vector3(0.2, 0.45, 0.12)
+        _javelin.position = Vector3(0.22, 0.55, 0.12)
         var wood := StandardMaterial3D.new()
         wood.albedo_color = GameConstants.COL_DOOR_WOOD
         wood.roughness = 0.85
@@ -66,7 +71,7 @@ func _build_gear() -> void:
         st.size = Vector3(0.035, 0.035, 0.4)
         _torch_in_hand.mesh = st
         _torch_in_hand.rotation_degrees = Vector3(-18.0, 0.0, 0.0)
-        _torch_in_hand.position = Vector3(-0.22, 0.5, 0.1)
+        _torch_in_hand.position = Vector3(-0.24, 0.6, 0.1)
         var stick_mat := StandardMaterial3D.new()
         stick_mat.albedo_color = GameConstants.COL_DOOR_WOOD
         stick_mat.roughness = 0.9
@@ -78,7 +83,7 @@ func _build_gear() -> void:
         fm.radius = 0.06
         fm.height = 0.12
         fl.mesh = fm
-        fl.position = Vector3(-0.22, 0.72, 0.02)
+        fl.position = Vector3(-0.24, 0.82, 0.02)
         var flm := StandardMaterial3D.new()
         flm.albedo_color = GameConstants.COL_GOLD
         flm.emission_enabled = true
@@ -114,15 +119,17 @@ func _combat_tick(delta: float) -> void:
                                 ground_provider)
 
 
-## پرتاب به جلو — نیزه‌ی دست برای لحظه‌ای محو می‌شود (رها شد)
+## پرتاب به جلو — انیمیشن Throw مدل + نیزه‌ی دست لحظه‌ای محو می‌شود (رها شد)
 func _throw_anim() -> void:
+        if _model != null:
+                _model.play_attack()
         var tw := create_tween()
         tw.tween_property(_javelin, "position:z", 0.3, 0.09).set_ease(Tween.EASE_OUT)
         tw.tween_callback(_javelin_back)
 
 
 func _javelin_back() -> void:
-        _javelin.position = Vector3(0.2, 0.45, 0.12)
+        _javelin.position = Vector3(0.22, 0.55, 0.12)
 
 
 # ---------------- گام ۶R — ژست اختصاصی پرتاب مشعل ----------------

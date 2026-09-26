@@ -7,7 +7,8 @@ extends UnitBase
 ##   * فقط در ایست شلیک می‌کند
 ##   * برد ARCHER_RANGE + مسیر باز (has_clear_shot) + بدون هم‌رزمی در کریدور
 ##   * خنک‌شدن ARCHER_COOLDOWN؛ تیر بالستیک (ArrowProjectile)
-## بصری: لاجوردی + کمان حلقه‌ای در دست چپ + تیردان پشت.
+## بصری: کاراکتر Rogue_Hooded پک KayKit (کاتاپولت دوشی) + تیردان؛ نشانگرِ
+## «در حال هدف‌گیری» = تیرِ شناور (_nock) کنار دست.
 
 var _bow: MeshInstance3D
 var _quiver: MeshInstance3D
@@ -19,8 +20,13 @@ func _default_hp() -> int:
         return GameConstants.PLAYER_HP_ARCHER
 
 
+func _model_kind() -> StringName:
+        return &"rogue_hooded"
+
+
 func _build_gear() -> void:
-        # کمان — حلقه‌ی باریک عمودی در دست چپ
+        # کاتاپولت داخل مدل ساخته می‌شود؛ کمانِ پروسیجرال قبلی فقط به‌عنوان
+        # تیردانِ پشتی نگه داشته می‌شود (حلقه‌ی کمان پنهان — ضد شلوغی)
         _bow = MeshInstance3D.new()
         var bm := TorusMesh.new()
         bm.inner_radius = 0.24
@@ -28,12 +34,13 @@ func _build_gear() -> void:
         bm.rings = 12
         bm.ring_segments = 6
         _bow.mesh = bm
-        _bow.position = Vector3(-0.24, 0.32, 0.06)
+        _bow.position = Vector3(-0.24, 0.42, 0.06)
         _bow.scale = Vector3(1.0, 1.0, 0.35)  # پخ‌کردن حلقه → شکل کمان
         var wood := StandardMaterial3D.new()
         wood.albedo_color = GameConstants.COL_DOOR_WOOD
         wood.roughness = 0.8
         _bow.material_override = wood
+        _bow.visible = false
         add_child(_bow)
 
         # تیردان پشت
@@ -43,7 +50,7 @@ func _build_gear() -> void:
         qm.bottom_radius = 0.05
         qm.height = 0.34
         _quiver.mesh = qm
-        _quiver.position = Vector3(0.12, 0.42, -0.14)
+        _quiver.position = Vector3(0.14, 0.55, -0.16)
         _quiver.rotation_degrees.z = 18.0
         var qmat := StandardMaterial3D.new()
         qmat.albedo_color = GameConstants.COL_GOLD
@@ -51,12 +58,12 @@ func _build_gear() -> void:
         _quiver.material_override = qmat
         add_child(_quiver)
 
-        # تیرِ روی کمان (فقط هنگام هدف‌گیری دیده می‌شود)
+        # تیرِ روی کمان (فقط هنگام هدف‌گیری دیده می‌شود) — کنار دستِ مدل
         _nock = MeshInstance3D.new()
         var nm := BoxMesh.new()
         nm.size = Vector3(0.02, 0.02, 0.4)
         _nock.mesh = nm
-        _nock.position = Vector3(-0.24, 0.34, 0.2)
+        _nock.position = Vector3(0.05, 0.5, 0.22)
         var nmat := StandardMaterial3D.new()
         nmat.albedo_color = GameConstants.COL_BEACH_SAND
         _nock.material_override = nmat

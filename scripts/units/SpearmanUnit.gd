@@ -6,7 +6,7 @@ extends UnitBase
 ## لایه ۳ — واکنش نبرد (گام ۵، روی کوله‌ی تمرین):
 ##   * در حرکت (MOVING): هرگز — حتی اگر دشمن وسط بینی باشد؛ نیزه بالا می‌ماند
 ##   * در ایست + دشمن در SPEARMAN_BRACE_RANGE → آماده‌باش: نیزه افقی می‌شود
-## بصری: فیروزه‌ای + نیزه‌ی بلند ۲.۲ متری روی بازوی راست.
+## بصری: کاراکتر Barbarian پک KayKit (تبر + سپر گرد) + نیزه‌ی بلند پروسیجرال.
 
 const SPEAR_LEN := 2.2
 
@@ -20,10 +20,14 @@ const SPEAR_UP_DEG := 55.0
 const SPEAR_BRACE_DEG := 6.0
 
 
+func _model_kind() -> StringName:
+        return &"barbarian"
+
+
 func _build_gear() -> void:
-        # پیوت نیزه روی شانه‌ی راست
+        # پیوت نیزه روی شانه‌ی راست (قدِ مدلِ اسکلتی)
         _spear_pivot = Node3D.new()
-        _spear_pivot.position = Vector3(0.18, 0.4, 0.0)
+        _spear_pivot.position = Vector3(0.22, 0.52, 0.0)
         add_child(_spear_pivot)
 
         _spear = MeshInstance3D.new()
