@@ -22,6 +22,7 @@ var _cell := 1.0
 var _origin := Vector2.ZERO
 var _corners := PackedFloat32Array()   # (size+1)² — ارتفاع گوشه‌ها برای زمینِ هموار
 var _terrain_mesh: MeshInstance3D
+var _walls_mesh: MeshInstance3D
 var _water: MeshInstance3D
 var _foam: MeshInstance3D
 ## گام ۶R۱۳ — مرکز/شعاعِ جزیره برای گرادیانِ عمقِ شعاعیِ آب
@@ -42,6 +43,7 @@ func build(island: Dictionary, cell_size: float, world_origin: Vector2) -> void:
         _build_terrain_mesh()
         _build_water()
         _build_foam()
+        _build_island_shadow()
 
 
 ## گام ۶R۱۳ — مرکز و شعاعِ تقریبیِ خشکی (از سلول‌های walkable) —
@@ -87,8 +89,11 @@ func _build_corners() -> void:
                                 var ci := cy * size + cx
                                 if int(_island["walkable"][ci]) == 1:
                                         acc += float(_island["tops"][ci])
-                                else:
+                                elif _is_water_module(ci):
                                         acc += sea_contrib
+                                else:
+                                        # صخره‌ی درونِ خشکی — سطحِ خودش را می‌دهد (نه گودیِ دریا)
+                                        acc += float(_island["tops"][ci])
                                 count += 1
                         _corners[j * n1 + i] = acc / float(maxi(count, 1))
 
@@ -108,67 +113,106 @@ func _corner_world(i: int, j: int) -> Vector3:
 
 
 func _build_terrain_mesh() -> void:
-        var st := SurfaceTool.new()
-        st.begin(Mesh.PRIMITIVE_TRIANGLES)
-        var colors: Array = _island["meta_colors"]
-        # گام ۶R۱۳ — نرم‌سازیِ رنگِ همسایه‌ها: الگوی شطرنجیِ ماژول‌های WFC
-        # کم‌پشت‌تر می‌شود و جزیره حسِ ارگانیکِ اسکرین‌شات را می‌گیرد
-        var smooth_colors: Array = []
-        smooth_colors.resize(size * size)
+        # گام ۶R۱۴c — بازنویسیِ کامل به «شبکه‌ی گوشه‌ایِ ایندکس‌دار»:
+        #   * رأس‌ها = (size+1)² گوشه‌ی مشترک — هر سلول فقط ۲ ایندکس-مثلث
+        #   * رنگ روی گوشه‌ها توزیع و در رستر درون‌یابی می‌شود (نرم‌تر از لکه‌ی
+        #     تختِ سلولی؛ و immune به هرگونه بدرفتاریِ رستر با triangle-soup —
+        #     «راه‌راهِ مورب» که با soup روی llvmpipe/GPU دیده می‌شد)
+        #   * winding = همان قراردادِ اثبات‌شده‌ی ۶R۱۳ (v00,v10,v11)
+        # رنگ‌آمیزی «قانونی»: چمنِ یکدستِ مرجع + موتِ ارگانیک — هشِ دو-متغیره
+        var mottle := PackedFloat32Array()
+        mottle.resize(size * size)
         for cyy in size:
                 for cxx in size:
                         var ci2 := cyy * size + cxx
-                        var own: Color = colors[int(_island["modules"][ci2])]
-                        var acc := Color(0, 0, 0)
-                        var cnt := 0
+                        mottle[ci2] = fposmod(
+                                        sin(float(cxx) * 127.1 + float(cyy) * 311.7)
+                                        * 43758.5453, 1.0)
+        var mottle_s := PackedFloat32Array()
+        mottle_s.resize(size * size)
+        for cyb in size:
+                for cxb in size:
+                        var cib := cyb * size + cxb
+                        var acc := mottle[cib] * 2.0
+                        var cnt := 2
                         for dd in [Vector2i(1, 0), Vector2i(-1, 0),
                                         Vector2i(0, 1), Vector2i(0, -1)]:
-                                var nx2: int = cxx + dd.x
-                                var ny2: int = cyy + dd.y
+                                var nx2: int = cxb + dd.x
+                                var ny2: int = cyb + dd.y
                                 if nx2 < 0 or ny2 < 0 or nx2 >= size or ny2 >= size:
                                         continue
-                                acc += colors[int(_island["modules"][ny2 * size + nx2])]
+                                acc += mottle[ny2 * size + nx2]
                                 cnt += 1
-                        smooth_colors[ci2] = own.lerp(
-                                        acc / float(maxi(cnt, 1)), 0.45)
-        var hsh := int(_island["hash"]) % 100000
-        var up := Vector3.UP
+                        mottle_s[cib] = acc / float(cnt)
+        # --- رنگِ هر سلولِ دارایِ سطح ---
+        var has_surface := PackedByteArray()
+        has_surface.resize(size * size)
+        var cell_col := PackedColorArray()
+        cell_col.resize(size * size)
         for cy in size:
                 for cx in size:
                         var ci := cy * size + cx
-                        var is_land := int(_island["walkable"][ci]) == 1
-                        var a := _corner_world(cx, cy)
-                        var b := _corner_world(cx + 1, cy)
-                        var c2 := _corner_world(cx, cy + 1)
-                        var d := _corner_world(cx + 1, cy + 1)
-                        if is_land:
-                                # لرزش رنگی قطعی برای حس ارگانیک (مثل نسخه‌ی قبل)
-                                var j := fposmod(sin(float(ci) * 12.9898 + float(hsh) * 0.017) * 43758.5453, 1.0)
-                                var col: Color = smooth_colors[ci]
-                                col = col * (0.93 + 0.13 * j)
-                                _add_tri(st, a, b, d, col, up)
-                                _add_tri(st, a, d, c2, col, up)
-                        # پرتگاه ساحلی: لبه‌ای از خشکی که به آب می‌رسد
-                        if is_land:
-                                # گام ۶R6 — صخره‌ی سفید-خاکستری لایه‌ی زیرین (سبک مرجع)
-                                var rock := GameConstants.COL_CLIFF
-                                var rock_dark := GameConstants.COL_CLIFF_DARK
-                                if not _land_at(cx + 1, cy):  # شرق
-                                        var col := rock.lerp(rock_dark, fposmod(sin(float(ci) * 3.7) * 0.5 + 0.5, 1.0) * 0.4)
-                                        _add_wall(st, b, d, col)
-                                if not _land_at(cx - 1, cy):  # غرب
-                                        var col := rock.lerp(rock_dark, fposmod(sin(float(ci) * 5.1) * 0.5 + 0.5, 1.0) * 0.4)
-                                        _add_wall(st, a, c2, col)
-                                if not _land_at(cx, cy + 1):  # جنوب
-                                        var col := rock.lerp(rock_dark, fposmod(sin(float(ci) * 7.3) * 0.5 + 0.5, 1.0) * 0.4)
-                                        _add_wall(st, c2, d, col)
-                                if not _land_at(cx, cy - 1):  # شمال
-                                        var col := rock.lerp(rock_dark, fposmod(sin(float(ci) * 9.7) * 0.5 + 0.5, 1.0) * 0.4)
-                                        _add_wall(st, a, b, col)
-        # گام ۶R۷ — generate_tangents() حذف شد: متریالِ terrain فقط vertex-color
-        # است (بدون بافت/نرمال‌مپ) و مشِ دستی UV ندارد؛ فراخوانیِ آن در هر
-        # بازتولید سه خطای «UVs are required to generate tangents» می‌ساخت
-        var mesh := st.commit()
+                        var walk := int(_island["walkable"][ci]) == 1
+                        var water := _is_water_module(ci)
+                        if water and not walk:
+                                continue
+                        has_surface[ci] = 1
+                        if walk:
+                                cell_col[ci] = _grass_color(mottle_s[ci],
+                                                float(_island["tops"][ci]))
+                        else:
+                                # صخره‌ی درونِ جزیره: خاکی-زیتونیِ هم‌خانواده‌ی چمن
+                                # (گچِ سفید فقط مالِ دیوارِ ساحلی است)
+                                cell_col[ci] = GameConstants.COL_GRASS_DARK.lerp(
+                                                GameConstants.COL_ROCK, 0.45)
+        # --- رأس‌های گوشه‌ای: موقعیت + رنگِ میانگینِ سلول‌های مجاور ---
+        var n1 := size + 1
+        var verts := PackedVector3Array()
+        verts.resize(n1 * n1)
+        var cols := PackedColorArray()
+        cols.resize(n1 * n1)
+        var norms := PackedVector3Array()
+        norms.resize(n1 * n1)
+        for j in n1:
+                for i in n1:
+                        var vi := j * n1 + i
+                        verts[vi] = _corner_world(i, j)
+                        norms[vi] = Vector3.UP
+                        var acc := Color(0, 0, 0, 0)
+                        var cnt := 0
+                        for d: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1),
+                                        Vector2i(-1, 0), Vector2i(0, 0)]:
+                                var cx: int = i + d.x
+                                var cy: int = j + d.y
+                                if cx < 0 or cy < 0 or cx >= size or cy >= size:
+                                        continue
+                                var ci3 := cy * size + cx
+                                if has_surface[ci3] == 0:
+                                        continue
+                                acc += cell_col[ci3]
+                                cnt += 1
+                        cols[vi] = (acc / float(maxi(cnt, 1)))
+                        cols[vi].a = 1.0
+        # --- ایندکس‌ها: ۲ مثلث برای هر سلولِ دارایِ سطح (winding اثبات‌شده) ---
+        var idxs := PackedInt32Array()
+        for cy in size:
+                for cx in size:
+                        var ci := cy * size + cx
+                        if has_surface[ci] == 0:
+                                continue
+                        var v00 := cy * n1 + cx
+                        var v10 := cy * n1 + cx + 1
+                        var v01 := (cy + 1) * n1 + cx
+                        var v11 := (cy + 1) * n1 + cx + 1
+                        idxs.append_array([v00, v10, v11, v00, v11, v01])
+        var arr := []
+        arr.resize(Mesh.ARRAY_MAX)
+        arr[Mesh.ARRAY_VERTEX] = verts
+        arr[Mesh.ARRAY_NORMAL] = norms
+        arr[Mesh.ARRAY_COLOR] = cols
+        arr[Mesh.ARRAY_INDEX] = idxs
+        var mesh := ArrayMesh.new()
+        mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
         _terrain_mesh = MeshInstance3D.new()
         _terrain_mesh.mesh = mesh
         var mat := StandardMaterial3D.new()
@@ -176,6 +220,43 @@ func _build_terrain_mesh() -> void:
         mat.roughness = 1.0
         _terrain_mesh.material_override = mat
         add_child(_terrain_mesh)
+        _build_cliff_walls(mottle_s)
+
+
+## گام ۶R۱۴c — دیوارهای گچی به‌صورت مشِ جدا (خارج از مشِ شبکه‌ایِ سطوح):
+## پرتگاه ساحلی با لبه‌ی چمنی — امضای مرجع. هر دیوار = نوارِ لب (چمن→گچ)
+## + بدنه‌ی گچ با گرادیان به سایه‌ی پایین.
+func _build_cliff_walls(mottle_s: PackedFloat32Array) -> void:
+        var st := SurfaceTool.new()
+        st.begin(Mesh.PRIMITIVE_TRIANGLES)
+        for cy in size:
+                for cx in size:
+                        var ci := cy * size + cx
+                        if int(_island["walkable"][ci]) != 1:
+                                continue
+                        var a := _corner_world(cx, cy)
+                        var b := _corner_world(cx + 1, cy)
+                        var c2 := _corner_world(cx, cy + 1)
+                        var d := _corner_world(cx + 1, cy + 1)
+                        var lip_col := _grass_color(mottle_s[ci],
+                                        float(_island["tops"][ci])) * 0.90
+                        if _is_water_module_at(cx + 1, cy) or cx + 1 >= size:  # شرق
+                                _add_wall(st, b, d, lip_col, Vector3(1, 0, 0))
+                        if _is_water_module_at(cx - 1, cy) or cx - 1 < 0:  # غرب
+                                _add_wall(st, a, c2, lip_col, Vector3(-1, 0, 0))
+                        if _is_water_module_at(cx, cy + 1) or cy + 1 >= size:  # جنوب
+                                _add_wall(st, c2, d, lip_col, Vector3(0, 0, 1))
+                        if _is_water_module_at(cx, cy - 1) or cy - 1 < 0:  # شمال
+                                _add_wall(st, a, b, lip_col, Vector3(0, 0, -1))
+        st.index()
+        var wmesh := st.commit()
+        _walls_mesh = MeshInstance3D.new()
+        _walls_mesh.mesh = wmesh
+        var wmat := StandardMaterial3D.new()
+        wmat.vertex_color_use_as_albedo = true
+        wmat.roughness = 1.0
+        _walls_mesh.material_override = wmat
+        add_child(_walls_mesh)
 
 
 func _land_at(cx: int, cy: int) -> bool:
@@ -184,13 +265,71 @@ func _land_at(cx: int, cy: int) -> bool:
         return int(_island["walkable"][cy * size + cx]) == 1
 
 
-## دیوار عمودی از لبه‌ی ساحل تا زیر آب — پرتگاه Bad North
-func _add_wall(st: SurfaceTool, p1: Vector3, p2: Vector3, col: Color) -> void:
+## گام ۶R۱۴ — دیوارِ گچیِ دولایه: نوارِ لبه‌ی چمنی (۰٫۱۳m) + بدنه‌ی گچِ سفید
+## با گرادیانِ ملایم به سایه‌ی پایین — windingِ اثبات‌شده حفظ شده، فقط
+## نرمالِ attribute به «بیرونِ واقعی» ست می‌شود (نورِ صحیح)
+func _add_wall(st: SurfaceTool, p1: Vector3, p2: Vector3, lip_col: Color,
+                outward: Vector3) -> void:
         var b1 := Vector3(p1.x, SKIRT_BOTTOM, p1.z)
         var b2 := Vector3(p2.x, SKIRT_BOTTOM, p2.z)
-        var outward := Vector3(p2.x - p1.x, 0.0, p2.z - p1.z).cross(Vector3.UP)
-        _add_tri(st, p1, p2, b2, col, outward)
-        _add_tri(st, p1, b2, b1, col, outward)
+        var lip := 0.13
+        var m1 := Vector3(p1.x, p1.y - lip, p1.z)
+        var m2 := Vector3(p2.x, p2.y - lip, p2.z)
+        var chalk := GameConstants.COL_CLIFF
+        var chalk_dark := GameConstants.COL_CLIFF_DARK
+        # نوارِ لب: چمن → گچِ سفید
+        _add_tri2(st, p1, lip_col, p2, lip_col, m2, chalk, outward)
+        _add_tri2(st, p1, lip_col, m2, chalk, m1, chalk, outward)
+        # بدنه: گچِ سفید → سایه‌ی پایین
+        _add_tri2(st, m1, chalk, m2, chalk, b2, chalk_dark, outward)
+        _add_tri2(st, m1, chalk, b2, chalk_dark, b1, chalk_dark, outward)
+
+
+## مثلث با windingِ اثبات‌شده‌ی ۶R۱۳ (flip وقتی n·desired > 0) اما با
+## نرمالِ attribute مستقل = جهتِ هندسیِ واقعی (برای نورِ صحیحِ خورشید)
+func _add_tri2(st: SurfaceTool, a: Vector3, ca: Color, b: Vector3, cb: Color,
+                c: Vector3, cc: Color, shade: Vector3) -> void:
+        var n := (b - a).cross(c - a)
+        if n.dot(shade) > 0.0:
+                var t := b
+                b = c
+                c = t
+                var tc := cb
+                cb = cc
+                cc = tc
+        var sn := shade.normalized()
+        for pair in [[a, ca], [b, cb], [c, cc]]:
+                st.set_color(pair[1])
+                st.set_normal(sn)
+                st.add_vertex(pair[0])
+
+
+## کواتِ سطحِ بالای زمین — همان ترتیبِ رئوسِ اثبات‌شده، نرمال = UP واقعی
+func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
+                col: Color) -> void:
+        _add_tri2(st, a, col, b, col, d, col, Vector3.UP)
+        _add_tri2(st, a, col, d, col, c, col, Vector3.UP)
+
+
+## گام ۶R۱۴ — آیا این سلول (ایندکسی) آبِ دریا است؟
+func _is_water_module(ci: int) -> bool:
+        var sockets: PackedStringArray = _island["meta_sockets"]
+        var mi := int(_island["modules"][ci])
+        return mi >= 0 and mi < sockets.size() and sockets[mi].begins_with("w")
+
+
+func _is_water_module_at(cx: int, cy: int) -> bool:
+        if cx < 0 or cy < 0 or cx >= size or cy >= size:
+                return true   # بیرونِ گرید = دریا
+        return _is_water_module(cy * size + cx)
+
+
+## چمنِ نرمِ مرجع: لرپِ ملایمِ دو سبز + کمی روشن‌تر در ارتفاعِ بیشتر
+func _grass_color(m: float, top: float) -> Color:
+        var col := GameConstants.COL_GRASS_DARK.lerp(GameConstants.COL_GRASS_LIGHT,
+                        clampf(m, 0.0, 1.0))
+        col = col.lerp(Color.WHITE, clampf((top - 0.55) * 0.09, 0.0, 0.09))
+        return col
 
 
 ## مثلث با جهت‌گیری قطعی — گام ۶R۱۳: قراردادِ winding در Godot 4 برعکسِ
@@ -219,6 +358,8 @@ func _build_water() -> void:
         _water = MeshInstance3D.new()
         var pm := PlaneMesh.new()
         pm.size = Vector2(320, 320)
+        # گام ۶R۱۴b — «GPU را ببر بالا، نگران نباش» (کاربر): subdiv به ۹۶ برگشت
+        # — سطحِ موجِ نرم‌تر؛ Adreno 618 با ~۱۸ هزار مثلثِ آب مشکلی ندارد
         pm.subdivide_width = 96
         pm.subdivide_depth = 96
         _water.mesh = pm
@@ -235,11 +376,11 @@ uniform vec3 shallow_col : source_color = vec3(0.490, 0.706, 0.659);
 uniform vec3 deep_col : source_color = vec3(0.216, 0.412, 0.470);
 uniform vec2 island_center = vec2(0.0, 0.0);
 uniform float island_radius = 12.0;
-uniform float wave_speed = 0.22;
-uniform float wave_height = 0.034;
+uniform float wave_speed = 0.15;
+uniform float wave_height = 0.020;
 uniform float wave_freq = 0.7;
-uniform float normal_strength = 0.5;
-uniform float fresnel = 0.38;
+uniform float normal_strength = 0.32;
+uniform float fresnel = 0.20;
 varying float vwave;
 varying vec3 vwp;
 float wave_h(vec2 p, float t) {
@@ -264,14 +405,16 @@ void fragment() {
         float ang = atan(vwp.z - island_center.y, vwp.x - island_center.x);
         float wob = sin(ang * 4.0) * 0.6 + sin(ang * 7.0 + 1.7) * 0.4;
         float shore = 1.0 - smoothstep(island_radius + 0.5 + wob,
-                        island_radius + 5.0 + wob, d);
+                        island_radius + 6.0 + wob, d);
         float m = smoothstep(-0.8, 1.0, vwave);
-        vec3 col = mix(deep_col, shallow_col, clamp(shore + 0.12 * m, 0.0, 1.0));
+        vec3 col = mix(deep_col, shallow_col, clamp(shore + 0.10 * m, 0.0, 1.0));
         float fr = pow(1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0), 3.0);
-        col = mix(col, vec3(0.93, 0.96, 0.95), fr * fresnel);
+        col = mix(col, vec3(0.90, 0.93, 0.92), fr * fresnel);
         ALBEDO = col;
-        ROUGHNESS = 0.28;
-        SPECULAR = 0.62;
+        // گام ۶R۱۴c — براقیتِ ملایم‌تر: اسپکولارِ تند روی آبِ خاکستریِ مرجع
+        // لکه‌ی سفیدِ سوسوزن می‌ساخت؛ مرجع آبِ ماتِ آرام دارد
+        ROUGHNESS = 0.46;
+        SPECULAR = 0.38;
 }
 """
         var mat := ShaderMaterial.new()
@@ -304,7 +447,9 @@ void fragment() {
 func _build_foam() -> void:
         var st := SurfaceTool.new()
         st.begin(Mesh.PRIMITIVE_TRIANGLES)
-        var white := Color(0.96, 0.98, 0.97)
+        # گام ۶R۱۴ — حلقه‌ی کفِ مرجع: «خطِ تیزِ سفیدِ چسبیده به ساحل» +
+        # «هاله‌ی نرمِ کم‌رنگ» بیرونی — آلفای هر رأس داخل رنگِ رأس است؛
+        # نبضِ خیلی ملایم فقط حسِ زندگی می‌دهد (قبلاً ۰٫۴۵ چشم‌آزار بود)
         for cy in size:
                 for cx in size:
                         if not _land_at(cx, cy):
@@ -313,7 +458,6 @@ func _build_foam() -> void:
                         for dir in dirs:
                                 if _land_at(cx + dir.x, cy + dir.y):
                                         continue
-                                # لبه‌ی مشترک این سلول با سلول آبی → نوار کف به سمت آب
                                 var ex := _origin.x + float(cx) * _cell
                                 var ey := _origin.y + float(cy) * _cell
                                 var p1: Vector3
@@ -331,15 +475,13 @@ func _build_foam() -> void:
                                         p1 = Vector3(ex, 0, ey)
                                         p2 = Vector3(ex + _cell, 0, ey)
                                 var out3 := Vector3(dir.x, 0, dir.y)
-                                var q1 := p1 + out3 * 0.28
-                                var q2 := p2 + out3 * 0.28
-                                var q3 := p2 + out3 * 0.85
-                                var q4 := p1 + out3 * 0.85
                                 var y := SEA_Y + 0.03
-                                _foam_tri(st, Vector3(q1.x, y, q1.z), Vector3(q2.x, y, q2.z),
-                                                Vector3(q3.x, y, q3.z), white)
-                                _foam_tri(st, Vector3(q1.x, y, q1.z), Vector3(q3.x, y, q3.z),
-                                                Vector3(q4.x, y, q4.z), white)
+                                # خطِ تیز: ۰٫۰۵ → ۰٫۳۲ متر (آلفا ۰٫۸۵)
+                                _foam_quad(st, p1, p2, out3, 0.05, 0.32, y,
+                                                0.85, 0.55)
+                                # هاله‌ی نرم: ۰٫۳۲ → ۱٫۰ متر (۰٫۳۰ → صفر)
+                                _foam_quad(st, p1, p2, out3, 0.32, 1.00, y,
+                                                0.30, 0.0)
         var mesh := st.commit()
         _foam = MeshInstance3D.new()
         _foam.mesh = mesh
@@ -347,14 +489,10 @@ func _build_foam() -> void:
         sh.code = """
 shader_type spatial;
 render_mode unshaded, blend_mix, cull_disabled, depth_draw_never;
-varying vec3 vwp;
-void vertex() {
-        vwp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-}
 void fragment() {
-        float pulse = 0.62 + 0.38 * sin(TIME * 1.1 + (vwp.x + vwp.z) * 0.9);
-        ALBEDO = vec3(0.97, 0.99, 0.98);
-        ALPHA = 0.45 * pulse;
+        float pulse = 0.88 + 0.12 * sin(TIME * 0.9 + (VERTEX.x + VERTEX.z) * 0.0);
+        ALBEDO = vec3(0.98, 0.99, 0.98);
+        ALPHA = COLOR.a * pulse;
 }
 """
         var mat := ShaderMaterial.new()
@@ -363,11 +501,56 @@ void fragment() {
         add_child(_foam)
 
 
-func _foam_tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, col: Color) -> void:
-        for v in [a, b, c]:
-                st.set_color(col)
+## نوارِ کف بین دو فاصله‌ی بیرون‌سو از لبه‌ی ساحل — آلفای لبه‌ها روی رأس‌ها
+func _foam_quad(st: SurfaceTool, p1: Vector3, p2: Vector3, out3: Vector3,
+                d0: float, d1: float, y: float, a0: float, a1: float) -> void:
+        var q1 := p1 + out3 * d0
+        var q2 := p2 + out3 * d0
+        var q3 := p2 + out3 * d1
+        var q4 := p1 + out3 * d1
+        var c1 := Color(1, 1, 1, a0)
+        var c2 := Color(1, 1, 1, a1)
+        _foam_tri(st, Vector3(q1.x, y, q1.z), c1,
+                        Vector3(q2.x, y, q2.z), c1,
+                        Vector3(q3.x, y, q3.z), c2)
+        _foam_tri(st, Vector3(q1.x, y, q1.z), c1,
+                        Vector3(q3.x, y, q3.z), c2,
+                        Vector3(q4.x, y, q4.z), c2)
+
+
+func _foam_tri(st: SurfaceTool, a: Vector3, ca: Color, b: Vector3, cb: Color,
+                c: Vector3, cc: Color) -> void:
+        for pair in [[a, ca], [b, cb], [c, cc]]:
+                st.set_color(pair[1])
                 st.set_normal(Vector3.UP)
-                st.add_vertex(v)
+                st.add_vertex(pair[0])
+
+
+# ---------------- سایه‌ی نرمِ جزیره روی آب (امضای مرجع) ----------------
+
+func _build_island_shadow() -> void:
+        var sz := maxf(_island_radius * 2.3, 10.0)
+        var pm := PlaneMesh.new()
+        pm.size = Vector2(sz, sz * 0.82)
+        var mi := MeshInstance3D.new()
+        mi.mesh = pm
+        mi.position = Vector3(_island_center.x + 0.9, SEA_Y + 0.015,
+                        _island_center.y + 0.7)
+        var sh := Shader.new()
+        sh.code = """
+shader_type spatial;
+render_mode unshaded, blend_mix, cull_disabled, depth_draw_never;
+void fragment() {
+        float d = length(UV - vec2(0.5)) * 2.0;
+        float a = (1.0 - smoothstep(0.55, 1.0, d)) * 0.15;
+        ALBEDO = vec3(0.16, 0.22, 0.22);
+        ALPHA = a;
+}
+"""
+        var mat := ShaderMaterial.new()
+        mat.shader = sh
+        mi.material_override = mat
+        add_child(mi)
 
 
 # ---------------- پرس‌وجو (همان قرارداد قبلی IslandTiles) ----------------

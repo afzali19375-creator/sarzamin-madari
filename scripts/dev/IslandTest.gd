@@ -84,6 +84,7 @@ var _cam_pivot: Node3D
 var _cam_pan: Node3D          # گام ۶R۱۲ — پنِ عمودیِ محدود (بین pivot و arm)
 var _cam_arm: Node3D
 var _cam: Camera3D
+var _sun: DirectionalLight3D
 var _yaw := GameConstants.CAM_YAW0_DEG
 var _target_height := GameConstants.CAM_HEIGHT0
 var _pan_v := 0.0             # پنِ اعمال‌شده (متر؛ + = نما به بالای صفحه)
@@ -174,7 +175,13 @@ func _run_screenshot_probe() -> void:
                 get_tree().quit(0)
                 return
         # ۱) نمای کلی — دسته‌ها متراکم در پست‌هایشان؛ پدها مخفی (۶R۱۳)
+        # گام ۶R۱۴c — SHOT_QUICK=1: فقط شاتِ کلی در ۸ث و خروج (چرخه‌ی سریع)
         await get_tree().create_timer(8.0).timeout
+        if OS.get_environment("SHOT_QUICK") != "":
+                _snap(out_dir + "/shot1_overview.png")
+                print("[SHOT] quick done")
+                get_tree().quit(0)
+                return
         _snap(out_dir + "/shot1_overview.png")
         # ۲) حالت فرمان — انتخاب دسته: پدهای نمایان + تینت فیروزه‌ای + حلقه
         _select_squad(0)
@@ -579,30 +586,41 @@ func regenerate(seed_value: int) -> void:
 # ---------------- محیط و دوربین (§۷ پرامت) ----------------
 
 func _build_environment() -> void:
-        # گام ۶R6 (بازخورد کاربر — سبک مرجع): نورِ Flat پاستلی؛ آسمان = رنگِ ساده
+        # گام ۶R۱۴ — مهِ سنگینِ مرجع: پس‌زمینه‌ی خاکستریِ مه‌آلودِ یکدست،
+        # آب‌شدنِ تدریجیِ افق، نورِ نرمِ پخش (بدون سایه‌ی تیز)
         var env := Environment.new()
         env.background_mode = Environment.BG_COLOR
-        env.background_color = Color("c7d6e0")          # آبی-خاکستری روشن
+        env.background_color = GameConstants.COL_SKY
         env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
         env.ambient_light_color = Color(1, 1, 1)
-        env.ambient_light_energy = 0.8                   # نور محیطی سفید با انرژی کم
+        # گام ۶R۱۴c — ضدِ اوراکسوز: قبلاً ambient ۱٫۰ + خورشید ۰٫۸۵ جمعاً
+        # چمنِ پاستلی را به سفیدِ کلیپ‌شده می‌شست (زمینِ «راه‌راهِ زرد-سفید»)
+        # — مرجع نرم است ولی رنگ‌ها اشباعِ واضح دارند
+        env.ambient_light_energy = 0.30
         env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
         env.fog_enabled = true
-        env.fog_light_color = Color("cfe0ea")            # مه ملایم آبی کمرنگ — عمق
-        # گام ۶R۱۳ — مهِ رقیق‌تر: خطِ ساحل و دریا شسته‌شدنی نمی‌شود (بازخورد
-        # «جزیره و دریا یکی شدن» — مهِ ۰٫۰۱۱ رنگ‌ها را به‌هم می‌خورد)
-        env.fog_density = 0.006
-        env.fog_sky_affect = 0.35
+        env.fog_light_color = Color("d3dcd9")            # هم‌خانواده‌ی پس‌زمینه
+        env.fog_density = 0.006                          # مهِ ملایمِ عمق — افق در مه
+        env.fog_sky_affect = 0.75
         var we := WorldEnvironment.new()
         we.environment = env
         add_child(we)
 
         var sun := DirectionalLight3D.new()
-        sun.rotation_degrees = Vector3(-52.0, -35.0, 0.0)
-        sun.light_energy = 1.0
-        sun.light_color = GameConstants.COL_SUN
-        # سبک Flat: بدون سایه‌های تیره و واقع‌گرایانه
-        sun.shadow_enabled = false
+        _sun = sun
+        sun.rotation_degrees = Vector3(-48.0, -35.0, 0.0)
+        sun.light_energy = 0.27
+        sun.light_color = Color("fff8ea")
+        # گام ۶R۱۴b — «GPU را ببر بالا» (کاربر): سایه‌ی نرمِ PCF با بلورِ
+        # زیاد — سایه‌روشنِ مرجع زیر درخت/خانه/سرباز، بدونِ لبه‌ی تیز
+        # گام ۶R۱۴c — ضدِ shadow-acne: نرمالِ attributeِ زمینِ تخت = UP است؛
+        # بایاسِ نرمالِ بزرگ‌تر + بایاسِ عمقی لازم است تا خودِ تپه‌ها روی خودشان
+        # سایه‌ی راه‌راهِ مورب نیندازند
+        sun.shadow_enabled = true
+        sun.shadow_blur = 2.0
+        sun.shadow_opacity = 0.34
+        sun.shadow_bias = 0.06
+        sun.shadow_normal_bias = 4.0
         add_child(sun)
 
         _cam_pivot = Node3D.new()
@@ -981,12 +999,14 @@ func _input(event: InputEvent) -> void:
                                         _middle_drag = false
         elif event is InputEventMouseMotion:
                 if _middle_drag:
-                        # گام ۶R۱۳ — کشیدن = جابه‌جاییِ خودِ دوربین (پنِ محدود دو محور)
+                        # گام ۶R۱۳/۶R۱۴ — کشیدن = جابه‌جاییِ خودِ دوربین؛ رفتار
+                        # «دنیا زیر انگشت» (استانداردِ Bad North/موبایل) روی هر دو محور:
+                        # محتوای زیر انگشت با انگشت جابه‌جا می‌شود
                         _pan_h_target = clampf(
                                         _pan_h_target - event.relative.x * GameConstants.CAM_PAN_DRAG_SENS,
                                         -GameConstants.CAM_PAN_SIDE_MAX, GameConstants.CAM_PAN_SIDE_MAX)
                         _pan_target = clampf(
-                                        _pan_target - event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
+                                        _pan_target + event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
                                         -GameConstants.CAM_PAN_BACK_MAX, GameConstants.CAM_PAN_FWD_MAX)
                 elif _left_down:
                         # گام ۶R2 — کشیدن با دکمه‌ی چپ (یا انگشت روی اندروید —
@@ -1001,7 +1021,7 @@ func _input(event: InputEvent) -> void:
                                                 -GameConstants.CAM_PAN_SIDE_MAX,
                                                 GameConstants.CAM_PAN_SIDE_MAX)
                                 _pan_target = clampf(
-                                                _pan_target - event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
+                                                _pan_target + event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
                                                 -GameConstants.CAM_PAN_BACK_MAX,
                                                 GameConstants.CAM_PAN_FWD_MAX)
         elif event is InputEventKey:

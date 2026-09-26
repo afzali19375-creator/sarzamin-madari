@@ -382,9 +382,11 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
         }
 
 
-## ذوب دریاچه‌های تک‌سلولی محصور در خشکی (§۸.۳: «هیچ آب در وسط جزیره نباید»)
-## سلول آب که هر ۸ همسایه‌اش خشکی/قابل‌عبور است → چمن low (g1، ارتفاع همسایه‌ها).
-## قطعی و بدون بازگشت — چند گذر تا جای‌به‌جایی ثابت (حلقه‌های ۲-تایی را هم می‌خورد).
+## ذوبِ «همه‌ی» دریاچه‌های محصور در خشکی (§۸.۳: «هیچ آب در وسط جزیره نباید»)
+## گام ۶R۱۴ — نسخه‌ی فلود-فیل: از هر سلولِ آبیِ مرزی سیلاب می‌کنیم؛ هر سلولِ آبی
+## که از مرز قابل‌دسترس نبود = «دریاچه‌ی داخلی» (هر اندازه، حتی چندسلولی) → چمن.
+## قبلاً فقط تک‌سلولی‌ها ذوب می‌شدند و تالاب‌های ۲-۵ سلولی به‌صورت «حفره‌ی آب
+## وسط جزیره» باقی می‌ماندند (بازخورد تصویری کاربر). قطعی و بدون بازگشت.
 @warning_ignore("integer_division")
 func _melt_inner_lakes(modules: PackedInt32Array, walkable: PackedByteArray,
                 tops: PackedFloat32Array) -> void:
@@ -395,29 +397,87 @@ func _melt_inner_lakes(modules: PackedInt32Array, walkable: PackedByteArray,
                         break
         if grass_module < 0:
                 return
-        for _pass in 8:
-                var changed := false
+        var n := _size * _size
+        var is_water := PackedByteArray()
+        is_water.resize(n)
+        var sea := PackedByteArray()
+        sea.resize(n)
+        # گام ۶R۱۴c — کلِ فرایند ۲ دور کامل می‌رود: پرکردنِ تنگه‌ها در دورِ اول
+        # ممکن است کانال‌های باقی‌مانده را «دریاچه‌ی بسته» کند؛ دورِ دوم با
+        # is_water تازه‌سازی‌شده آن‌ها را هم ذوب می‌کند.
+        for _round in 2:
+                # --- ۱) علامت‌گذاریِ آب ---
+                for i in n:
+                        is_water[i] = 0 if walkable[i] == 1 else 1
+                for i in n:
+                        sea[i] = 0
+                # --- ۲) سیلاب از مرز گرید (دریای بیرونی) ---
+                var q: Array[int] = []
+                for cy in _size:
+                        for cx in _size:
+                                if cx == 0 or cy == 0 or cx == _size - 1 or cy == _size - 1:
+                                        var bi := cy * _size + cx
+                                        if is_water[bi] == 1 and sea[bi] == 0:
+                                                sea[bi] = 1
+                                                q.append(bi)
+                var head := 0
+                while head < q.size():
+                        var cur: int = q[head]
+                        head += 1
+                        var cx := cur % _size
+                        var cy := int(cur / float(_size))
+                        for d in 4:
+                                var nx: int = cx + DIR_X[d]
+                                var ny: int = cy + DIR_Y[d]
+                                if nx < 0 or ny < 0 or nx >= _size or ny >= _size:
+                                        continue
+                                var ni := ny * _size + nx
+                                if is_water[ni] == 1 and sea[ni] == 0:
+                                        sea[ni] = 1
+                                        q.append(ni)
+                # --- ۳) ذوبِ دریاچه‌های محصور ---
                 for cy in _size:
                         for cx in _size:
                                 var i := cy * _size + cx
-                                if walkable[i] == 1:
-                                        continue  # خشکی است
-                                var surrounded := true
-                                for d in 8:
-                                        var nx: int = cx + DIR8_X[d]
-                                        var ny: int = cy + DIR8_Y[d]
-                                        if nx < 0 or ny < 0 or nx >= _size or ny >= _size:
-                                                surrounded = false
-                                                break
-                                        var ni := ny * _size + nx
-                                        if walkable[ni] == 0:
-                                                surrounded = false
-                                                break
-                                if not surrounded:
-                                        continue
-                                modules[i] = grass_module
-                                walkable[i] = 1
-                                tops[i] = _mods[grass_module]["top"]
-                                changed = true
-                if not changed:
-                        break
+                                if is_water[i] == 1 and sea[i] == 0:
+                                        modules[i] = grass_module
+                                        walkable[i] = 1
+                                        tops[i] = _mods[grass_module]["top"]
+                # --- ۴) پرکردنِ تنگه‌ها ---
+                # اثباتِ پرابِ رندر (۶R۱۴c): WFC کانال‌های آبِ ۱-۳ سلولی می‌سازد
+                # که جزیره را به نوارهای موازی می‌شکند (بازخورد تصویری: «راه‌راه
+                # مورب روی کل جزیره» — در نمایِ سایه‌دار، سطحِ آبِ کانال با حلقه‌ی
+                # کم‌عمقِ روشن، سفیدِ شسته می‌شود). قانون: سلولِ آبِ متصل به دریا
+                # که در هر دو سمتِ یک محور تا ۵ سلول خشکی دارد = شکاف → چمن.
+                # خلیجِ پهن (≥۶ سلول) و دریایِ باز دست‌نخورده می‌مانند.
+                for _pass in 8:
+                        var any_fill := false
+                        for cy in _size:
+                                for cx in _size:
+                                        var i2 := cy * _size + cx
+                                        if walkable[i2] == 1 or is_water[i2] == 0 \
+                                                        or sea[i2] == 0:
+                                                continue
+                                        if (_scan_land(walkable, cx, cy, 1, 0, 5) \
+                                                        and _scan_land(walkable, cx, cy, -1, 0, 5)) \
+                                                        or (_scan_land(walkable, cx, cy, 0, 1, 5) \
+                                                        and _scan_land(walkable, cx, cy, 0, -1, 5)):
+                                                modules[i2] = grass_module
+                                                walkable[i2] = 1
+                                                tops[i2] = _mods[grass_module]["top"]
+                                                any_fill = true
+                        if not any_fill:
+                                break
+
+
+## گام ۶R۱۴c — آیا در جهتِ (dx,dy) تا «reach» سلول خشکی هست؟ (برای تشخیص تنگه)
+func _scan_land(walkable: PackedByteArray, cx: int, cy: int,
+                dx: int, dy: int, reach: int) -> bool:
+        for r in range(1, reach + 1):
+                var nx: int = cx + dx * r
+                var ny: int = cy + dy * r
+                if nx < 0 or ny < 0 or nx >= _size or ny >= _size:
+                        return false
+                if walkable[ny * _size + nx] == 1:
+                        return true
+        return false

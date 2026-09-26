@@ -13,7 +13,7 @@ config_version=5
 config/name="سرزمین مادری — Sarzamin-e Madari"
 config/description="Bad North–style island defense — Achaemenid Persia vs Greek invaders. دفاع از جزیره در روزگار هخامنشیان."
 run/main_scene="res://scenes/main/Main.tscn"
-config/features=PackedStringArray("4.5", "Forward Plus")
+config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [autoload]
@@ -58,6 +58,13 @@ locale/fallback="en"
 
 [rendering]
 
-renderer/rendering_method="forward_plus"
+textures/vram_compression/import_etc2_astc=true
+; 6R14 - GPU quality up (user): target Redmi Note 9 Pro (Adreno 618) on
+; gl_compatibility - MSAA 4x + 4096 shadows + high soft filter + aniso 8x
+textures/default_filters/anisotropic_filtering_level=8
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+anti_aliasing/quality/msaa_3d=0
+
+renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-anti_aliasing/quality/msaa_3d=2

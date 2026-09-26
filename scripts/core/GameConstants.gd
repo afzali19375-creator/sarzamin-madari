@@ -70,10 +70,14 @@ const CAM_FOV := 55.0
 const CAM_PITCH_DEG := -55.0
 const CAM_YAW0_DEG := 45.0                # قابل چرخش ۳۶۰ درجه
 ## گام ۶R۱۲ — «جزیره زیاده بزرگ بود»: جزیره کوچک‌تر شد → دوربین پایین‌تر/نزدیک‌تر
-const CAM_HEIGHT0 := 13.0
+## گام ۶R۱۴c — ارتفاعِ پیش‌فرض ۱۳→۲۷: قابِ مرجع «جزیره‌ی کوچک وسطِ دریای پهن»
+## است (اسکرین‌شات‌ها: جزیره ~۴۰٪ عرضِ کادر)؛ ۱۳ جزیره را تمام‌صفحه می‌کرد
+const CAM_HEIGHT0 := 27.0
 const CAM_MIN_HEIGHT := 8.0
-const CAM_MAX_HEIGHT := 20.0
-const CAM_ZOOM_SPEED := 6.0               # m/s
+## گام ۶R۱۴ — «بتواند زوم‌اوت بیشتری بکند»: سقف زوم ۲۰→۳۴ متر — جزیره با
+## حاشیه‌ی آبِ پهن مثل اسکرین‌شات‌های مرجع در کادر جا می‌شود
+const CAM_MAX_HEIGHT := 34.0
+const CAM_ZOOM_SPEED := 7.0               # m/s
 const CAM_ROTATE_SPEED := 120.0           # درجه بر ثانیه (Q/E/جهت‌نما) — بازخورد کاربر: چرخش حس‌بهتر
 const CAM_DRAG_SENS := 0.35               # حساسیت چرخش با کشیدن موس/لمس (اندروید) — گام ۶R2
 const CAM_DRAG_START_PX := 12.0           # آستانه‌ی تفکیک «تپ» از «کشیدن» (px)
@@ -239,19 +243,21 @@ const COL_CRIMSON := Color("c9564a")      # سرخ پارسی
 const COL_NIGHT := Color("0c2f36")        # منو
 
 # --- محیط ---
-const COL_SKY := Color("d4e4ec")              # آسمان
-const COL_WATER_SHALLOW := Color("7db4a8")    # گام ۶R۱۳ — فیروزه‌ایِ شفافِ کم‌عمق (حلقه‌ی ساحل)
-const COL_WATER_DEEP := Color("376a78")       # آب عمیقِ آرام — کنتراستِ واضح با ساحل
+const COL_SKY := Color("ccd6d4")              # گام ۶R۱۴ — خاکستریِ مه‌آلودِ مرجع
+## گام ۶R۱۴ — آبِ کم‌اشباعِ «مه‌آلود» مرجع: فیروزه‌ی پاستلی، نه سبزِ اشباع
+const COL_WATER_SHALLOW := Color("8fb3ab")    # حلقه‌ی کم‌عمقِ روشنِ ساحل
+const COL_WATER_DEEP := Color("5c827e")       # آبِ عمیقِ آرامِ خاکستری-فیروزه‌ای
 const COL_BEACH_SAND := Color("e8d5a8")       # شن ساحل
 ## گام ۶R۱۲ — زمینِ پایه‌ی «خشک و کمرنگ» (اسکرین‌شات: جزیره‌ی پاستلی با پدهای
 ## سبزِ مجزا) — چمنِ پایه از سبزِ اشباع به خشکِ کاهی تغییر کرد؛ پدهای بیضی
 ## سبزِ تازه روی آن می‌نشینند
-const COL_GRASS_LIGHT := Color("a8b072")      # چمنِ خشکِ روشن (زمینِ پایه)
-const COL_GRASS_DARK := Color("8e9a62")       # چمنِ خشکِ تیره
+const COL_GRASS_LIGHT := Color("9db878")      # گام ۶R۱۴c — چمنِ سبزِ مرجع (تق‌تر از قبل)
+const COL_GRASS_DARK := Color("7c9960")       # سایه‌ی ملایمِ چمن
 ## پدهای بیضی سبز — لکه‌های چمنِ زنده‌ی جزیره (VoronoiBlocks ۶R۱۲)
-const COL_PAD_LIGHT := Color("7fae62")
-const COL_PAD_DARK := Color("6a9650")
-const COL_PAD_EDGE := Color("547c40")
+## گام ۶R۱۴ — پدها مثل مرجع «روشن‌تر از چمن»‌اند، نه تیره‌تر
+const COL_PAD_LIGHT := Color("b7c98e")
+const COL_PAD_DARK := Color("a7bb7e")
+const COL_PAD_EDGE := Color("93a96c")
 const COL_ROCK := Color("8b8073")             # صخره
 const COL_ROCK_DARK := Color("5e5548")        # صخره تیره
 const COL_SUN := Color("fff4d6")              # نور خورشید

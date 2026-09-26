@@ -1970,10 +1970,12 @@ func _phase16_flags_and_camera() -> void:
                                 _sub_t = _t
                 8:
                         if _t - _sub_t >= 0.5:
-                                var pf2: float = GameConstants.CAM_PAN_FWD_MAX
+                                # گام ۶R۱۴ — درگِ به بالا = «دنیا زیر انگشت»: محتوا
+                                # با انگشت می‌رود → پنِ منفی (کشش به سمت پایینِ صحنه)
+                                var pb2: float = GameConstants.CAM_PAN_BACK_MAX
                                 _check("camera_pans_with_vertical_drag",
-                                                target_scene._pan_target >= 0.5 * pf2 \
-                                                and target_scene._pan_target <= pf2 + 1e-4,
+                                                target_scene._pan_target <= -0.5 * pb2 \
+                                                and target_scene._pan_target >= -pb2 - 1e-4,
                                                 "t=%.2f" % target_scene._pan_target)
                                 # ریستِ پن برای ادامه‌ی بازی (بازه‌ی آزادی کوچک است)
                                 target_scene._pan_target = 0.0
@@ -2140,11 +2142,17 @@ func _phase17_torch_burns_house() -> void:
                                 _phase = 18
                                 return
                         # گام ۶R۱۲ — این فاز «مکانیزمِ مشعل» را می‌آزماید نه دوئل
-                        # با کماندارها؛ در جزیره‌ی کوچک کماندارِ مدافع، مهاجمِ
+                        # با کماندار؛ در جزیره‌ی کوچک کماندارِ مدافع، مهاجمِ
                         # کوشایی را پیش از سه پرتاب قطع می‌کرد (hp=99 ضدگلوله‌ی تست)
                         _torch_peltast.hp = 99
                         _torch_peltast.raid_target = hxz
                         _torch_peltast.target_house = _torch_house
+                        # گام ۶R۱۴ — ایزولاسیونِ دوم: این فاز «پرتابِ مشعل → آتش →
+                        # سوختن» را می‌آزماید نه «۳ پرتاب در پنجره‌ی زمانی» — با
+                        # چیدمانِ جدیدِ جزیره (فلود-فیل) باندِ ایستِ مهاجم لرزان
+                        # می‌شود و شمارِ پرتاب در ۴۰ث به ۱-۲ می‌رسید؛ hp=1 یعنی
+                        # همان ۱ پرتابِ واقعی کافی است — مستقل از چیدمان
+                        _torch_house.hp = 1
                         _sub = 1
                         _sub_t = _t
                 1:

@@ -177,15 +177,16 @@ func _pad_shader() -> Shader:
         sh.code = """
 shader_type spatial;
 render_mode unshaded, blend_mix, cull_back, depth_draw_opaque;
-uniform float intensity = 0.62;
-uniform vec3 edge_tint = vec3(0.33, 0.49, 0.25);
+uniform float intensity = 0.5;
+uniform vec3 edge_tint = vec3(0.62, 0.72, 0.48);
 void fragment() {
         vec2 p = UV - vec2(0.5);
         float d = length(p * 2.0);
-        float a = 1.0 - smoothstep(0.82, 1.0, d);
-        // دو-تُن: مرکزِ روشن‌تر، حاشیه‌ی تیره‌تر — لکه‌ی چمنِ زنده
-        vec3 col = COLOR.rgb * mix(1.06, 0.82, smoothstep(0.25, 1.0, d));
-        col = mix(col, edge_tint, smoothstep(0.86, 1.0, d) * 0.45);
+        float a = 1.0 - smoothstep(0.78, 1.0, d);
+        // گام ۶R۱۴c — پدِ «روشن‌تر از چمن» مثل مرجع: مرکزِ روشن، لبه‌ی نرمِ
+        // سبزِ کمرنگ (قبلاً لبه‌ی زیتونیِ تیره بود — حسِ لکه)
+        vec3 col = COLOR.rgb * mix(1.14, 0.96, smoothstep(0.2, 1.0, d));
+        col = mix(col, edge_tint, smoothstep(0.82, 1.0, d) * 0.35);
         ALBEDO = col;
         ALPHA = a * intensity;
 }
@@ -234,8 +235,10 @@ func _build_visuals() -> void:
 ## ترنسفورم هم‌راستا با شیب زمین (تیلت) + lift — الگوی CommandGrid
 func _pad_transform(b: Dictionary) -> Transform3D:
         var center: Vector2 = b["center"]
-        var rx: float = b["rx"]
-        var ry: float = b["ry"]
+        # گام ۶R۱۴c — پدها ۵۵٪ کوچک‌تر: در مرجع بیضی‌های «جدا و کوچک»‌اند،
+        # نه فرشِ تمام‌جزیره
+        var rx: float = b["rx"] * 0.55
+        var ry: float = b["ry"] * 0.55
         var h00 := _ground.height_at_world(center + Vector2(-rx, -ry))
         var h10 := _ground.height_at_world(center + Vector2(rx, -ry))
         var h01 := _ground.height_at_world(center + Vector2(-rx, ry))

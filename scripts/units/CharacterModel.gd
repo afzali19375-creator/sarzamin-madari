@@ -140,22 +140,37 @@ func _collect_and_tint(tint: Color, tint_k: float, special: Dictionary) -> void:
                         if mat is StandardMaterial3D:
                                 var sm := (mat as StandardMaterial3D).duplicate() \
                                                 as StandardMaterial3D
+                                # گام ۶R۱۴c — حذفِ بافت: بافتِ تیره‌ی پک ضرب در هر
+                                # تینتی = بدنه‌ی سیاه (بازخورد تصویری). ظاهرِ مرجع =
+                                # فیگورِ تک‌رنگِ مات؛ سیلوئت از هندسه/افزار می‌آید.
+                                if sm.albedo_texture != null:
+                                        _tex = sm.albedo_texture
+                                        sm.albedo_texture = null
                                 mi.set_surface_override_material(i, sm)
                                 _mats.append(sm)
                                 _mat_colors.append(sm.albedo_color)
-                                if _tex == null and sm.albedo_texture != null:
-                                        _tex = sm.albedo_texture
         apply_team_tint(tint, tint_k)
 
 
 ## گِرَش همه‌ی متریال‌ها به رنگ تیم — میکس پیش‌فرض ۴۲٪ تا شکلِ کاراکتر زیر رنگ
 ## گم نشود. رنگِ تینت‌شده جایگزین رنگ پایه در حافظه می‌شود تا فلشِ سفیدِ ضربه
 ## بعد از بازیابی، تینتِ تیم را از دست ندهد.
+## گام ۶R۱۴c — دو استثنا برای «سربازِ تک‌رنگِ مرجع»:
+##   ۱) سطوحِ «تقریباً سیاه» (پکِ *_Male: 0.12/0.19/0.27) تینتِ ۴۲٪ را
+##      می‌بلعند → ~۹۰٪ رنگِ دسته می‌گیرند.
+##   ۲) سطوحِ «بافت‌دار» (Warrior/Ranger با PNG تیره) هم با تینتِ ۴۲٪ تیره
+##      می‌مانند → حداقلِ ۸۵٪ تینت تا مثل مرجعِ «فیگورِ تک‌رنگِ اسباب‌بازی»
+##      خوانا شود (فیروزه‌ایِ انتخاب مخصوصاً واضح).
 func apply_team_tint(tint: Color, tint_k := 0.42) -> void:
         _tint = tint
         _tint_k = tint_k
         for i in _mats.size():
-                var c := _mat_colors[i].lerp(tint, tint_k)
+                var k := tint_k
+                if _mat_colors[i].get_luminance() < 0.2:
+                        k = maxf(tint_k, 0.90)
+                elif _tex != null:
+                        k = maxf(tint_k, 0.85)
+                var c := _mat_colors[i].lerp(tint, k)
                 _mats[i].albedo_color = c
                 _mat_colors[i] = c
 
@@ -287,8 +302,9 @@ func flash_white() -> void:
 
 
 func _restore_flash() -> void:
+        # گام ۶R۱۴c — بافت دیگر وجود ندارد (فیگورِ تک‌رنگ) — فقط رنگِ تینت‌شده
         for i in _mats.size():
-                _mats[i].albedo_texture = _tex
+                _mats[i].albedo_texture = null
                 _mats[i].albedo_color = _mat_colors[i]
 
 

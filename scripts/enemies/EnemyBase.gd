@@ -325,19 +325,22 @@ func _house_tick(pos: Vector2, delta: float) -> bool:
         if d < GameConstants.ENEMY_RAID_STANDOFF - 0.6:
                 _move_with((pos - hxz).normalized(), delta, move_speed)
                 return true
-        # گام ۶R۱۲ — باندِ ایست [۲٫۰..۳٫۲]: از ۳٫۲ متر دورتر → مارس؛ داخل باند
-        # رو به خانه و پرتاب (پس‌زنیِ تیر از ایستِ ۲٫۶ بیرون نمی‌آورد)
-        if d > GameConstants.ENEMY_RAID_STANDOFF + 0.6:
+        # گام ۶R۱۲/۶R۱۴ — باندِ ایست [۲٫۰..۳٫۶]: از ۳٫۶ متر دورتر → مارس؛
+        # داخل باند رو به خانه و پرتاب. گیتِ پرتاب ۳٫۲→۳٫۶: در چیدمانِ جدیدِ
+        # جزیره (فلود-فیلِ دریاچه‌ها) مهاجم گاهی روی ~۳٫۳ متر نوسان می‌کرد
+        # و ساعتِ مشعل می‌ایستاد (خانه هرگز آتش نمی‌گرفت) — پرتابِ از ۳٫۶
+        # همچنان «نزدیک» است (ایستِ آرام ۲٫۶ حفظ شده)
+        if d > GameConstants.ENEMY_RAID_STANDOFF + 1.0:
                 return false
         _face_toward(hxz, delta)
         _model_set_moving(false)
         if h.burning:
                 return true
         _torch_cd -= delta
-        # گام ۶R۱۲ — پرتاب تا ۰٫۶م دورترِ ایست هم مجاز است: پس‌زنیِ تیرِ
+        # گام ۶R۱۲ — پرتاب تا ۱٫۰م دورترِ ایست هم مجاز است: پس‌زنیِ تیرِ
         # کماندار نباید یورشِ آتش را برای همیشه فلج کند (ایستِ بی‌مزاحمت
         # همچنان ۲٫۶m است — بازخورد کاربر «نزدیک‌تر بیایند»)
-        if _torch_cd <= 0.0 and d <= GameConstants.ENEMY_RAID_STANDOFF + 0.6:
+        if _torch_cd <= 0.0 and d <= GameConstants.ENEMY_RAID_STANDOFF + 1.0:
                 _torch_cd = GameConstants.TORCH_COOLDOWN
                 torches_thrown += 1
                 _torch_throw_anim()

@@ -102,23 +102,22 @@ func _avg_top(cc: Vector2i, half: int) -> float:
 ## بیرونِ ضلع (تا داخل شکاف) پهن‌تر و نرم‌تر، داخلِ ضلع تندتر محو —
 ## «هاله دقیقاً از اضلاع بیرون می‌زند، نه از وسط»
 func _edge_glow_shader() -> Shader:
-        # گام ۶R11 — پدِ بیضیِ نرم Bad North (اسکرین‌شات‌های کاربر): لکه‌های
-        # بیضیِ سبزِ تیرهِ ملایم روی چمن — بدونِ دیوار نور، بدونِ درخششِ طلایی
+        # گام ۶R۱۴ — پدِ بیضیِ «روشن‌تر از چمن» مثل مرجع: لکه‌ی نرمِ پاستلیِ
+        # سبزِ روشن (قبلاً لکه‌ی تیره بود و حسِ لکه‌ی کثیف می‌داد)
         var sh := Shader.new()
         sh.code = """
 shader_type spatial;
 render_mode unshaded, depth_draw_never;
-uniform float intensity = 0.38;
-uniform float cell = 2.0;
+uniform float intensity = 0.8;
 uniform float rx = 0.80;
 uniform float ry = 0.68;
-uniform float soft = 0.18;
+uniform float soft = 0.22;
 void fragment() {
         vec2 p = UV - vec2(0.5);
         float d = length(vec2(p.x / rx, p.y / ry));
-        float a = 1.0 - smoothstep(1.0 - soft, 1.0, d);
-        ALBEDO = vec3(0.17, 0.29, 0.17);
-        ALPHA = a * intensity;
+        float a = (1.0 - smoothstep(1.0 - soft, 1.0, d)) * intensity * 0.55;
+        ALBEDO = vec3(0.718, 0.788, 0.557);
+        ALPHA = a;
 }
 """
         return sh
@@ -142,7 +141,9 @@ func _build_visuals() -> void:
         _ground_mat.shader = _edge_glow_shader()
         _apply_command_params()
         _mmi.material_override = _ground_mat
-        _mmi.visible = true
+        # گام ۶R۱۴ — پدها «مخفی تا کلیک روی دسته» (بازخورد کاربر):
+        # جزیره‌ی آرامِ بدون لکه؛ فقط در حالت فرمان ظاهر می‌شوند
+        _mmi.visible = false
         add_child(_mmi)
 
         # گام ۶R11 — دیوارهای نورِ اضلاع حذف شدند (بازخورد: «تایل‌ها خوب
@@ -181,13 +182,15 @@ func _cell_transform(center: Vector2, lift: float) -> Transform3D:
 
 func _apply_command_params() -> void:
         if _ground_mat != null:
-                _ground_mat.set_shader_parameter("intensity", 0.60 if _command else 0.36)
+                _ground_mat.set_shader_parameter("intensity", 0.85 if _command else 0.55)
 
 
-## ورود/خروج حالت فرمان — تایل‌ها همیشه نمایان‌اند؛ اینجا فقط پرنورتر می‌شوند
+## ورود/خروج حالت فرمان — گام ۶R۱۴: پدها فقط در حالت فرمان «نمایان» می‌شوند
 func set_command_mode(on: bool) -> void:
         _command = on
         _apply_command_params()
+        if _mmi != null:
+                _mmi.visible = on
         if not on:
                 _clear_hover()
 

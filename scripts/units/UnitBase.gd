@@ -139,7 +139,7 @@ func _ready() -> void:
         # گام ۶R۱۲ — کاراکتر اسکلتی Quaternius با انیمیشن کامل؛ تینتِ ۴۲٪ رنگ دسته
         # روی پالت کاراکتر (قابل‌تفکیک از دور، شکل کاراکتر زیر رنگ گم نمی‌شود)
         _model = CharacterModel.new()
-        _model.setup(_model_kind(), _spawn_color, 0.42, _model_special())
+        _model.setup(_model_kind(), _spawn_color, 0.55, _model_special())
         add_child(_model)
         _body = _model.body_root()
 
@@ -949,7 +949,7 @@ func set_selected_ring(on: bool) -> void:
                         fl.set_color(GameConstants.COL_SELECTED)
         else:
                 if _model != null:
-                        _model.apply_team_tint(_base_color, 0.42)
+                        _model.apply_team_tint(_base_color, 0.55)
                 if fl != null:
                         fl.set_color(_base_color)
 
@@ -959,7 +959,7 @@ func set_selected_ring(on: bool) -> void:
 func clear_selected_tint() -> void:
         _sel_tinted = false
         if _model != null:
-                _model.apply_team_tint(_base_color, 0.42)
+                _model.apply_team_tint(_base_color, 0.55)
         var fl := _find_squad_flag()
         if fl != null:
                 fl.set_color(_base_color)
@@ -1158,7 +1158,7 @@ func _set_color(c: Color) -> void:
         if _sel_tinted:
                 return
         if _model != null:
-                _model.apply_team_tint(c, 0.42)
+                _model.apply_team_tint(c, 0.55)
 
 
 # ---------------- Fidget (§۵.۳ پرامت — لایه ۲) ----------------
