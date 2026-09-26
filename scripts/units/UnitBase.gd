@@ -110,9 +110,12 @@ var garrisoned := false
 # ---------------- بصری ----------------
 var _spawn_color: Color
 var _base_color: Color
-var _mat: ShaderMaterial
-var _body: MeshInstance3D
+var _body: Node3D
 var _ring: MeshInstance3D
+## کاراکتر Low-Poly واقعی (پک KayKit «Adventurers» — CC0، ۷۶ انیمیشن اسکلتی)
+## گام ۶R11 — بازخورد کاربر: «حرکت‌ها/ضربه‌ها/جنگ خیلی ابتدایی است» →
+## راه‌رفتن/حمله/ضربه‌خوردن/مرگِ واقعی از اسکلتِ پک — بدنه‌ی چینی حذف شد
+var _model: CharacterModel
 
 
 func _ready() -> void:
@@ -127,20 +130,17 @@ func _ready() -> void:
         else:
                 _spawn_color = GameConstants.UNIT_PALETTE.pick_random()
         _base_color = _spawn_color
-        _mat = ChibiLook.shader_mat(_spawn_color)
 
         # رسیدن موقتی است: با جابه‌جایی پرچم باید دوباره راه بیفتد
         # (رفع باگ «گیر کردن در آیدل بعد از رسیدن») — فقط برای کانال ۰/بدون اسلات
         GameEvents.goal_changed.connect(_on_goal_changed)
 
-        # گام ۶R7 — تنه‌ی چینیِ اشکی (شکم + کلاه‌خودِ نوک‌تیز، گرادیانِ دسته)
-        _body = MeshInstance3D.new()
-        _body.mesh = ChibiLook.body_mesh()
-        _body.position.y = 0.0
-        _body.material_override = _mat
-        add_child(_body)
-        ChibiLook.add_face(_body)
-        ChibiLook.add_legs(self, _spawn_color)
+        # گام ۶R11 — کاراکتر اسکلتی KayKit با انیمیشن کامل؛ تینتِ ۴۲٪ رنگ دسته
+        # روی بافت پالت کاراکتر (قابل‌تفکیک از دور، شکل کاراکتر زیر رنگ گم نمی‌شود)
+        _model = CharacterModel.new()
+        _model.setup(_model_kind(), _spawn_color, 0.42, _model_special())
+        add_child(_model)
+        _body = _model.body_root()
 
         # حلقه‌ی انتخاب (فقط دسته‌ی انتخابی — الگوی Bad North)
         _ring = MeshInstance3D.new()
@@ -191,6 +191,17 @@ func _build_gear() -> void:
         pass
 
 
+## نقشِ کاراکتر KayKit این یونیت — زیرکلاس‌ها override می‌کنند:
+##   knight=جاویدان | barbarian=نیزه‌دار | rogue_hooded=کماندار
+func _model_kind() -> StringName:
+        return &"knight"
+
+
+## تینتِ ویژه‌ی گره‌های مدل (مثلاً سپر فیروزه‌ای جاویدان) — زیرکلاس‌ها override
+func _model_special() -> Dictionary:
+        return {}
+
+
 # ---------------- سلامت، ضربه و مرگ دائمی (گام ۶) ----------------
 
 ## جان پایه — زیرکلاس‌ها override می‌کنند
@@ -211,6 +222,9 @@ func take_hit(dmg: int = 1, from_dir: Vector3 = Vector3.ZERO,
                 return
         hp -= dmg
         _flash_hit()
+        # گام ۶R11 — انیمیشن ضربه‌خوردنِ اسکلتی (Hit_A پک)
+        if _model != null:
+                _model.play_hit()
         _knockback(from_dir)
         # گام ۶R9 — خون‌ریزی: پاشش در سینه‌ی سرباز + صدای برخورد
         BattleFX.blood_burst(get_parent(), global_position + Vector3(0, 0.45, 0),
@@ -240,7 +254,10 @@ func _knockback(from_dir: Vector3) -> void:
 
 func _flash_hit() -> void:
         _flash_restore = _base_color
-        ChibiLook.set_flash(_mat, 1.0)
+        # گام ۶R11 — فلشِ سفید داخل CharacterModel (متریال موقتاً سفید، خودش
+        # بازیابی می‌کند) — شیدرِ فلشِ چینی حذف شد
+        if _model != null:
+                _model.flash_white()
         _flash_t = 0.0
         _flashing = true
 
@@ -257,9 +274,12 @@ func die() -> void:
         # قانون آهنین سند طراحی §۷: مرگ دائمی است — هرگز برنمی‌گردد
         GameEvents.unit_permanently_died.emit(self)
         set_process(false)
-        # گام ۶R9 — فلشِ در جریان روی جسد نمی‌ماند
+        # گام ۶R9 — فلشِ در جریان روی جسد نمی‌ماند (مدل خودش بازیابی می‌کند)
         _flashing = false
-        ChibiLook.set_flash(_mat, 0.0)
+        # گام ۶R11 — توقفِ انیمیشنِ اسکلتی در ژستِ فعلی؛ افتادن با چرخشِ کلِ نود
+        # انجام می‌شود (تجهیزِ پروسیجرالِ زیرِ نود هم هماهنگ می‌افتد)
+        if _model != null:
+                _model.freeze_pose()
         # گام ۶R9 — خون: لکه‌ی دائمی جای سقوط + صدای افتادن
         var gy := position.y
         if ground_provider.is_valid():
@@ -326,6 +346,10 @@ func _strike_land(wr: WeakRef, dmg: int, reach: float) -> void:
         dir.y = 0.0
         hostile.take_hit(dmg,
                         dir.normalized() if dir.length() > 0.001 else Vector3.ZERO, self)
+        # گام ۶R11 — انیمیشن حمله‌ی اسکلتی (شمشیر/تبر/کاتاپولت) هم‌گام با
+        # چرخه‌ی ضربه — «حرکت‌ها و ضربه‌ها ابتدایی نباشد» (بازخورد کاربر)
+        if _model != null:
+                _model.play_attack()
         _strike_impact_fx()
         # گام ۶R4 — جرقه‌ی برخورد در نقطه‌ی میانی (حسِ ضربه خواناتر می‌شود)
         _spawn_hit_spark((hostile.global_position + global_position) * 0.5 \
@@ -541,7 +565,6 @@ func _process(delta: float) -> void:
                 _flash_t += delta
                 if _flash_t >= 0.12:
                         _flashing = false
-                        ChibiLook.set_flash(_mat, 0.0)
                         _set_color(GameConstants.COL_ARRIVED \
                                         if _arrived else _flash_restore)
 
@@ -750,7 +773,8 @@ func _flee_despawn() -> void:
 ## گام ۶R9 — تسک A: خاکستری‌شدن پیکر/پرتره — فرماندهِ افتاده رنگِ دسته را نمی‌ماند
 func gray_out_body() -> void:
         _base_color = GameConstants.COL_FLAG_GRAY
-        ChibiLook.set_base(_mat, GameConstants.COL_FLAG_GRAY)
+        if _model != null:
+                _model.apply_team_tint(GameConstants.COL_FLAG_GRAY, 0.8)
 
 
 func is_arrived() -> bool:
@@ -866,10 +890,46 @@ func _on_goal_changed(_new_goal: Vector2) -> void:
                 _body.position.y = 0.0
 
 
-## حلقه‌ی انتخاب دسته (Bad North: زیر دسته‌ی انتخابی حلقه‌ی سفید)
+## حلقه‌ی انتخاب دسته — گام ۶R10: زبان انتخاب Bad North از اسکرین‌شات‌های کاربر:
+## دسته‌ی انتخابی «تمام‌قد» فیروزه‌ی روشن می‌شود (بدنه + پرچم + حلقه‌ی زیر پا)
+## و با لغو انتخاب به رنگ منطقیِ جاری (تولد/خاکستری بی‌فرمانده) برمی‌گردد.
+## نکته: رنگ منطقی در _base_color زندگی می‌کند؛ تینتِ انتخاب فقط شیدر را عوض
+## می‌کند تا با فلشِ ضربه (یونیفرم flash) و حالت «رسیده» تداخل نکند.
 func set_selected_ring(on: bool) -> void:
         if _ring != null:
                 _ring.visible = on
+                var rm := _ring.material_override as StandardMaterial3D
+                if rm != null:
+                        rm.albedo_color = GameConstants.COL_SELECTED \
+                                        if on else Color(1, 1, 1, 0.35)
+        if _model == null:
+                return
+        var fl := _find_squad_flag()
+        if on:
+                if _model != null:
+                        _model.apply_team_tint(GameConstants.COL_SELECTED, 0.78)
+                if fl != null:
+                        fl.set_color(GameConstants.COL_SELECTED)
+        else:
+                if _model != null:
+                        _model.apply_team_tint(_base_color, 0.42)
+                if fl != null:
+                        fl.set_color(_base_color)
+
+
+## پرچمِ فرمانده — فقط فرماندهِ دسته SquadFlag دارد (صحنه به فرزندش وصل می‌کند)
+func _find_squad_flag() -> SquadFlag:
+        for c in get_children():
+                if c is SquadFlag:
+                        return c
+        return null
+
+
+## رنگ فعلی تینتِ مدل — برای تست خودکارِ تینت انتخاب
+func body_shader_color() -> Color:
+        if _model != null:
+                return _model.display_color()
+        return _base_color
 
 
 func is_ring_visible() -> bool:
@@ -1027,6 +1087,9 @@ func _avoid_step(from: Vector2, step: Vector2, to_dir: Vector2,
 
 
 func _bob_visual(moving: bool) -> void:
+        # گام ۶R11 — انیمیشن راه‌رفتنِ اسکلتی (Walking_A) بر اساس وضعیت حرکت
+        if _model != null:
+                _model.set_moving(moving)
         var target := absf(sin(_bob_t * 9.0)) * 0.05 if moving else 0.0
         var k := clampf(12.0 * get_process_delta_time(), 0.0, 1.0)
         _body.position.y = lerpf(_body.position.y, target, k)
@@ -1034,7 +1097,12 @@ func _bob_visual(moving: bool) -> void:
 
 func _set_color(c: Color) -> void:
         _base_color = c
-        ChibiLook.set_base(_mat, c)
+        # گام ۶R10 — حینِ انتخابِ Bad North بدنه فیروزه‌ای می‌ماند؛ رنگِ منطقی
+        # (رسیده/تولد) فقط ثبت می‌شود تا با لغو انتخاب برگردد
+        if is_ring_visible():
+                return
+        if _model != null:
+                _model.apply_team_tint(c, 0.42)
 
 
 # ---------------- Fidget (§۵.۳ پرامت — لایه ۲) ----------------

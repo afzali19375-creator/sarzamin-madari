@@ -23,14 +23,15 @@ void vertex() {
         VERTEX.y += sin(TIME * wave_freq * 0.63 + k * 4.7) * wave_amp * 0.45 * k;
 }
 void fragment() {
-        // گام ۶R2 — حاشیه‌ی عاجی دور پارچه + درخشش ملایم: پرچم واضح در هر زمینه
+        // گام ۶R2 — حاشیه‌ی عاجی دور پارچه؛ گام ۶R11 — درخشش خیلی کم
+        // (پرچم ماتِ پارچه‌ای مثل اسکرین‌شات‌ها، نه نئون)
         float bx = min(UV.x, 1.0 - UV.x);
         float by = min(UV.y, 1.0 - UV.y);
         float border = 1.0 - clamp(min(bx, by) * 7.0, 0.0, 1.0);
         vec3 cloth = albedo.rgb;
         vec3 trim = vec3(0.94, 0.90, 0.76);
         ALBEDO = mix(cloth, trim, border * 0.92);
-        EMISSION = cloth * (0.28 - border * 0.2);
+        EMISSION = cloth * (0.10 - border * 0.06);
         ROUGHNESS = 0.9;
 }"
 

@@ -7,7 +7,8 @@ extends UnitBase
 ##   * فقط در ایست شلیک می‌کند
 ##   * برد ARCHER_RANGE + مسیر باز (has_clear_shot) + بدون هم‌رزمی در کریدور
 ##   * خنک‌شدن ARCHER_COOLDOWN؛ تیر بالستیک (ArrowProjectile)
-## بصری: لاجوردی + کمان حلقه‌ای در دست چپ + تیردان پشت.
+## بصری: کاراکتر Rogue_Hooded پک KayKit (کاتاپولت دوشیِ داخل اسکلت) + تیردانِ
+## پشت + تیرِ شناور هنگام هدف‌گیری (گام ۶R11 — کمانِ پروسیجرال پنهان شد)
 
 var _bow: Node3D
 var _quiver: MeshInstance3D
@@ -19,22 +20,27 @@ func _default_hp() -> int:
         return GameConstants.PLAYER_HP_ARCHER
 
 
+func _model_kind() -> StringName:
+        return &"rogue_hooded"
+
+
 func _build_gear() -> void:
-        # گام ۶R9 — کمانِ واقعی: شانه‌ی خمیده از بند‌های چوبی روی قوس + زه‌ی
-        # عاجی + نقشِ برنزیِ دسته — روی پیوتِ دست چپ، زه رو به سینه‌ی کماندار
+        # گام ۶R11 — کاتاپولت دوشی داخل اسکلت Rogue_Hooded دیده می‌شود؛
+        # کمانِ پروسیجرال ۶R9 فقط نگه داشته می‌شود ولی پنهان است (ضدِ تکرار)
         _bow = WeaponLook.bow(0.3)
         _bow.position = Vector3(-0.4, -0.07, 0.02)
         _bow.rotation_degrees = Vector3(0.0, 90.0, 0.0)
+        _bow.visible = false
         _hand.add_child(_bow)
 
-        # تیردان پشت
+        # تیردان پشت (قدِ مدلِ اسکلتی KayKit ≈ ۰٫۹۵m)
         _quiver = MeshInstance3D.new()
         var qm := CylinderMesh.new()
         qm.top_radius = 0.05
         qm.bottom_radius = 0.05
         qm.height = 0.34
         _quiver.mesh = qm
-        _quiver.position = Vector3(0.12, 0.44, -0.17)
+        _quiver.position = Vector3(0.14, 0.55, -0.16)
         _quiver.rotation_degrees.z = 18.0
         var qmat := StandardMaterial3D.new()
         qmat.albedo_color = GameConstants.COL_GOLD
@@ -47,7 +53,7 @@ func _build_gear() -> void:
         var nm := BoxMesh.new()
         nm.size = Vector3(0.02, 0.02, 0.4)
         _nock.mesh = nm
-        _nock.position = Vector3(-0.26, 0.35, 0.14)
+        _nock.position = Vector3(0.05, 0.5, 0.22)
         var nmat := StandardMaterial3D.new()
         nmat.albedo_color = GameConstants.COL_BEACH_SAND
         _nock.material_override = nmat

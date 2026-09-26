@@ -5,7 +5,12 @@ class_name GameConstants
 
 # ---------- هویت بیلد ----------
 ## روی صفحه‌ی تست و منو نمایش داده می‌شود تا همیشه مشخص باشد کاربر کدام نسخه را اجرا می‌کند
-const BUILD_ID := "2026-09-25-r16"
+const BUILD_ID := "2026-09-26-r17"
+
+# ---------- گام ۶R10 — زبان انتخاب Bad North (اسکرین‌شات‌های کاربر) ----------
+## در تصاویر مرجع کاربر: دسته‌ی انتخابی «تمام‌قد» فیروزه‌ای روشن می‌شود (بدنه +
+## پرچم) و با لغو انتخاب به رنگ دسته برمی‌گردد؛ حلقه‌ی زیر پا هم همان فیروزه‌ای
+const COL_SELECTED := Color("3edbf0")
 
 # ---------- گام ۶R6 — بازطراحی سه‌بخشی (بازخورد کاربر) ----------
 ## باگ ۱: قایق = وسیله‌ی حمل‌ونقل واقعی؛ سربازانِ سوار، موجودیت واقعی‌اند
@@ -24,8 +29,8 @@ const BLOCK_SITE_JITTER := 0.9            # لرزش قطعیِ سایت‌ها 
 const BLOCK_SEAM_W := 0.05                # پهنای درزِ تیره‌ی روی لبه‌ی مشترک (m)
 
 ## باگ ۳: پالت محیط به سبک مرجع (Low-Poly پاستلی — Bad North)
-const COL_CLIFF := Color("cfc9bc")        # صخره‌ی سفید-خاکستری لایه‌ی زیرین
-const COL_CLIFF_DARK := Color("a49d90")   # سایه‌ی صخره
+const COL_CLIFF := Color("f2f0e6")        # گام ۶R11 — صخره‌ی آهکیِ تقریباً سفید (اسکرین‌شات‌ها)
+const COL_CLIFF_DARK := Color("d9d5c6")   # سایه‌ی صخره
 const COL_HOUSE_WALL := Color("f2ede1")   # دیوار سفید خانه
 const COL_HOUSE_ROOF := Color("8a6448")   # سقف قهوه‌ای
 const COL_HOUSE_ROOF_HI := Color("d9c8a8")# بژِ لبه‌ی سقف
@@ -225,11 +230,11 @@ const COL_NIGHT := Color("0c2f36")        # منو
 
 # --- محیط ---
 const COL_SKY := Color("d4e4ec")              # آسمان
-const COL_WATER_SHALLOW := Color("6c8a97")    # آب کم‌عمق — آبی-خاکستری مات
-const COL_WATER_DEEP := Color("46626f")       # آب عمیق — آبی-خاکستری مات
+const COL_WATER_SHALLOW := Color("8fb3b0")    # گام ۶R11 — آبِ مه‌آلودِ فیروزه‌ایِ ملایم
+const COL_WATER_DEEP := Color("5f8689")       # آب عمیق
 const COL_BEACH_SAND := Color("e8d5a8")       # شن ساحل
-const COL_GRASS_LIGHT := Color("7a9a5c")      # چمن روشن
-const COL_GRASS_DARK := Color("5c7a44")       # چمن تیره
+const COL_GRASS_LIGHT := Color("a2c17c")      # گام ۶R11 — چمنِ پاستلیِ زرد-سبز
+const COL_GRASS_DARK := Color("87a565")       # چمن تیره
 const COL_ROCK := Color("8b8073")             # صخره
 const COL_ROCK_DARK := Color("5e5548")        # صخره تیره
 const COL_SUN := Color("fff4d6")              # نور خورشید

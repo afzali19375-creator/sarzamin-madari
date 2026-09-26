@@ -102,51 +102,23 @@ func _avg_top(cc: Vector2i, half: int) -> float:
 ## بیرونِ ضلع (تا داخل شکاف) پهن‌تر و نرم‌تر، داخلِ ضلع تندتر محو —
 ## «هاله دقیقاً از اضلاع بیرون می‌زند، نه از وسط»
 func _edge_glow_shader() -> Shader:
+        # گام ۶R11 — پدِ بیضیِ نرم Bad North (اسکرین‌شات‌های کاربر): لکه‌های
+        # بیضیِ سبزِ تیرهِ ملایم روی چمن — بدونِ دیوار نور، بدونِ درخششِ طلایی
         var sh := Shader.new()
         sh.code = """
 shader_type spatial;
-render_mode unshaded, blend_add, cull_disabled, depth_draw_never;
+render_mode unshaded, depth_draw_never;
 uniform float intensity = 0.38;
-uniform float pulse_speed = 1.3;
 uniform float cell = 2.0;
-uniform float inset = 0.08;
-uniform float corner = 0.30;
-uniform float sigma_in = 0.034;
-uniform float sigma_out = 0.06;
+uniform float rx = 0.80;
+uniform float ry = 0.68;
+uniform float soft = 0.18;
 void fragment() {
-        vec2 p = (UV - vec2(0.5)) * cell;
-        float b = cell * 0.5 - inset;
-        vec2 q = abs(p) - vec2(b - corner);
-        float sd = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - corner;
-        float sg = sd > 0.0 ? sigma_out : sigma_in;
-        float g = exp(-(sd * sd) / (sg * sg));
-        float pulse = 0.82 + 0.18 * sin(TIME * pulse_speed);
-        ALBEDO = vec3(1.0, 0.84, 0.52);
-        ALPHA = g * intensity * pulse;
-}
-"""
-        return sh
-
-
-## دیوار نور — دامنه‌ای که از ضلع‌های تایل بالا می‌رود؛ پایه پرنور، بالا محو
-func _skirt_shader() -> Shader:
-        var sh := Shader.new()
-        sh.code = """
-shader_type spatial;
-render_mode unshaded, blend_add, cull_disabled, depth_draw_never;
-uniform float intensity = 0.30;
-uniform float pulse_speed = 1.3;
-uniform float skirt_h = 0.55;
-varying float vy;
-void vertex() {
-        vy = VERTEX.y;
-}
-void fragment() {
-        float h01 = clamp(vy / skirt_h, 0.0, 1.0);
-        float fade = pow(1.0 - h01, 1.7);
-        float pulse = 0.85 + 0.15 * sin(TIME * pulse_speed);
-        ALBEDO = vec3(1.0, 0.84, 0.52);
-        ALPHA = fade * intensity * pulse;
+        vec2 p = UV - vec2(0.5);
+        float d = length(vec2(p.x / rx, p.y / ry));
+        float a = 1.0 - smoothstep(1.0 - soft, 1.0, d);
+        ALBEDO = vec3(0.17, 0.29, 0.17);
+        ALPHA = a * intensity;
 }
 """
         return sh
@@ -173,83 +145,16 @@ func _build_visuals() -> void:
         _mmi.visible = true
         add_child(_mmi)
 
-        # دیوار نور اضلاع — حلقه‌ی جعبه‌ی گردِ عمودی
-        var ring := _skirt_ring_mesh(SKIRT_H)
-        var smm := MultiMesh.new()
-        smm.transform_format = MultiMesh.TRANSFORM_3D
-        smm.mesh = ring
-        smm.instance_count = maxi(_cells.size(), 1)
-        for i in _cells.size():
-                smm.set_instance_transform(i, _cell_transform(_cells[i]["center"], 0.05))
-        _skirts = MultiMeshInstance3D.new()
-        _skirts.multimesh = smm
-        _skirt_mat = ShaderMaterial.new()
-        _skirt_mat.shader = _skirt_shader()
-        _skirt_mat.set_shader_parameter("skirt_h", SKIRT_H)
-        _skirts.material_override = _skirt_mat
-        _skirts.visible = true
-        add_child(_skirts)
-
-        # بلوکِ هاور (فقط حالت فرمان) — پرنورتر و بلندتر
+        # گام ۶R11 — دیوارهای نورِ اضلاع حذف شدند (بازخورد: «تایل‌ها خوب
+        # نیستند») — فقط پدِ بیضیِ روی زمین؛ هاور = پدِ پرنورتر
         _hover = MeshInstance3D.new()
         _hover.mesh = pm
         _hover_mat = ShaderMaterial.new()
         _hover_mat.shader = _edge_glow_shader()
         _hover_mat.set_shader_parameter("intensity", 1.05)
-        _hover_mat.set_shader_parameter("pulse_speed", 5.0)
         _hover.material_override = _hover_mat
         _hover.visible = false
         add_child(_hover)
-
-        _hover_skirt = MeshInstance3D.new()
-        _hover_skirt.mesh = _skirt_ring_mesh(HOVER_SKIRT_H)
-        _hover_skirt_mat = ShaderMaterial.new()
-        _hover_skirt_mat.shader = _skirt_shader()
-        _hover_skirt_mat.set_shader_parameter("intensity", 0.62)
-        _hover_skirt_mat.set_shader_parameter("pulse_speed", 4.5)
-        _hover_skirt_mat.set_shader_parameter("skirt_h", HOVER_SKIRT_H)
-        _hover_skirt.material_override = _hover_skirt_mat
-        _hover_skirt.visible = false
-        add_child(_hover_skirt)
-
-
-## حلقه‌ی عمودیِ جعبه‌ی گرد — دیوار نور: هر ضلع/گوشه یک نوار از زمین تا skirt_h
-func _skirt_ring_mesh(h: float) -> ArrayMesh:
-        var b := GameConstants.COMMAND_CELL * 0.5 - GROUND_INSET - 0.012
-        var r := CORNER_R
-        var pts: Array[Vector2] = []
-        # مسیر پادساعتگرد: ۴ کمانِ گوشه (۹۰° هرکدام، ۷ قطعه) — ضلع‌های مستقیم
-        # به‌صورت پاره‌خطِ بینِ پایانِ یک کمان و آغازِ کمانِ بعدی می‌آیند
-        for si in 4:
-                var a0 := float(si) * TAU * 0.25
-                var mid := a0 + TAU * 0.125
-                var ccenter := Vector2(signf(cos(mid)), signf(sin(mid))) * (b - r)
-                for k in 7:
-                        var ang := a0 + TAU * 0.25 * (float(k) / 6.0)
-                        pts.append(ccenter + Vector2(cos(ang), sin(ang)) * r)
-        var st := SurfaceTool.new()
-        st.begin(Mesh.PRIMITIVE_TRIANGLES)
-        for i in pts.size():
-                var p1 := pts[i]
-                var p2 := pts[(i + 1) % pts.size()]
-                # نرمالِ بیرونی در جعبه‌ی گرد = شعاعی از مرکز (هم در ضلع، هم در کمان)
-                var n1 := Vector3(p1.x, 0.0, p1.y).normalized()
-                var n2 := Vector3(p2.x, 0.0, p2.y).normalized()
-                var q1 := Vector3(p1.x, 0.0, p1.y)
-                var q2 := Vector3(p2.x, 0.0, p2.y)
-                st.set_normal(n1)
-                st.add_vertex(q1)
-                st.set_normal(n2)
-                st.add_vertex(q2)
-                st.set_normal(n2)
-                st.add_vertex(Vector3(q2.x, h, q2.z))
-                st.set_normal(n1)
-                st.add_vertex(q1)
-                st.set_normal(n2)
-                st.add_vertex(Vector3(q2.x, h, q2.z))
-                st.set_normal(n1)
-                st.add_vertex(Vector3(q1.x, h, q1.z))
-        return st.commit()
 
 
 ## ترنسفورم هم‌راستا با شیب زمین (تیلت) + lift بالای سطح
@@ -276,11 +181,7 @@ func _cell_transform(center: Vector2, lift: float) -> Transform3D:
 
 func _apply_command_params() -> void:
         if _ground_mat != null:
-                _ground_mat.set_shader_parameter("intensity", 0.62 if _command else 0.36)
-                _ground_mat.set_shader_parameter("pulse_speed", 2.2 if _command else 1.3)
-        if _skirt_mat != null:
-                _skirt_mat.set_shader_parameter("intensity", 0.44 if _command else 0.28)
-                _skirt_mat.set_shader_parameter("pulse_speed", 2.2 if _command else 1.3)
+                _ground_mat.set_shader_parameter("intensity", 0.60 if _command else 0.36)
 
 
 ## ورود/خروج حالت فرمان — تایل‌ها همیشه نمایان‌اند؛ اینجا فقط پرنورتر می‌شوند
@@ -342,16 +243,16 @@ func is_command_mode() -> bool:
         return _command
 
 
-## گام ۶R5 — برای تست خودکار: تایل‌ها همیشه نمایان‌اند
+## گام ۶R11 — برای تست خودکار: پدها همیشه نمایان‌اند (دیوار نور حذف شد)
 func tiles_visible() -> bool:
-        return _mmi != null and _mmi.visible and _skirts != null and _skirts.visible
+        return _mmi != null and _mmi.visible
 
 
-## گام ۶R4/۶R5 — سازگاری تست: تعداد دیوارهای نور ساخته‌شده (== تعداد تایل‌ها)
+## گام ۶R11 — تعداد پدهای ساخته‌شده (== تعداد تایل‌ها؛ برای تست خودکار)
 func beam_instance_count() -> int:
-        if _skirts == null or _skirts.multimesh == null:
+        if _mmi == null or _mmi.multimesh == null:
                 return 0
-        return int(_skirts.multimesh.instance_count)
+        return int(_mmi.multimesh.instance_count)
 
 
 # ---------------- ثبتِ اشغال تایل (هر سرباز = یک بلوک) ----------------

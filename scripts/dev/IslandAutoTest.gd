@@ -2234,6 +2234,27 @@ func _phase19_fleet_touch_gameover() -> void:
                         target_scene.cmd_grid.set_command_mode(false)
                         _check("command_mode_flag_off",
                                         not target_scene.cmd_grid.is_command_mode())
+                        # گام ۶R10 — زبان انتخاب Bad North (اسکرین‌شات‌های کاربر):
+                        # انتخاب = فیروزه‌ایِ یکدست (بدنه + پرچم + حلقه)؛
+                        # لغو = بازگشت دقیق به رنگ منطقیِ قبل
+                        var sel_u10: UnitBase = null
+                        for u20 in target_scene.squads[0]:
+                                if is_instance_valid(u20) and not u20.is_dead() \
+                                                and not u20.garrisoned:
+                                        sel_u10 = u20
+                                        break
+                        if sel_u10 != null:
+                                var before10: Color = sel_u10.body_shader_color()
+                                sel_u10.set_selected_ring(true)
+                                var on_ok10: bool = sel_u10.is_ring_visible() \
+                                                and sel_u10.body_shader_color() \
+                                                == GameConstants.COL_SELECTED
+                                sel_u10.set_selected_ring(false)
+                                var off_ok10: bool = not sel_u10.is_ring_visible() \
+                                                and sel_u10.body_shader_color() \
+                                                == before10
+                                _check("selection_tints_bad_north",
+                                                on_ok10 and off_ok10)
                         # — دسته‌ی ۳ نفره: بارِ پیش‌فرض = سبک×۲ + پرتاب‌گر×۱ →
                         #   دو قایق پاروییِ همگن (هر قایق یک نوع — بازخورد کاربر)
                         _fleet_g3 = target_scene.director.spawn_wave(

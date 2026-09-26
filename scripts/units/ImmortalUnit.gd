@@ -6,49 +6,23 @@ extends UnitBase
 ## لایه ۳ — واکنش نبرد (گام ۵، روی کوله‌ی تمرین):
 ##   * دشمن در IMMORTAL_REACT_RANGE → رو به دشمن می‌چرخد و سپر بالا می‌برد
 ##   * مخروط سپر IMMORTAL_SHIELD_CONE_DEG از پیش رو (پیش‌فرض گام ۵؛ بالانس نهایی گام ۶)
-## بصری: عاجی + نوار طلایی، سپر مستطیلی، کلاه‌خود بلند.
+## بصری: کاراکتر Knight پک KayKit (شمشیر + سپر مستطیلی داخل اسکلت) — سپر به
+## رنگ کاشیِ فیروزه‌ای هخامنشی تینت می‌شود؛ حالت سپر = انیمیشن Blocking مدل؛
+## اسلشِ شمشیر = انیمیشن اسکلتی (گام ۶R11 — تجهیزِ پروسیجرالِ تکراری حذف شد)
 
-var _shield: MeshInstance3D
-var _crest: MeshInstance3D
+
 var shield_up := false          # برای تست خودکار و HUD
 var _face_dir := 0.0            # جهت فعلیِ روکردن به دشمن
 var strikes_done := 0           # برای تست خودکار (گام ۶)
 
 
-func _build_gear() -> void:
-        # گام ۶R9 — جاویدان اکنون شمشیر هم دارد: سپرِ فیروزه‌ای چپ، تیغه‌ی
-        # فولادی راست روی پیوتِ دست — اسلشِ واقعی هنگام ضربه (سبک SWORD_SLASH)
-        _swing_style = SwingStyle.SWORD_SLASH
-        _swing_weapon = WeaponLook.sword(GameConstants.STEEL_BLADE, 0.46)
-        _swing_weapon.rotation_degrees.z = -12.0
-        _hand.add_child(_swing_weapon)
+func _model_kind() -> StringName:
+        return &"knight"
 
-        # کلاه‌خود بلند هخامنشی — روی نوکِ کلاهِ چینی (بدنه ۶R۷ تا ~۰٫۸۵m)
-        _crest = MeshInstance3D.new()
-        var cm := CylinderMesh.new()
-        cm.top_radius = 0.02
-        cm.bottom_radius = 0.12
-        cm.height = 0.2
-        _crest.mesh = cm
-        _crest.position.y = 0.9
-        var gold := StandardMaterial3D.new()
-        gold.albedo_color = GameConstants.COL_GOLD
-        gold.metallic = 0.6
-        gold.roughness = 0.35
-        _crest.material_override = gold
-        add_child(_crest)
 
-        # سپر مستطیلی — جلوی شکم (+Z مدل، سمت بینی جهت‌نما)
-        _shield = MeshInstance3D.new()
-        var sm := BoxMesh.new()
-        sm.size = Vector3(0.42, 0.56, 0.05)
-        _shield.mesh = sm
-        _shield.position = Vector3(-0.16, 0.34, 0.26)
-        var shield_mat := StandardMaterial3D.new()
-        shield_mat.albedo_color = GameConstants.COL_DOME_TILE  # کاشی فیروزه‌ای سپر
-        shield_mat.roughness = 0.5
-        _shield.material_override = shield_mat
-        add_child(_shield)
+func _model_special() -> Dictionary:
+        # سپر مستطیلیِ مدل → کاشی فیروزه‌ای (هویت بصری جاویدان)
+        return {"Rectangle_Shield": GameConstants.COL_DOME_TILE}
 
 
 func _combat_wants(hostile: Node3D) -> bool:
@@ -73,9 +47,10 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
         rotation.y = _heading
         if not shield_up:
                 shield_up = true
-                # سپر به سمت جلو بالا می‌آید + نشستنِ کوتاه زانو
-                _shield.position = Vector3(-0.05, 0.32, 0.3)
-                _body.scale = Vector3(1.0, 0.92, 1.0)
+                # سپر بالا می‌آید (انیمیشن Blocking مدل) + نشستنِ کوتاه زانو
+                if _model != null:
+                        _model.set_blocking(true)
+                _body.scale = Vector3(1.0, 0.94, 1.0)
         # گام ۶R2 — شمشیرزن تیرانداز را تعقیب می‌کند (بازخورد کاربر:
         # «سرباز شمشیرزن به سرباز تیرانداز نزدیک نمی‌شود») — یورش با سپرِ بالا
         if _combat_move_toward(delta, hostile, GameConstants.IMMORTAL_ENGAGE_RANGE,
@@ -91,7 +66,8 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
 
 func _combat_end() -> void:
         shield_up = false
-        _shield.position = Vector3(-0.16, 0.3, 0.2)
+        if _model != null:
+                _model.set_blocking(false)
         _body.scale = Vector3.ONE
 
 
@@ -102,20 +78,8 @@ func _lunge() -> void:
         tw.tween_property(_body, "position:z", 0.0, 0.14)
 
 
-## گام ۶R9 — یورش + اسلشِ شمشیر (سوئینگِ دست در پیاده‌سازیِ پایه)
+## گام ۶R11 — یورشِ بدنه؛ اسلشِ شمشیر از انیمیشن اسکلتی می‌آید
+## (سوئینگِ دستِ پروسیجرال حذف شد — شمشیر داخل اسکلت Knight است)
 func _strike_impact_fx() -> void:
         _lunge()
         _body.rotation.y = 0.0
-        # سوئینگِ تیغه — منطقِ SWORD_SLASH از پایه (بدونِ ژستِ بدنه‌ی پیش‌فرض)
-        if _hand != null:
-                var hs := create_tween()
-                hs.set_parallel(true)
-                hs.tween_property(_hand, "rotation:y", -1.35,
-                                GameConstants.STRIKE_LUNGE + 0.05) \
-                                .set_ease(Tween.EASE_OUT)
-                hs.tween_property(_hand, "rotation:z", -0.2,
-                                GameConstants.STRIKE_LUNGE + 0.05)
-                hs.chain().tween_property(_hand, "rotation:y", 0.0,
-                                GameConstants.STRIKE_RECOVER)
-                hs.parallel().tween_property(_hand, "rotation:z", 0.0,
-                                GameConstants.STRIKE_RECOVER)
