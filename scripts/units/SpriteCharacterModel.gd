@@ -145,7 +145,10 @@ func _load_frames() -> void:
                         i += 1
                 if not frames.is_empty():
                         _anims[a] = frames
-        # جایگزین‌ها: attack→walk اولین فریم، block→idle، death→idle
+        # جایگزین‌ها: walk→idle (لغزشِ نرم تا اسپرایتِ اختصاصی برسد)،
+        # attack→walk اولین فریم، block→idle، death→idle
+        if not _anims.has("walk") and _anims.has("idle"):
+                _anims["walk"] = _anims["idle"].duplicate()
         if not _anims.has("attack") and _anims.has("walk"):
                 _anims["attack"] = [_anims["walk"][0]]
         if not _anims.has("block") and _anims.has("idle"):
