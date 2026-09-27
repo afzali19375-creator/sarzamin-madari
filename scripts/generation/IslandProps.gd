@@ -9,13 +9,13 @@ extends Node3D
 ##   * بوته/درخت مینیمال سبک Bad North — مانع ناوبری نیستند
 ##   * چیدمان قطعی با seed جزیره (بازتولید = همان روستا)
 
-## گام ۶R۱۶ — بازخورد کاربر: «خانه‌ها بزرگ‌تر باشن؛ در مرحله اول یکی خانه هم
-## کافیه» → یک خانه‌ی بزرگ (بدون آتشکده) — هدفِ مشعل/گاریسون/باخت همین یکی است
-const HOUSE_SITES := 1
+## گام ۶R16 — بازخورد کاربر: «خانه‌ها بزرگ‌تر باشن؛ در مرحله‌ی اول یکی خانه هم
+## کافیه» — یک خانه‌ی درشت روی تراسِ اصلی؛ آتشکده به مرحله‌های بعد موکول شد
+const HOUSE_SITES := 1          # یک خانه (مرحله‌ی اول)
 const SITE_MIN_DIST := 4.6      # فاصله‌ی حداقلی بین خانه‌ها (§۹.۱: ≥ 2 متر)
-const SITE_HALF := 1            # نیم‌اندازه‌ی سایت: ۲×۲ سلول NavGrid
-## گام ۶R۱۶ — مقیاسِ خانه: قدِ خانه ~۲٫۴ برابرِ سرباز (مثل مرجع)
-const HOUSE_SCALE := 1.45
+## گام ۶R17 — سایتِ خانه ۲×۲ → ۶×۶ سلولِ NavGrid (۳.۷۲m) — خانه‌ی «بزرگ» مراجع
+## (اندازه‌گیریِ پیکسلی: دیوار ≈ ۴.۳m عرض، بلندیِ کامل ≈ ۴.۷m = ۵.۷× سرباز)
+const SITE_SPAN := 6            # ۶×۶ سلول = ۳.۷۲ متر
 
 ## گام ۶R5 — سایت‌ها هم‌ترازِ شبکه‌ی فرمان‌اند (مبدا زوج) تا هر خانه دقیقاً
 ## «یک واحد بلوک مستطیلی» را پر کند (مرکز خانه = مرکز تایل) — بازخورد کاربر
@@ -48,14 +48,14 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
                 var cell00 := sites[i]
                 house_sites.append(cell00)
                 _stamp_site_blocked(nav, cell00)
-                var center := nav.origin + (Vector2(cell00) + Vector2(1.0, 1.0)) * nav.cell_size
+                # مرکزِ سایتِ ۶×۶ = cell00 + ۳ سلول
+                var center := nav.origin + (Vector2(cell00)
+                                                + Vector2(SITE_SPAN * 0.5,
+                                                        SITE_SPAN * 0.5)) * nav.cell_size
                 var y := ground.height_at_world(center) - 0.03
                 var pos := Vector3(center.x, y, center.y)
                 house_positions.append(pos)
-                if i < 1:
-                        _build_house(pos, i == 0)
-                else:
-                        _build_fire_temple(pos)
+                _build_house(pos, i == 0)
         _build_vegetation(ground, nav, island, sites)
         _build_islets(ground, nav, island)
         _build_driftwood(ground, nav)
@@ -79,50 +79,59 @@ func nearest_alive_house_xz(from: Vector2) -> Vector2:
 # ---------------- انتخاب سایت خانه‌ها ----------------
 
 func _pick_house_sites(ground: IslandGround, nav: NavGrid) -> Array[Vector2i]:
+        # گام ۶R17 — سایتِ ۶×۶ (۳.۷۲m) برای خانه‌ی بزرگ؛ هم‌ترازیِ زوج حفظ می‌شود
+        # (۶ = ۳ تایلِ فرمان). ترجیح: چمنِ یکپارچه + هموارترین زمین (اختلافِ
+        # ارتفاعِ گوشه‌ها < ۰.۶m) تا خانه روی شیب شناور/فرورفته دیده نشود.
         var cands: Array[Vector2i] = []
-        # گام ۶R5 — مبدا زوج (هم‌ترازی با تایل‌های ۲×۲ شبکه‌ی فرمان):
-        # ۴ سلولِ سایت = دقیقاً یک تایل؛ مرکز خانه = مرکز بلوک
-        for cy in range(0, ground.size - 2, 2):
-                for cx in range(0, ground.size - 2, 2):
+        var scores: Array[float] = []
+        for cy in range(0, ground.size - SITE_SPAN + 1, 2):
+                for cx in range(0, ground.size - SITE_SPAN + 1, 2):
                         var ok := true
-                        for d: Vector2i in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
-                                var c2 := Vector2i(cx, cy) + d
-                                if not nav.is_walkable(c2):
-                                        ok = false
+                        var grass := 0
+                        var hmin := 1e9
+                        var hmax := -1e9
+                        for dy in SITE_SPAN:
+                                for dx in SITE_SPAN:
+                                        var c2 := Vector2i(cx, cy) + Vector2i(dx, dy)
+                                        if not nav.is_walkable(c2):
+                                                ok = false
+                                                break
+                                        # گام ۶R۱۵ — مسیرِ باریکِ دوبلکس خانه نمی‌گیرد
+                                        if ground.is_path_cell(c2):
+                                                ok = false
+                                                break
+                                        if String(ground.module_name_at(c2)).begins_with("grass"):
+                                                grass += 1
+                                        var h := ground.height_at_world(
+                                                        nav.cell_center(c2))
+                                        hmin = minf(hmin, h)
+                                        hmax = maxf(hmax, h)
+                                if not ok:
                                         break
-                                # گام ۶R۱۵ — مسیرِ باریکِ دوبلکس خانه نمی‌گیرد
-                                if ground.is_path_cell(c2):
-                                        ok = false
-                                        break
-                                if not String(ground.module_name_at(c2)).begins_with("grass"):
-                                        ok = false
-                                        break
-                        if ok:
-                                cands.append(Vector2i(cx, cy))
-        # بُر زدن قطعی + انتخاب حریصانه با فاصله‌ی حداقلی
+                        if not ok:
+                                continue
+                        var flat := hmax - hmin
+                        if flat > 1.0:
+                                continue      # شیبِ تند — خانه شناور دیده می‌شود
+                        cands.append(Vector2i(cx, cy))
+                        # امتیاز: چمنِ کامل + همواری (بزرگ‌تر = بهتر)
+                        scores.append(float(grass) - flat * 8.0)
+        # بُر زدن قطعی؛ سپس پایدارترین (امتیازِ برتر) اول
         for i in range(cands.size() - 1, 0, -1):
                 var j := _rng.randi_range(0, i)
                 var t := cands[i]
                 cands[i] = cands[j]
                 cands[j] = t
+                var ts := scores[i]
+                scores[i] = scores[j]
+                scores[j] = ts
+        var order := range(cands.size())
+        order.sort_custom(func(a, b): return scores[a] > scores[b])
         var picked: Array[Vector2i] = []
-        # گام ۶R۱۵ — جزیره‌ی دوبلکس: حداقل «یک خانه روی سقف» و «یک خانه روی
-        # تراسِ پایین» تا روستای دوطبقه‌ی مرجع دیده شود (مثل اسکرین‌شات‌ها)
-        var want_upper := Vector2i(-9999, -9999)
-        var want_lower := Vector2i(-9999, -9999)
-        if ground.has_duplex():
-                for p in cands:
-                        if want_upper.x < -100 and ground.level_at(p + Vector2i(1, 1)) == 1:
-                                want_upper = p
-                        if want_lower.x < -100 and ground.level_at(p + Vector2i(1, 1)) == 0:
-                                want_lower = p
-        if want_upper.x > -100:
-                picked.append(want_upper)
-        if want_lower.x > -100 and picked.size() < HOUSE_SITES:
-                picked.append(want_lower)
-        for p in cands:
+        for idx in order:
                 if picked.size() >= HOUSE_SITES:
                         break
+                var p := cands[idx]
                 var far := true
                 for q in picked:
                         var pc := nav.cell_center(p)
@@ -136,9 +145,11 @@ func _pick_house_sites(ground: IslandGround, nav: NavGrid) -> Array[Vector2i]:
 
 
 func _stamp_site_blocked(nav: NavGrid, cell00: Vector2i) -> void:
-        for d in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
-                nav.set_walkable(cell00 + d, false)
-                blocked_cells.append(cell00 + d)
+        for dy in SITE_SPAN:
+                for dx in SITE_SPAN:
+                        var c := cell00 + Vector2i(dx, dy)
+                        nav.set_walkable(c, false)
+                        blocked_cells.append(c)
 
 
 # ---------------- خانه Low-Poly (گام ۶R6 — سبک مرجع کاربر) ----------------
@@ -147,67 +158,68 @@ func _stamp_site_blocked(nav: NavGrid, cell00: Vector2i) -> void:
 func _build_house(pos: Vector3, with_flag_extra: bool) -> void:
         var root := _make_building(pos)
 
-        # بدنه‌ی مکعبیِ سفید — داخل بلوکِ خودش (شعاع ≤ ۰٫۹)
+        # گام ۶R17 — خانه‌ی «بزرگ» مراجع (اندازه‌گیریِ پیکسلی: دیوار ≈ ۴.۳m عرض،
+        # بلندیِ کامل ≈ ۴.۷m = ۵.۷× سربازِ ۰.۸۲m) — بدنه‌ی مکعبیِ سفید
         var wall := MeshInstance3D.new()
         var wm := BoxMesh.new()
-        wm.size = Vector3(1.25, 0.62, 1.05)
+        wm.size = Vector3(3.74, 2.0, 3.1)
         wall.mesh = wm
-        wall.position.y = 0.31
+        wall.position.y = 1.0
         wall.material_override = _building_mat(root, GameConstants.COL_HOUSE_WALL)
         root.add_child(wall)
 
         # سقف شیروانی Low-Poly (دو سطحِ قهوه‌ای + لبه‌ی بژ)
         var roof := MeshInstance3D.new()
         var rm := PrismMesh.new()
-        rm.size = Vector3(1.42, 0.52, 1.22)
+        rm.size = Vector3(4.35, 1.9, 3.62)
         roof.mesh = rm
-        roof.position.y = 0.88
+        roof.position.y = 2.95
         roof.material_override = _building_mat(root, GameConstants.COL_HOUSE_ROOF)
         root.add_child(roof)
 
         # لبه‌ی بژِ سقف (تاجِ نازک روی شیروانی)
         var ridge := MeshInstance3D.new()
         var rg := BoxMesh.new()
-        rg.size = Vector3(0.08, 0.09, 1.26)
+        rg.size = Vector3(0.2, 0.24, 3.72)
         ridge.mesh = rg
-        ridge.position.y = 1.15
+        ridge.position.y = 3.97
         ridge.material_override = _building_mat(root, GameConstants.COL_HOUSE_ROOF_HI)
         root.add_child(ridge)
 
         # در چوبی (سمت +Z)
         var door := MeshInstance3D.new()
         var dm2 := BoxMesh.new()
-        dm2.size = Vector3(0.34, 0.46, 0.08)
+        dm2.size = Vector3(1.05, 1.5, 0.22)
         door.mesh = dm2
-        door.position = Vector3(0.0, 0.23, 0.55)
+        door.position = Vector3(0.0, 0.75, 1.6)
         door.material_override = _building_mat(root, GameConstants.COL_DOOR_WOOD)
         root.add_child(door)
 
         # دودکش کوچک — سیلوئتِ خواناتر
         var chimney := MeshInstance3D.new()
         var ch := BoxMesh.new()
-        ch.size = Vector3(0.16, 0.42, 0.16)
+        ch.size = Vector3(0.5, 1.4, 0.5)
         chimney.mesh = ch
-        chimney.position = Vector3(0.42, 0.95, -0.3)
+        chimney.position = Vector3(1.25, 3.3, -0.95)
         chimney.material_override = _building_mat(root, GameConstants.COL_HOUSE_WALL)
         root.add_child(chimney)
 
         # پرچمِ مالکیت — سرخ/صورتی؛ با تصرفِ خانه رنگِ دسته می‌گیرد
         var pole := MeshInstance3D.new()
         var pm2 := CylinderMesh.new()
-        pm2.top_radius = 0.015
-        pm2.bottom_radius = 0.02
-        pm2.height = 0.85
+        pm2.top_radius = 0.03
+        pm2.bottom_radius = 0.045
+        pm2.height = 2.3
         pole.mesh = pm2
-        pole.position = Vector3(-0.45, 1.4, -0.3)
+        pole.position = Vector3(-1.4, 4.35, -0.9)
         pole.material_override = _building_mat(root, GameConstants.COL_DOOR_WOOD)
         root.add_child(pole)
 
         var flag := MeshInstance3D.new()
         var fm := BoxMesh.new()
-        fm.size = Vector3(0.36, 0.2, 0.02)
+        fm.size = Vector3(1.1, 0.62, 0.04)
         flag.mesh = fm
-        flag.position = Vector3(-0.29, 1.68, -0.3)
+        flag.position = Vector3(-0.95, 5.25, -0.9)
         var flm := StandardMaterial3D.new()
         flm.albedo_color = GameConstants.COL_HOUSE_FLAG
         flm.roughness = 0.8
@@ -216,8 +228,6 @@ func _build_house(pos: Vector3, with_flag_extra: bool) -> void:
         root.add_child(flag)
         # چرخش قطعی خانه برای تنوع
         root.rotation.y = _rng.randf() * TAU
-        # گام ۶R۱۶ — خانه‌ی بزرگ‌تر (قد ~۲٫۴ برابرِ سرباز — مثل مرجع)
-        root.scale = Vector3.ONE * HOUSE_SCALE
 
 
 ## آتشکده‌ی سنگی (چک‌پوینت گام‌های بعد) — مکعب ساده با پیش‌کمره‌ی بالا
@@ -286,7 +296,10 @@ func _build_vegetation(ground: IslandGround, nav: NavGrid, island: Dictionary,
                         var p := nav.cell_center(c)
                         var near_house := false
                         for s in house_sites:
-                                if p.distance_to(nav.cell_center(s)) < 2.6:
+                                var sc := nav.cell_center(s) \
+                                                + Vector2(SITE_SPAN, SITE_SPAN) \
+                                                * 0.5 * nav.cell_size
+                                if p.distance_to(sc) < 3.4:
                                         near_house = true
                                         break
                         if near_house:

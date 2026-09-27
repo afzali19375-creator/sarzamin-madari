@@ -27,6 +27,8 @@ func _model_kind() -> StringName:
 func _build_gear() -> void:
         # گام ۶R11 — کاتاپولت دوشی داخل اسکلت Rogue_Hooded دیده می‌شود؛
         # کمانِ پروسیجرال ۶R9 فقط نگه داشته می‌شود ولی پنهان است (ضدِ تکرار)
+        # گام ۶R16 — در مسیرِ ۲بعدی: کمان/تیردان/نوکِ تیر داخلِ اسپرایت است —
+        # تجهیزاتِ سه‌بعدی مخفی (مرجع‌ها برای نبردِ کماندار سالم می‌مانند)
         _bow = WeaponLook.bow(0.3)
         _bow.position = Vector3(-0.4, -0.07, 0.02)
         _bow.rotation_degrees = Vector3(0.0, 90.0, 0.0)
@@ -46,6 +48,7 @@ func _build_gear() -> void:
         qmat.albedo_color = GameConstants.COL_GOLD
         qmat.roughness = 0.6
         _quiver.material_override = qmat
+        _quiver.visible = not GameConstants.UNITS_2D
         add_child(_quiver)
 
         # تیرِ روی کمان (فقط هنگام هدف‌گیری دیده می‌شود)
@@ -82,8 +85,8 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
 
         _shoot_cooldown = maxf(0.0, _shoot_cooldown - delta)
         if _shoot_cooldown > 0.0:
-                if _nock != null:
-                        _nock.visible = true  # در حال کمان‌کشیدن
+                # گام ۶R16 — در مسیرِ ۲بعدی تیرِ سه‌بعدیِ شناور مخفی می‌ماند
+                _nock.visible = not GameConstants.UNITS_2D  # در حال کمان‌کشیدن
                 return
 
         var from_xz := Vector2(global_position.x, global_position.z)
@@ -98,8 +101,7 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
                 return  # قانون: آسیب دوستانه ندارد — نگه!
 
         _shoot_cooldown = GameConstants.ARCHER_COOLDOWN
-        if _nock != null:
-                _nock.visible = false
+        _nock.visible = false
         shots_fired += 1
         # گام ۶R2 — shooter پاس می‌شود تا مهاجمِ تیرخورده به «این کماندار» تلافی کند
         ArrowProjectile.fire(get_parent(), global_position + Vector3(0, 0.5, 0),
@@ -108,6 +110,5 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
 
 
 func _combat_end() -> void:
-        if _nock != null:
-                _nock.visible = false
+        _nock.visible = false
         _shoot_cooldown = 0.0

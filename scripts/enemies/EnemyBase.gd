@@ -80,9 +80,8 @@ var _flash_t := 10.0
 var _flashing := false
 var _flash_restore := Color.WHITE
 
-## گام ۶R12 — کاراکتر انسانی واقعی (جایگزین بدنه‌ی شبحِ ۶R8 — بازخورد کاربر:
-## «اسکلت‌ها خیلی مسخره بودن؛ اگر انسان باشن بهتره»)
-var _model: CharacterModel
+## گام ۶R16 — مدلِ کاراکتر (۲بعدیِ بیلبورد یا ۳بعدیِ اسکلتی — GameConstants.UNITS_2D)
+var _model: CharacterModelBase
 var _body: Node3D
 var _body_color: Color
 
@@ -111,13 +110,10 @@ func _ready() -> void:
         _heading = rotation.y
         _channel = GameConstants.ENEMY_CHANNEL_BASE + raid_group
         _body_color = _default_color()
-        # گام ۶R12 — کاراکتر انسانی با انیمیشن کامل (Idle/Walk/Attack/Hit/Death)
+        # گام ۶R16 — مسیرِ رندر: اسپرایتِ بیلبوردی (پیش‌فرض) یا اسکلتی (قدیمی)
         # گام ۶R۱۵ — تینتِ گرادیانیِ ~۵۰٪: از دور «سرخِ مهاجم» خوانده می‌شود
-        # ولی بافتِ پک هم دیده می‌شود (بدونِ دوده‌ی سیاهِ ۶R۱۴)
-        # گام ۶R۱۶ — تکنیک ۲٫۵بعدی: اسپرایتِ بیلبوردی دوبعدی (Bad North)
-        # یا مدل اسکلتی سه‌بعدی Quaternius — با همان API کاراکتر
-        if GameConstants.CHARACTERS_2D:
-                _model = SpriteCharacter.new()
+        if GameConstants.UNITS_2D:
+                _model = SpriteCharacterModel.new()
         else:
                 _model = CharacterModel.new()
         _model.setup(_model_kind(), _body_color, 0.5)
@@ -130,9 +126,10 @@ func _ready() -> void:
         add_child(_hand)
 
         # تجهیزات اختصاصی کلاس (کلاه‌خود/سپر/نیزه‌ی پرتاب)
-        # گام ۶R۱۶ — در حالت ۲بعدی سلاح داخل اسپرایت است؛ تجهیزات سه‌بعدی حذف
-        if not GameConstants.CHARACTERS_2D:
-                _build_gear()
+        _build_gear()
+        # گام ۶R16 — در مسیرِ ۲بعدی، سلاحِ سه‌بعدیِ دست مخفی (داخلِ اسپرایت)
+        if GameConstants.UNITS_2D and _hand != null:
+                _hand.visible = false
 
 
 # ---------------- هوک‌های زیرکلاس ----------------

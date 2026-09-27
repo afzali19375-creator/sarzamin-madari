@@ -22,14 +22,17 @@ extends Node3D
 
 enum Mode { IDLE, COMMAND }
 
-## گام ۶R۱۶ — «جزیره باید کوچک باشد، شبیه اسکرین‌شات‌ها»: شبکه‌ی ۳۲→۲۴
-## (قطرِ خشکی ~۱۳–۱۵ متر به‌جای ~۱۸–۲۰ — روستای کوچکِ مرجع)
+## گام ۶R16 — «جزیره خیلی بزرگ هست» (بازخورد کاربر): شبکه ۳۲→۲۴ — خشکیِ
+## ~۱۵متری مثل مراجع؛ قایق/موج/خانه بدون تغییر نسبت به سربازها جا می‌شوند
+## گام ۶R17 — گامِ شبکه ۱.۰→۰.۶۲: خشکیِ ~۱۵متریِ دقیقِ مراجع (اندازه‌گیریِ پیکسلی:
+## جزیره ≈ ۳۵٪ عرضِ کادر، سرباز ۰.۸۲m ≈ ۳۰px) — خانه/قایق/سرباز همه مطلق می‌مانند
 const GRID := 24
-const CELL := 1.0
+const CELL := 0.62
 const FONT_FA := "res://assets/fonts/Vazirmatn-Regular.ttf"
 const DEFAULT_SEED := 20260924
 const SELECT_PICK_PX := 46.0
-const SELECT_PICK_WORLD := 1.15
+const SELECT_PICK_WORLD := 0.75
+const SELECT_PICK_WORLD_MAX := 0.7   # سقفِ شعاعِ جهانیِ انتخاب (ضدِ ربودنِ کلیکِ فرمان)
 const WP_REACH_FRACTION := 0.8   # ≥۸۰٪ دسته رسیده → waypoint بعدی
 const SLOT_MAX_RING := 3
 ## تعریف دسته‌ها — رنگ از پالت UNIT_PALETTE (طلایی برای UI نگه داشته شده)
@@ -88,7 +91,8 @@ var _cam_arm: Node3D
 var _cam: Camera3D
 var _sun: DirectionalLight3D
 var _yaw := GameConstants.CAM_YAW0_DEG
-var _target_height := GameConstants.CAM_HEIGHT0
+## گام ۶R16 — دوربین اورتو: زوم با «اندازه‌ی اورتو» (متر، بلندیِ کادر) نه فاصله
+var _target_size := GameConstants.CAM_ORTHO_SIZE0
 var _pan_v := 0.0             # پنِ اعمال‌شده (متر؛ + = نما به بالای صفحه)
 var _pan_target := 0.0        # پنِ درخواستی — همیشه در بازه‌ی محدود نگه داشته می‌شود
 ## گام ۶R۱۳ — پنِ افقیِ محدود: خودِ دوربین چپ/راست هم می‌رود
@@ -149,6 +153,12 @@ func _ready() -> void:
                 add_child(runner)
         elif OS.get_cmdline_user_args().has("--blockprobe"):
                 _run_block_probe()
+        elif OS.get_cmdline_user_args().has("--peltastprobe"):
+                var pdp: Node = load("res://scripts/dev/PeltastDebugProbe.gd").new()
+                add_child(pdp)
+        elif OS.get_cmdline_user_args().has("--boatprobe"):
+                var bdp: Node = load("res://scripts/dev/BoatDebugProbe.gd").new()
+                add_child(bdp)
         elif OS.get_cmdline_user_args().has("--screenshot"):
                 _run_screenshot_probe()
 
@@ -192,14 +202,14 @@ func _run_screenshot_probe() -> void:
         # ۳) کلوزآپ همان دسته — مقیاس کاراکترها و پدها
         var post: Vector2 = _squad_posts[0]
         _cam_pivot.position = Vector3(post.x, ground.height_at_world(post), post.y)
-        _target_height = 6.5
-        _cam_arm.rotation_degrees.x = -62.0
+        _target_size = 5.0
+        _cam_arm.rotation_degrees.x = -40.0
         await get_tree().create_timer(1.5).timeout
         _snap(out_dir + "/shot3_squad_close.png")
         # ۴) نبرد — موج دشمن + بازگشت دوربین به نمای کلی
         _deselect()
         _cam_pivot.position = Vector3.ZERO
-        _target_height = GameConstants.CAM_HEIGHT0
+        _target_size = GameConstants.CAM_ORTHO_SIZE0
         _cam_arm.rotation_degrees.x = GameConstants.CAM_PITCH_DEG
         if director != null:
                 director.spawn_wave()
@@ -216,7 +226,7 @@ func _run_screenshot_probe() -> void:
         if e != null:
                 var p2 := Vector2(e.global_position.x, e.global_position.z)
                 _cam_pivot.position = Vector3(p2.x, e.global_position.y, p2.y)
-                _target_height = 5.0
+                _target_size = 4.0
                 await get_tree().create_timer(1.5).timeout
                 _snap(out_dir + "/shot5_enemy_close.png")
         # ۶) گام ۶R۱۵ — نمای دوبلکس: پرتگاهِ داخلی + مسیرِ باریک + سقف
@@ -233,7 +243,7 @@ func _run_screenshot_probe() -> void:
                         _cam_pivot.position = Vector3(mwx.x + axis.x * 2.0,
                                         ground.height_at_world(mwx) + 0.5,
                                         mwx.y + axis.y * 2.0)
-                        _target_height = 11.0
+                        _target_size = 13.0
                         await get_tree().create_timer(1.5).timeout
                         _snap(out_dir + "/shot6_duplex.png")
         print("[SHOT] done -> ", out_dir)
@@ -480,7 +490,9 @@ func _pick_cluster_cells() -> Array[Vector2]:
                         break
                 var far := true
                 for q in picked:
-                        if p.distance_to(q) < 3.2:
+                        # گام ۶R17 — جزیره‌ی ۱۵متری: ۳.۲m پست‌ها را جمع می‌کرد (۳ پست
+                        # برای ۵ دسته) → ۲.۲m (پدها ~۲m؛ دسته‌ها متراکم مثل مراجع)
+                        if p.distance_to(q) < 2.2:
                                 far = false
                                 break
                 if far:
@@ -688,7 +700,10 @@ func _build_environment() -> void:
         _cam_pan.add_child(_cam_arm)
         _cam_arm.rotation_degrees.x = GameConstants.CAM_PITCH_DEG
         _cam = Camera3D.new()
-        _cam.fov = GameConstants.CAM_FOV
+        # گام ۶R16 — پرسپکتیوِ اورتوگرافیک (فرمول ۲.۵بعدیِ مرجع): خطوطِ دیواره
+        # موازی می‌مانند، دورترها کوچک نمی‌شوند، بیلبوردها بدونِ اعوجاج
+        _cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+        _cam.size = GameConstants.CAM_ORTHO_SIZE0
         _cam.near = GameConstants.CAM_NEAR
         _cam.far = GameConstants.CAM_FAR
         _cam_arm.add_child(_cam)
@@ -896,7 +911,7 @@ func _refresh_stats() -> void:
                 int(round(100.0 * float(island.get("land_count", 0)) / float(GRID * GRID))),
                 cmd_grid.cell_count if cmd_grid != null else 0,
                 computes, str(info["channels"]), Engine.time_scale,
-                _target_height, _yaw, _pan_v, _pan_h, gar,
+                _target_size, _yaw, _pan_v, _pan_h, gar,
         ]
         # گام ۶R2 — نشان باخت روی پنل آمار
         if game_over:
@@ -921,7 +936,7 @@ func _process(delta: float) -> void:
         if _keys_held.get(KEY_E, false):
                 _yaw += GameConstants.CAM_ROTATE_SPEED * raw
         _cam_pivot.rotation.y = deg_to_rad(_yaw)
-        _cam.position.z = move_toward(_cam.position.z, _target_height,
+        _cam.size = move_toward(_cam.size, _target_size,
                         GameConstants.CAM_ZOOM_SPEED * raw)
 
         # گام ۶R۱۲/۶R۱۳ — جابه‌جاییِ خودِ دوربین (پنِ محدودِ دو محور):
@@ -1036,11 +1051,11 @@ func _input(event: InputEvent) -> void:
                                 MOUSE_BUTTON_MIDDLE:
                                         _middle_drag = true
                                 MOUSE_BUTTON_WHEEL_UP:
-                                        _target_height = clampf(_target_height - GameConstants.CAM_ZOOM_SPEED,
-                                                        GameConstants.CAM_MIN_HEIGHT, GameConstants.CAM_MAX_HEIGHT)
+                                        _target_size = clampf(_target_size - GameConstants.CAM_ZOOM_SPEED,
+                                                        GameConstants.CAM_ORTHO_MIN, GameConstants.CAM_ORTHO_MAX)
                                 MOUSE_BUTTON_WHEEL_DOWN:
-                                        _target_height = clampf(_target_height + GameConstants.CAM_ZOOM_SPEED,
-                                                        GameConstants.CAM_MIN_HEIGHT, GameConstants.CAM_MAX_HEIGHT)
+                                        _target_size = clampf(_target_size + GameConstants.CAM_ZOOM_SPEED,
+                                                        GameConstants.CAM_ORTHO_MIN, GameConstants.CAM_ORTHO_MAX)
                 else:
                         match event.button_index:
                                 MOUSE_BUTTON_LEFT:
@@ -1596,13 +1611,16 @@ func _squad_center_xz(idx: int) -> Vector2:
         return acc / float(squads[idx].size())
 
 
-## انتخاب واحد با ماوس: نزدیک‌ترین سرباز در ۴۶ پیکسل یا ۱.۱۵ متر
+## انتخاب واحد با ماوس: نزدیک‌ترین سرباز در ۴۶ پیکسل یا ۰.۷ متر
+## گام ۶R17 — اورتوِ ۲۴: ۴۶px ≈ ۱.۲۳m می‌شد (فرمانِ کلیک نزدیک سرباز ربوده می‌شد)
+## → شعاعِ پیکسلی با زوم محدود می‌شود تا شعاعِ جهانی از ۰.۷m گذر نکند
 func _unit_at_screen(screen: Vector2) -> UnitBase:
         var cam := get_viewport().get_camera_3d()
         if cam == null:
                 return null
+        var px_per_m := get_viewport().get_visible_rect().size.y / maxf(cam.size, 0.1)
         var best: UnitBase = null
-        var best_px := SELECT_PICK_PX
+        var best_px := minf(SELECT_PICK_PX, SELECT_PICK_WORLD_MAX * px_per_m)
         for u in squad:
                 if not u.visible:
                         continue   # گام ۶R — داخل خانه‌ها قابل‌کلیک نیستند

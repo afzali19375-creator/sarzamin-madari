@@ -114,9 +114,8 @@ var _spawn_color: Color
 var _base_color: Color
 var _body: Node3D
 var _ring: MeshInstance3D
-## کاراکتر Low-Poly واقعی — گام ۶R۱۲: پک Quaternius (CC0) با انیمیشن اسکلتی کامل
-## (Idle/Walk/حمله/ضربه/مرگ) — بازخورد: «کیفیت کاراکترها خوب نیست»
-var _model: CharacterModel
+## گام ۶R16 — مدلِ کاراکتر (۲بعدیِ بیلبورد یا ۳بعدیِ اسکلتی — GameConstants.UNITS_2D)
+var _model: CharacterModelBase
 
 
 func _ready() -> void:
@@ -136,10 +135,10 @@ func _ready() -> void:
         # (رفع باگ «گیر کردن در آیدل بعد از رسیدن») — فقط برای کانال ۰/بدون اسلات
         GameEvents.goal_changed.connect(_on_goal_changed)
 
-        # گام ۶R۱۶ — تکنیک ۲٫۵بعدی: اسپرایتِ بیلبوردی دوبعدی (Bad North)
-        # یا مدل اسکلتی سه‌بعدی Quaternius — با همان API کاراکتر
-        if GameConstants.CHARACTERS_2D:
-                _model = SpriteCharacter.new()
+        # گام ۶R16 — مسیرِ رندر: اسپرایتِ بیلبوردی (پیش‌فرض، سبک Bad North) یا
+        # مدلِ اسکلتی Quaternius (مسیرِ قدیمی — برای مقایسه/بازگشت)
+        if GameConstants.UNITS_2D:
+                _model = SpriteCharacterModel.new()
         else:
                 _model = CharacterModel.new()
         # گام ۶R۱۵ — رنگِ عادی: بدون تینت (تینت فقط هنگامِ انتخاب)
@@ -168,14 +167,14 @@ func _ready() -> void:
         _hand = Node3D.new()
         _hand.position = Vector3(0.15, 0.5, 0.1)
         add_child(_hand)
-        # گام ۶R۱۶ — در حالت ۲بعدی سلاح داخل خودِ اسپرایت کشیده شده؛
-        # تجهیزات سه‌بعدی پروسیجرال کنار اسپرایتِ تخت ناجور دیده می‌شوند
-        if not GameConstants.CHARACTERS_2D:
-                _build_gear()
+        _build_gear()
+        # گام ۶R16 — در مسیرِ ۲بعدی، تجهیزاتِ سه‌بعدیِ در دست مخفی (سلاح داخل
+        # خودِ اسپرایت کشیده می‌شود) — مرجع‌ها برای تویین‌ها سالم می‌مانند
+        if GameConstants.UNITS_2D and _hand != null:
+                _hand.visible = false
 
         # گام ۶R — نشان فرمانده: سربند طلایی (پرچم را صحنه وصل می‌کند)
-        # گام ۶R۱۶ — در حالت ۲بعدی سربندِ سه‌بعدی حذف؛ فرمانده با پرچم شناخته می‌شود
-        if is_commander and not GameConstants.CHARACTERS_2D:
+        if is_commander:
                 var band := MeshInstance3D.new()
                 var bm := TorusMesh.new()
                 bm.inner_radius = 0.11
@@ -185,6 +184,7 @@ func _ready() -> void:
                 band.mesh = bm
                 # گام ۶R12 — سرِ کاراکتر واقعی‌نما (قد ۰٫۸۲) نه قدِ چینیِ قبلی
                 band.position.y = 0.88
+                band.visible = not GameConstants.UNITS_2D
                 var gm := StandardMaterial3D.new()
                 gm.albedo_color = GameConstants.COL_GOLD
                 gm.metallic = 0.5

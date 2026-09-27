@@ -53,6 +53,7 @@ func _build_gear() -> void:
         stick_mat.albedo_color = GameConstants.COL_DOOR_WOOD
         stick_mat.roughness = 0.9
         _torch_in_hand.material_override = stick_mat
+        _torch_in_hand.visible = not GameConstants.UNITS_2D   # ۶R16: مشعل داخلِ اسپرایت
         add_child(_torch_in_hand)
         # سرِ آتشین مشعل دستی
         var fl := MeshInstance3D.new()
@@ -67,19 +68,18 @@ func _build_gear() -> void:
         flm.emission = GameConstants.COL_CRIMSON
         flm.emission_energy_multiplier = 2.2
         fl.material_override = flm
+        fl.visible = not GameConstants.UNITS_2D               # ۶R16: مشعل داخلِ اسپرایت
         add_child(fl)
 
 
 ## رفتار پرتابی: دور بمان، رو به هدف، پرتاب کن (override لایه ۳)
+## گام ۶R17 — «پرتاب» بر «عقب‌نشینی» اولویت دارد: در جزیره‌ی کوچک سربازها
+## پلتاست را قبل از اولین پرتاب در گوشه گیر می‌انداختند (d < ۳ = حلقه‌ی
+## عقب‌نشینیِ بی‌پایان = صفر پرتاب). پلتاستِ گرفتار هم پرتاب می‌کند.
 func _combat_tick(delta: float) -> void:
         var up := Vector2(engaged_unit.global_position.x, engaged_unit.global_position.z)
         var pos := Vector2(global_position.x, global_position.z)
         var d := pos.distance_to(up)
-
-        # خیلی نزدیک شد → عقب‌نشینی کوتاه (پرتابگر بی‌سپر است)
-        if d < GameConstants.PELTAST_MIN_DIST:
-                _move_with((pos - up).normalized(), delta, move_speed)
-                return
 
         _face_toward(up, delta)
         _model_set_moving(false)
@@ -94,6 +94,11 @@ func _combat_tick(delta: float) -> void:
                                 global_position + Vector3(0, 0.55, 0),
                                 engaged_unit.global_position + Vector3(0, 0.35, 0),
                                 ground_provider)
+                return
+        # خیلی نزدیک شد → عقب‌نشینی کوتاه (پرتابگر بی‌سپر است) — فقط وقتی
+        # اجازه‌ی پرتابی در کار نیست (سرد است یا LOS بسته)
+        if d < GameConstants.PELTAST_MIN_DIST:
+                _move_with((pos - up).normalized(), delta, move_speed)
 
 
 ## پرتاب — گام ۶R9: کلِ بازو به جلو شلاق می‌خورد + نیزه لحظه‌ای جلو می‌رود

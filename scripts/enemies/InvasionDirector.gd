@@ -57,6 +57,12 @@ var raiders_root: Node3D
 #              "anchor": Vector2, "raid_target": Vector2,
 #              "target_building": BuildingBase, "cleared": bool}
 var _groups: Dictionary = {}
+
+
+## فقط‌خواندنی برای پراب‌های دیباگ (گام ۶R17)
+func group_info(gid: int) -> Dictionary:
+        return _groups.get(gid, {})
+
 var _next_group := 0
 var _rng := RandomNumberGenerator.new()
 var _wave_accum := 0.0
@@ -362,11 +368,23 @@ func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
                 return
         var boat_xz := Vector2(boat.global_position.x, boat.global_position.z)
         # شعاع = offset لنگر + یک سلول ساحل + حاشیه؛ پویا برای لنگرِ ضدقفل
+        # گام ۶R17 — جزیره‌ی ۱۵متری: ساحلِ تنگ (سایتِ خانه/پرتگاهِ دوبلکس) گاهی
+        # کمتر از «need» سلول در ۳.۸m دارد → تا ۱۲m گسترش + چرخه‌ی سلول‌ها؛
+        # هیچ سربازی نباید هدفِ پیاده‌شدنِ «آب» بگیرد (قفلِ ابدی در دریا)
         var cells := _walkable_cells_near(boat_xz, 3.8, need)
         if cells.size() < need:
                 cells = _walkable_cells_near(boat_xz, 5.5, need)
         if cells.size() < need:
                 cells = _walkable_cells_near(boat_xz, 8.0, need)
+        if cells.size() < need:
+                cells = _walkable_cells_near(boat_xz, 12.0, need)
+        if cells.is_empty():
+                # even 12m found nothing (pathological) — nearest walkable point
+                var nav: NavGrid = PathService.nav
+                var nc := _nearest_walkable_cell(boat_xz)
+                cells = _walkable_cells_near(nav.cell_center(nc), 3.8, need)
+        while cells.size() < need and not cells.is_empty():
+                cells.append(cells[0])   # سربازهای اضافی → نزدیک‌ترین سلولِ ساحل
         boat.start_disembark(cells)
         # میدانِ گروه این لحظه به خانه ست می‌شود (سربازان با پیاده‌شدن فعال می‌شوند)
         PathService.set_goal_for(g["channel"], g["raid_target"])

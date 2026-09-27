@@ -256,8 +256,16 @@ func _process(delta: float) -> void:
                                 else:
                                         _stuck_t = 0.0
                                 _last_dist = dist
+                                # گام ۶R17 — جزیره‌ی کوچک: ناوگانِ هم‌زمان قایق را
+                                # تا ~۲.۷m بیرون می‌راند (> SEP_PARKED+0.7=۲.۴) و
+                                # پهلوگیری هرگز شروع نمی‌شد → آستانه به ۱.۲ بالا رفت
+                                # + گیرِ طولانی (> ۶s) در هر فاصله‌ی داک = پهلوگیری
+                                if _stuck_t > 6.0 \
+                                                and dist <= GameConstants.BOAT_DOCK_ZONE * 2.2:
+                                        _begin_landing()
+                                        return
                                 if _stuck_t > 3.0 \
-                                                and dist <= GameConstants.BOAT_SEP_PARKED + 0.7:
+                                                and dist <= GameConstants.BOAT_SEP_PARKED + 1.2:
                                         _begin_landing()
                                         return
                         else:

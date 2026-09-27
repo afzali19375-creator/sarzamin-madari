@@ -123,9 +123,10 @@ func rebuild(ground: IslandGround, nav: NavGrid, house_sites: Array[Vector2i]) -
         # ---- ۳) پدِ خانه‌ها: مستطیلِ اختصاصی — «خانه دقیقاً یک بلوک» ----
         var house_centers: Array[Vector2] = []
         for site in house_sites:
-                var hc := nav.origin + (Vector2(site) + Vector2(1.0, 1.0)) * nav.cell_size
+                # گام ۶R17 — سایتِ ۶×۶ سلولی؛ مرکز = cell00 + ۳ سلول
+                var hc := nav.origin + (Vector2(site) + Vector2(3.0, 3.0)) * nav.cell_size
                 house_centers.append(hc)
-                _add_pad(hc, 0.94, 0.94)
+                _add_pad(hc, 2.35, 2.0)
 
         cell_count = _blocks.size()
 

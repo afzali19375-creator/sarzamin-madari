@@ -1,7 +1,11 @@
 class_name CharacterModel
-extends Node3D
+extends CharacterModelBase
 ## کاراکتر Low-Poly واقعی — گام ۶R۱۲: پک «Quaternius» (لایسنس CC0) جایگزین
 ## KayKit — بازخورد کاربر: «کیفیت کاراکترها خوب نیست؛ باکیفیت‌تر پیدا کن».
+##
+## گام ۶R16 — از گامِ ۶R16 این کلاس «مسیرِ ۳بعدی» است؛ مسیرِ پیش‌فرض بازی
+## SpriteCharacterModel (اسپرایتِ بیلبوردیِ Bad North) شد — GameConstants.UNITS_2D.
+## این کلاس برای مقایسه/بازگشتِ احتمالی حفظ می‌شود (همان API پایه).
 ##
 ## پک‌ها (هر دو CC0، فایل glTF با بافت/بافر embed — تک‌فایلی):
 ##   * RPG Character Pack: Warrior / Ranger / Rogue / Wizard / Cleric / Monk

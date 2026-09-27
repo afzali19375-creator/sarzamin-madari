@@ -47,6 +47,7 @@ func _build_gear() -> void:
         shield_mat.albedo_color = GameConstants.COL_ENEMY_SHIELD
         shield_mat.roughness = 0.55
         _shield.material_override = shield_mat
+        _shield.visible = not GameConstants.UNITS_2D   # ۶R16: سپر داخلِ اسپرایت
         add_child(_shield)
 
         # لبه‌ی برنزی سپر
@@ -59,6 +60,7 @@ func _build_gear() -> void:
         rim_mat.albedo_color = Color("b98d4a")
         rim_mat.roughness = 0.5
         rim.material_override = rim_mat
+        rim.visible = not GameConstants.UNITS_2D       # ۶R16: سپر داخلِ اسپرایت
         add_child(rim)
 
 
