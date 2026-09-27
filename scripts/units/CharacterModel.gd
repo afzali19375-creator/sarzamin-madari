@@ -59,16 +59,19 @@ static var _scene_cache: Dictionary = {}
 var _kind: StringName = &"warrior"
 var _root: Node3D
 var _anim: AnimationPlayer
-var _mats: Array[StandardMaterial3D] = []
+## _mats الان ShaderMaterial است
+var _mats: Array[ShaderMaterial] = []
 var _mat_colors: Array[Color] = []
 var _tex: Texture2D = null
 var _moving := false
 var _busy := false             # انیمیشن یک‌باره در جریان است (حمله/ضربه)
 var _dead := false
 var _attack_anim := "SwordSlash"
-## آخرین تینتِ اعمال‌شده — برای تست خودکار و دیباگ (display_color)
+## آخرین رنگِ تینتِ اعمال‌شده — برای تست خودکار و دیباگ (display_color)
 var _tint := Color.WHITE
 var _tint_k := 0.0
+## گام ۶R۱۵ — چسباندنِ گرادیان به سطحِ زمینِ فعلی (y پایِ کاراکتر)
+var _last_feet_y := -1000.0
 ## گام ۶R۱۳ — مقیاسِ نرمال‌شده‌ی قد (set_crouch روی همین ضرب می‌شود تا
 ## «غول‌شدن» هنگام نبرد رخ ندهد — بازخورد کاربر)
 var _norm_scale := 1.0
@@ -104,6 +107,18 @@ func body_root() -> Node3D:
         return _root
 
 
+func _process(_delta: float) -> void:
+        # گرادیانِ انتخاب باید همیشه نسبت به پایِ کاراکتر روی زمین باشد
+        # (سربار ناچیز: فقط هنگام تغییرِ y بیش از ۱ سانتی‌متر)
+        if _root == null or _mats.is_empty() or not is_inside_tree():
+                return
+        var fy := global_position.y
+        if absf(fy - _last_feet_y) > 0.01:
+                _last_feet_y = fy
+                for m in _mats:
+                        m.set_shader_parameter("feet_y", fy)
+
+
 func _on_root_freed() -> void:
         _anim = null
         _mats.clear()
@@ -128,7 +143,57 @@ func _setup_anim() -> void:
                 _anim.seek(_anim.get_animation(A_IDLE).length * randf(), true)
 
 
-## متریال‌ها per-instance + گِرَش رنگ تیم
+## متریال‌ها per-instance + شیدرِ گرادیانیِ تیم — گام ۶R۱۵:
+##   * بافتِ طبیعیِ پک «برگردانده شد» (بازخورد: «رنگ عادی داشته باشند») —
+##     فیگورِ تک‌رنگِ ۶R۱۴ حذف شد
+##   * تینت = «میزانِ گرادیانِ رنگِ پرچم» از بالا (روشن) به پایین (تیره)
+##     روی خودِ بدنه — انتخابِ دسته = amt ۱٫۰ با رنگِ پرچمِ خودِ دسته
+static func _team_shader() -> Shader:
+        if _shader_cache == null:
+                var sh := Shader.new()
+                sh.code = """
+shader_type spatial;
+uniform vec4 base_col : source_color = vec4(1.0);
+uniform sampler2D tex : source_color, filter_linear_mipmap, repeat_enable;
+uniform float has_tex = 0.0;
+uniform vec4 tint_col : source_color = vec4(1.0);
+uniform float tint_amt = 0.0;
+uniform float flash = 0.0;
+uniform float alpha = 1.0;
+uniform float rough = 1.0;
+uniform float metallic_f = 0.0;
+uniform float feet_y = 0.0;
+uniform float body_h = 0.82;
+varying float v_h;
+void vertex() {
+        vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+        v_h = clamp((wp.y - feet_y) / max(body_h, 0.2), 0.0, 1.0);
+}
+void fragment() {
+        vec3 base = base_col.rgb * COLOR.rgb;
+        if (has_tex > 0.5) {
+                base *= texture(tex, UV).rgb;
+        }
+        // گام ۶R۱۵b — لیفتِ ملایمِ بافت: پالتِ تیره‌ی پک زیرِ نورِ نرمِ مرجع
+        // «لجن» دیده نمی‌شود و رنگِ عادیِ انسانی خوانا می‌ماند
+        base = min(base * 1.28 + vec3(0.025), vec3(1.0));
+        // گرادیانِ عمودی: سر روشن‌تر، پا تیره‌تر (امضای Bad North)
+        vec3 grad = tint_col.rgb * mix(0.50, 1.35, v_h);
+        vec3 col = mix(base, grad, tint_amt);
+        col = mix(col, vec3(1.0), flash);
+        ALBEDO = col;
+        ROUGHNESS = rough;
+        METALLIC = metallic_f;
+        ALPHA = alpha;
+}
+"""
+                _shader_cache = sh
+        return _shader_cache
+
+
+static var _shader_cache: Shader = null
+
+
 func _collect_and_tint(tint: Color, tint_k: float, special: Dictionary) -> void:
         var meshes := _root.find_children("*", "MeshInstance3D", true, false)
         for m in meshes:
@@ -137,47 +202,63 @@ func _collect_and_tint(tint: Color, tint_k: float, special: Dictionary) -> void:
                         continue
                 for i in mi.mesh.get_surface_count():
                         var mat := mi.get_active_material(i)
+                        var sm := ShaderMaterial.new()
+                        sm.shader = _team_shader()
+                        var base_col := Color(1, 1, 1)
+                        var tex: Texture2D = null
+                        var rough := 1.0
+                        var metal := 0.0
                         if mat is StandardMaterial3D:
-                                var sm := (mat as StandardMaterial3D).duplicate() \
-                                                as StandardMaterial3D
-                                # گام ۶R۱۴c — حذفِ بافت: بافتِ تیره‌ی پک ضرب در هر
-                                # تینتی = بدنه‌ی سیاه (بازخورد تصویری). ظاهرِ مرجع =
-                                # فیگورِ تک‌رنگِ مات؛ سیلوئت از هندسه/افزار می‌آید.
-                                if sm.albedo_texture != null:
-                                        _tex = sm.albedo_texture
-                                        sm.albedo_texture = null
-                                mi.set_surface_override_material(i, sm)
-                                _mats.append(sm)
-                                _mat_colors.append(sm.albedo_color)
+                                var std := mat as StandardMaterial3D
+                                base_col = std.albedo_color
+                                tex = std.albedo_texture
+                                rough = std.roughness
+                                metal = std.metallic
+                        elif mat is ShaderMaterial:
+                                # بافتِ تعبیه‌شده‌ی glTF معمولاً StandardMaterial است؛
+                                # اگر شیدرِ سفارشی بود، رنگِ سفیدِ خنثی می‌دهیم
+                                base_col = Color(1, 1, 1)
+                        sm.set_shader_parameter("base_col", base_col)
+                        if tex != null:
+                                sm.set_shader_parameter("tex", tex)
+                                sm.set_shader_parameter("has_tex", 1.0)
+                                _tex = tex
+                        sm.set_shader_parameter("rough", rough)
+                        sm.set_shader_parameter("metallic_f", metal)
+                        sm.set_shader_parameter("feet_y",
+                                        global_position.y if is_inside_tree() else 0.0)
+                        sm.set_shader_parameter("body_h", TARGET_HEIGHT)
+                        mi.set_surface_override_material(i, sm)
+                        _mats.append(sm)
+                        _mat_colors.append(base_col)
         apply_team_tint(tint, tint_k)
 
 
-## گِرَش همه‌ی متریال‌ها به رنگ تیم — میکس پیش‌فرض ۴۲٪ تا شکلِ کاراکتر زیر رنگ
-## گم نشود. رنگِ تینت‌شده جایگزین رنگ پایه در حافظه می‌شود تا فلشِ سفیدِ ضربه
-## بعد از بازیابی، تینتِ تیم را از دست ندهد.
-## گام ۶R۱۴c — دو استثنا برای «سربازِ تک‌رنگِ مرجع»:
-##   ۱) سطوحِ «تقریباً سیاه» (پکِ *_Male: 0.12/0.19/0.27) تینتِ ۴۲٪ را
-##      می‌بلعند → ~۹۰٪ رنگِ دسته می‌گیرند.
-##   ۲) سطوحِ «بافت‌دار» (Warrior/Ranger با PNG تیره) هم با تینتِ ۴۲٪ تیره
-##      می‌مانند → حداقلِ ۸۵٪ تینت تا مثل مرجعِ «فیگورِ تک‌رنگِ اسباب‌بازی»
-##      خوانا شود (فیروزه‌ایِ انتخاب مخصوصاً واضح).
-func apply_team_tint(tint: Color, tint_k := 0.42) -> void:
+## گام ۶R۱۵ — تینتِ گرادیانیِ تیم:
+##   amt = ۰  → رنگِ عادیِ انسانی (بافت پک، بدونِ هیچ تینت)
+##   amt = ۱  → گرادیانِ کاملِ رنگِ پرچم از بالا به پایین (حالتِ انتخاب)
+##   ۰-۱      → میکس (دشمنان ~۰٫۵ قرمزِ گرادیانی | منحل‌شده‌ها خاکستری)
+## feet_y هم تازه می‌شود تا گرادیان به قدِ واقعیِ زمینِ فعلی بچسبد.
+func apply_team_tint(tint: Color, amt := 0.0) -> void:
         _tint = tint
-        _tint_k = tint_k
-        for i in _mats.size():
-                var k := tint_k
-                if _mat_colors[i].get_luminance() < 0.2:
-                        k = maxf(tint_k, 0.90)
-                elif _tex != null:
-                        k = maxf(tint_k, 0.85)
-                var c := _mat_colors[i].lerp(tint, k)
-                _mats[i].albedo_color = c
-                _mat_colors[i] = c
+        _tint_k = amt
+        if _root != null and is_inside_tree():
+                var fy := global_position.y
+                for m in _mats:
+                        m.set_shader_parameter("feet_y", fy)
+        for m in _mats:
+                m.set_shader_parameter("tint_col", tint)
+                m.set_shader_parameter("tint_amt", clampf(amt, 0.0, 1.0))
 
 
 ## آخرین رنگِ تینتِ اعمال‌شده (قبل از میکس با پالت) — مصرفِ تستِ انتخاب
 func display_color() -> Color:
         return _tint
+
+
+## میزانِ گرادیانِ فعلی (۰=عادی، ۱=انتخاب کامل) — مصرفِ تستِ انتخاب
+func tint_amount() -> float:
+        return _tint_k
 
 
 ## توقفِ فوریِ انیمیشن در ژستِ فعلی — برای جسدِ یخ‌زده (اگر لازم شود)
@@ -289,33 +370,35 @@ func play_death() -> void:
 
 # ---------------- افکت‌های ضربه و مرگ ----------------
 
-## فلش سفید کلاسیک — بافت موقتاً حذف → سیلوئت تمام‌سفید؛ ۰٫۱۲s بعد برمی‌گردد
+## فلش سفید کلاسیک — یونیفرمِ flash → سیلوئت تمام‌سفید؛ ۰٫۱۲s بعد برمی‌گردد
 func flash_white() -> void:
         if _mats.is_empty() or _dead:
                 return
         for m in _mats:
-                m.albedo_color = Color(1, 1, 1, 1)
-                m.albedo_texture = null
+                m.set_shader_parameter("flash", 1.0)
         var tw := create_tween()
-        tw.tween_interval(0.12)
+        tw.tween_interval(0.10)
         tw.tween_callback(_restore_flash)
 
 
 func _restore_flash() -> void:
-        # گام ۶R۱۴c — بافت دیگر وجود ندارد (فیگورِ تک‌رنگ) — فقط رنگِ تینت‌شده
-        for i in _mats.size():
-                _mats[i].albedo_texture = null
-                _mats[i].albedo_color = _mat_colors[i]
+        for m in _mats:
+                m.set_shader_parameter("flash", 0.0)
 
 
-## محوِ جسد — متریال‌ها ALPHA و آلفا به صفر (فرار از جزیره)
+## محوِ جسد — یونیفرمِ آلفا به صفر (فرار از جزیره)
 func fade_out(secs: float) -> void:
         if _mats.is_empty():
                 return
         for m in _mats:
-                m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+                m.set_shader_parameter("alpha", 1.0)
         var tw := create_tween()
         tw.tween_interval(0.35)
         tw.set_parallel(true)
         for m in _mats:
-                tw.tween_property(m, "albedo_color:a", 0.0, secs)
+                tw.tween_method(_set_alpha.bind(m), 1.0, 0.0, secs)
+
+
+func _set_alpha(v: float, m: ShaderMaterial) -> void:
+        if is_instance_valid(m):
+                m.set_shader_parameter("alpha", v)

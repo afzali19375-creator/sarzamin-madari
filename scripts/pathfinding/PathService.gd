@@ -110,9 +110,11 @@ func _post_compute() -> void:
                 return
         var walk := nav.snapshot_walkable()
         var costs := nav.snapshot_costs()
+        var edge := nav.snapshot_edge_ok()
+        var lvl := nav.snapshot_level_field()
         for channel in _goals:
                 field_thread.request_compute(nav.world_to_cell(_goals[channel]),
-                                walk, costs, channel)
+                                walk, costs, channel, edge, lvl)
 
 
 func _exit_tree() -> void:

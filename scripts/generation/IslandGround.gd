@@ -20,7 +20,17 @@ var sea_y := SEA_Y
 var _island: Dictionary = {}
 var _cell := 1.0
 var _origin := Vector2.ZERO
-var _corners := PackedFloat32Array()   # (size+1)² — ارتفاع گوشه‌ها برای زمینِ هموار
+## گام ۶R۱۵ — زمینِ دوبلکس: گوشه‌ها «در هر سطح» جدا محاسبه می‌شوند تا پرتگاه
+## داخلی تیز بماند (میانگینِ ارتفاعِ سقف و تراس، پرتگاه را شیبِ نامرئی می‌کرد)
+var _h0 := PackedFloat32Array()   # (size+1)² ارتفاع گوشه‌ها در سطحِ پایین
+var _h1 := PackedFloat32Array()   # (size+1)² ارتفاع گوشه‌ها در سقف
+var _hr := PackedFloat32Array()   # (size+1)² ارتفاع گوشه‌ها در شیبِ مسیر
+var _has0 := PackedByteArray()
+var _has1 := PackedByteArray()
+var _hasr := PackedByteArray()
+var _cc := PackedFloat32Array()   # size²×۴ — ارتفاع ۴ گوشه‌ی هر سلول (h00,h10,h01,h11)
+var _levels := PackedInt32Array() # ۰ پایین | ۱ سقف | ۲ شیب
+var _duplex := {}
 var _terrain_mesh: MeshInstance3D
 var _walls_mesh: MeshInstance3D
 var _water: MeshInstance3D
@@ -38,6 +48,14 @@ func build(island: Dictionary, cell_size: float, world_origin: Vector2) -> void:
         _cell = cell_size
         _origin = world_origin
         size = int(island["size"])
+        var n2 := size * size
+        _levels.resize(n2)
+        _levels.fill(0)
+        if island.has("levels"):
+                var lv: PackedInt32Array = island["levels"]
+                if lv.size() == n2:
+                        _levels = lv
+        _duplex = island.get("duplex", {})
         _compute_island_bounds()
         _build_corners()
         _build_terrain_mesh()
@@ -69,57 +87,134 @@ func _compute_island_bounds() -> void:
                         (min_c - _island_center).length()) + _cell * 0.5
 
 
-# ---------------- ارتفاع گوشه‌ها ----------------
-## هر گوشه = میانگینِ ارتفاعِ سلول‌های مجاور؛ آب سهمِ «سطح دریا» می‌دهد تا
-## ساحل به‌نرمی زیر آب برود و پرتگاه‌های مرتفع به‌صورت شیب تند ظاهر شوند.
+# ---------------- ارتفاع گوشه‌ها (نسخه‌ی دوبلکس ۶R۱۵) ----------------
+## هر گوشه برای هر «سطح» جداگانه میانگین می‌شود:
+##   * سطح ۰ (تراس پایین) و سطح ۱ (سقف): میانگینِ تاپِ ماژول‌های هم‌سطح
+##   * سطح ۲ (شیبِ مسیر): درون‌یابیِ خطی روی محورِ مسیر بین دهانه و سقف؛
+##     در دو سرِ شیب (t<0.18 / t>0.82) به میانگینِ سطحِ مقصد جوش می‌خورد
+##     تا هیچ درزِ هندسی بین مسیر و تراس‌ها نماند.
 
+@warning_ignore("integer_division")
 func _build_corners() -> void:
         var n1 := size + 1
-        _corners.resize(n1 * n1)
-        var sea_contrib := SEA_Y + BEACH_TUCK
+        _h0.resize(n1 * n1); _h1.resize(n1 * n1); _hr.resize(n1 * n1)
+        _has0.resize(n1 * n1); _has1.resize(n1 * n1); _hasr.resize(n1 * n1)
+        _h0.fill(0.0); _h1.fill(0.0); _hr.fill(0.0)
+        _has0.fill(0); _has1.fill(0); _hasr.fill(0)
         for j in n1:
                 for i in n1:
-                        var acc := 0.0
-                        var count := 0
+                        var acc0 := 0.0
+                        var acc1 := 0.0
+                        var acc_r := 0.0
+                        var c0 := 0
+                        var c1 := 0
+                        var cr := 0
                         for d: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(0, 0)]:
                                 var cx: int = i + d.x
                                 var cy: int = j + d.y
                                 if cx < 0 or cy < 0 or cx >= size or cy >= size:
                                         continue
                                 var ci := cy * size + cx
-                                if int(_island["walkable"][ci]) == 1:
-                                        acc += float(_island["tops"][ci])
-                                elif _is_water_module(ci):
-                                        acc += sea_contrib
-                                else:
-                                        # صخره‌ی درونِ خشکی — سطحِ خودش را می‌دهد (نه گودیِ دریا)
-                                        acc += float(_island["tops"][ci])
-                                count += 1
-                        _corners[j * n1 + i] = acc / float(maxi(count, 1))
+                                var top := float(_island["tops"][ci])
+                                match _levels[ci]:
+                                        1:
+                                                acc1 += top
+                                                c1 += 1
+                                        2:
+                                                acc_r += _ramp_corner_h(ci, i, j)
+                                                cr += 1
+                                        _:
+                                                acc0 += top
+                                                c0 += 1
+                        var k := j * n1 + i
+                        if c0 > 0:
+                                _has0[k] = 1
+                                _h0[k] = acc0 / float(c0)
+                        if c1 > 0:
+                                _has1[k] = 1
+                                _h1[k] = acc1 / float(c1)
+                        if cr > 0:
+                                _hasr[k] = 1
+                                _hr[k] = acc_r / float(cr)
+        # --- جوشِ دو سرِ شیب با میانگینِ سطحِ مقصد (ضدِ درز) ---
+        var upper_top := float(_duplex.get("upper_top", WfcIsland.DUPLEX_UPPER_TOP))
+        for j2 in n1:
+                for i2 in n1:
+                        var k2 := j2 * n1 + i2
+                        if _hasr[k2] == 0:
+                                continue
+                        var t := _ramp_t(Vector2(i2, j2))
+                        if t < 0.20 and _has0[k2] == 1:
+                                _hr[k2] = _h0[k2]
+                        elif t > 0.80 and _has1[k2] == 1:
+                                _hr[k2] = _h1[k2]
+                        elif t > 0.80:
+                                _hr[k2] = upper_top
+        # --- ارتفاع ۴ گوشه‌ی هر سلول از آرایه‌ی سطحِ خودش ---
+        _cc.resize(size * size * 4)
+        for cy2 in size:
+                for cx2 in size:
+                        var ci2 := cy2 * size + cx2
+                        var lv := _levels[ci2]
+                        for c in 4:
+                                var gi: int = (cy2 + (c / 2)) * n1 + cx2 + (c % 2)
+                                var h := 0.0
+                                match lv:
+                                        1: h = _h1[gi] if _has1[gi] == 1 else upper_top
+                                        2: h = _hr[gi] if _hasr[gi] == 1 else _h0[gi]
+                                        _: h = _h0[gi] if _has0[gi] == 1 else (SEA_Y + BEACH_TUCK)
+                                _cc[ci2 * 4 + c] = h
 
 
+## پارامتر t (۰=دهانه‌ی پایین، ۱=سقف) یک نقطه‌ی گرید روی محورِ مسیر
+func _ramp_t(grid_p: Vector2) -> float:
+        if _duplex.is_empty():
+                return 0.0
+        var axis := Vector2(_duplex["axis"])
+        var entry := Vector2(_duplex["entry"])
+        var plen := maxf(float(_duplex["len"]), 0.001)
+        return clampf((grid_p - entry).dot(axis) / plen, 0.0, 1.0)
+
+
+## ارتفاعِ شیب در گوشه‌ی (i,j) برای سلولِ شیبِ ci
+func _ramp_corner_h(ci: int, i: int, j: int) -> float:
+        var t := _ramp_t(Vector2(i, j))
+        var low_top := float(_duplex.get("low_top", 0.55))
+        var upper_top := float(_duplex.get("upper_top", WfcIsland.DUPLEX_UPPER_TOP))
+        return lerpf(low_top, upper_top, t)
+
+
+## سازگاری پروب‌های قدیمی — ارتفاع گوشه در سطحِ پایین
 func corner_height(i: int, j: int) -> float:
         var n1 := size + 1
         i = clampi(i, 0, size)
         j = clampi(j, 0, size)
-        return _corners[j * n1 + i]
+        return _h0[j * n1 + i]
+
+
+func level_at(cell: Vector2i) -> int:
+        if not in_bounds(cell):
+                return 0
+        return _levels[cell.y * size + cell.x]
+
+
+func is_path_cell(cell: Vector2i) -> bool:
+        return level_at(cell) == 2
+
+
+## آیا جزیره‌ی فعلی دوبلکس است؟ (سقفِ بلند + مسیرِ اتصال)
+func has_duplex() -> bool:
+        return not _duplex.is_empty()
 
 
 # ---------------- مش زمین (سطح + پرتگاه ساحلی) ----------------
 
-func _corner_world(i: int, j: int) -> Vector3:
-        return Vector3(_origin.x + float(i) * _cell, corner_height(i, j),
-                        _origin.y + float(j) * _cell)
-
 
 func _build_terrain_mesh() -> void:
-        # گام ۶R۱۴c — بازنویسیِ کامل به «شبکه‌ی گوشه‌ایِ ایندکس‌دار»:
-        #   * رأس‌ها = (size+1)² گوشه‌ی مشترک — هر سلول فقط ۲ ایندکس-مثلث
-        #   * رنگ روی گوشه‌ها توزیع و در رستر درون‌یابی می‌شود (نرم‌تر از لکه‌ی
-        #     تختِ سلولی؛ و immune به هرگونه بدرفتاریِ رستر با triangle-soup —
-        #     «راه‌راهِ مورب» که با soup روی llvmpipe/GPU دیده می‌شد)
-        #   * winding = همان قراردادِ اثبات‌شده‌ی ۶R۱۳ (v00,v10,v11)
-        # رنگ‌آمیزی «قانونی»: چمنِ یکدستِ مرجع + موتِ ارگانیک — هشِ دو-متغیره
+        # گام ۶R۱۵ — نسخه‌ی دوبلکس: همان شبکه‌ی گوشه‌ایِ اثبات‌شده‌ی ۶R۱۴،
+        # اما هر گوشه «به ازای هر ارتفاعِ متمایز» یک رأسِ خودش دارد
+        # (کلید = گوشه + ارتفاعِ کوانتیزه) — پرتگاهِ داخلی تیز می‌ماند و
+        # سلول‌های هم‌سطح مثل قبل جوش می‌خورند (ضدِ soup-raster).
         var mottle := PackedFloat32Array()
         mottle.resize(size * size)
         for cyy in size:
@@ -157,54 +252,73 @@ func _build_terrain_mesh() -> void:
                         if water and not walk:
                                 continue
                         has_surface[ci] = 1
-                        if walk:
-                                cell_col[ci] = _grass_color(mottle_s[ci],
-                                                float(_island["tops"][ci]))
-                        else:
+                        if not walk:
                                 # صخره‌ی درونِ جزیره: خاکی-زیتونیِ هم‌خانواده‌ی چمن
-                                # (گچِ سفید فقط مالِ دیوارِ ساحلی است)
                                 cell_col[ci] = GameConstants.COL_GRASS_DARK.lerp(
                                                 GameConstants.COL_ROCK, 0.45)
-        # --- رأس‌های گوشه‌ای: موقعیت + رنگِ میانگینِ سلول‌های مجاور ---
-        var n1 := size + 1
+                        elif _levels[ci] == 2:
+                                cell_col[ci] = _path_color(mottle_s[ci])
+                        else:
+                                cell_col[ci] = _grass_color(mottle_s[ci],
+                                                float(_island["tops"][ci]))
+        # --- رأس‌ها با کلیدِ (گوشه، ارتفاع) + تجمعِ رنگ/نرمال ---
+        var vkey := {}
         var verts := PackedVector3Array()
-        verts.resize(n1 * n1)
-        var cols := PackedColorArray()
-        cols.resize(n1 * n1)
-        var norms := PackedVector3Array()
-        norms.resize(n1 * n1)
-        for j in n1:
-                for i in n1:
-                        var vi := j * n1 + i
-                        verts[vi] = _corner_world(i, j)
-                        norms[vi] = Vector3.UP
-                        var acc := Color(0, 0, 0, 0)
-                        var cnt := 0
-                        for d: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1),
-                                        Vector2i(-1, 0), Vector2i(0, 0)]:
-                                var cx: int = i + d.x
-                                var cy: int = j + d.y
-                                if cx < 0 or cy < 0 or cx >= size or cy >= size:
-                                        continue
-                                var ci3 := cy * size + cx
-                                if has_surface[ci3] == 0:
-                                        continue
-                                acc += cell_col[ci3]
-                                cnt += 1
-                        cols[vi] = (acc / float(maxi(cnt, 1)))
-                        cols[vi].a = 1.0
-        # --- ایندکس‌ها: ۲ مثلث برای هر سلولِ دارایِ سطح (winding اثبات‌شده) ---
+        var col_sum := {}
+        var nrm_sum := {}
         var idxs := PackedInt32Array()
         for cy in size:
                 for cx in size:
                         var ci := cy * size + cx
                         if has_surface[ci] == 0:
                                 continue
-                        var v00 := cy * n1 + cx
-                        var v10 := cy * n1 + cx + 1
-                        var v01 := (cy + 1) * n1 + cx
-                        var v11 := (cy + 1) * n1 + cx + 1
-                        idxs.append_array([v00, v10, v11, v00, v11, v01])
+                        var quad := PackedInt32Array()
+                        quad.resize(4)
+                        for c in 4:
+                                var gi_x: int = cx + (c % 2)
+                                var gi_y: int = cy + (c / 2)
+                                var h := _cc[ci * 4 + c]
+                                var key := Vector3(gi_x, gi_y, snappedf(h, 0.01))
+                                var vi: int
+                                if vkey.has(key):
+                                        vi = int(vkey[key])
+                                else:
+                                        vi = verts.size()
+                                        vkey[key] = vi
+                                        verts.append(Vector3(
+                                                        _origin.x + float(gi_x) * _cell, h,
+                                                        _origin.y + float(gi_y) * _cell))
+                                        col_sum[key] = {"c": Color(0, 0, 0), "n": 0}
+                                        nrm_sum[key] = Vector3.ZERO
+                                var ca: Dictionary = col_sum[key]
+                                ca["c"] += cell_col[ci]
+                                ca["n"] = int(ca["n"]) + 1
+                                quad[c] = vi
+                        # نرمالِ وجه برای تجمع (winding اثبات‌شده‌ی ۶R۱۳)
+                        var p0 := verts[quad[0]]
+                        var p1 := verts[quad[1]]
+                        var p2 := verts[quad[2]]
+                        var p3 := verts[quad[3]]
+                        var fn := (p1 - p0).cross(p3 - p0)
+                        if fn.dot(Vector3.UP) < 0.0:
+                                fn = -fn
+                        for c in 4:
+                                var key2 := Vector3(cx + (c % 2), cy + (c / 2),
+                                                snappedf(_cc[ci * 4 + c], 0.01))
+                                nrm_sum[key2] += fn
+                        idxs.append_array([quad[0], quad[1], quad[3],
+                                        quad[0], quad[3], quad[2]])
+        var cols := PackedColorArray()
+        cols.resize(verts.size())
+        var norms := PackedVector3Array()
+        norms.resize(verts.size())
+        for key in vkey:
+                var vi2: int = int(vkey[key])
+                var ca2: Dictionary = col_sum[key]
+                cols[vi2] = (ca2["c"] / float(maxi(int(ca2["n"]), 1)))
+                cols[vi2].a = 1.0
+                var ns: Vector3 = nrm_sum[key]
+                norms[vi2] = ns.normalized() if ns.length() > 0.0001 else Vector3.UP
         var arr := []
         arr.resize(Mesh.ARRAY_MAX)
         arr[Mesh.ARRAY_VERTEX] = verts
@@ -220,34 +334,64 @@ func _build_terrain_mesh() -> void:
         mat.roughness = 1.0
         _terrain_mesh.material_override = mat
         add_child(_terrain_mesh)
-        _build_cliff_walls(mottle_s)
+        _build_cliff_walls(mottle_s, has_surface)
 
 
-## گام ۶R۱۴c — دیوارهای گچی به‌صورت مشِ جدا (خارج از مشِ شبکه‌ایِ سطوح):
-## پرتگاه ساحلی با لبه‌ی چمنی — امضای مرجع. هر دیوار = نوارِ لب (چمن→گچ)
-## + بدنه‌ی گچ با گرادیان به سایه‌ی پایین.
-func _build_cliff_walls(mottle_s: PackedFloat32Array) -> void:
+## رنگِ مسیرِ باریکِ دوبلکس — خاکیِ روشنِ هم‌خانواده‌ی چمن (مثل رگه‌ی روشنِ مرجع)
+func _path_color(m: float) -> Color:
+        var base := GameConstants.COL_GRASS_LIGHT.lerp(GameConstants.COL_BEACH_SAND,
+                        0.45)
+        return base.lerp(GameConstants.COL_GRASS_DARK, clampf(m, 0.0, 1.0) * 0.25)
+
+
+## گام ۶R۱۵ — دیوارهای گچی: ساحلی (همسایه = آب) + داخلی (پرتگاهِ دوسطحی)
+func _build_cliff_walls(mottle_s: PackedFloat32Array,
+                has_surface: PackedByteArray) -> void:
         var st := SurfaceTool.new()
         st.begin(Mesh.PRIMITIVE_TRIANGLES)
         for cy in size:
                 for cx in size:
                         var ci := cy * size + cx
-                        if int(_island["walkable"][ci]) != 1:
+                        if has_surface[ci] == 0:
                                 continue
-                        var a := _corner_world(cx, cy)
-                        var b := _corner_world(cx + 1, cy)
-                        var c2 := _corner_world(cx, cy + 1)
-                        var d := _corner_world(cx + 1, cy + 1)
-                        var lip_col := _grass_color(mottle_s[ci],
-                                        float(_island["tops"][ci])) * 0.90
-                        if _is_water_module_at(cx + 1, cy) or cx + 1 >= size:  # شرق
-                                _add_wall(st, b, d, lip_col, Vector3(1, 0, 0))
-                        if _is_water_module_at(cx - 1, cy) or cx - 1 < 0:  # غرب
-                                _add_wall(st, a, c2, lip_col, Vector3(-1, 0, 0))
-                        if _is_water_module_at(cx, cy + 1) or cy + 1 >= size:  # جنوب
-                                _add_wall(st, c2, d, lip_col, Vector3(0, 0, 1))
-                        if _is_water_module_at(cx, cy - 1) or cy - 1 < 0:  # شمال
-                                _add_wall(st, a, b, lip_col, Vector3(0, 0, -1))
+                        var walk := int(_island["walkable"][ci]) == 1
+                        var lip_col := cell_col_of(ci, mottle_s) * 0.90
+                        var top_a := float(_island["tops"][ci])
+                        # --- چهار همسایه ---
+                        for dir in [Vector2i(1, 0), Vector2i(-1, 0),
+                                        Vector2i(0, 1), Vector2i(0, -1)]:
+                                var nx: int = cx + dir.x
+                                var ny: int = cy + dir.y
+                                var outside := nx < 0 or ny < 0 \
+                                                or nx >= size or ny >= size
+                                var ni := ny * size + nx
+                                var nb_surface := (not outside) \
+                                                and has_surface[ni] == 1
+                                if not nb_surface:
+                                        if not walk:
+                                                continue  # صخره‌ی ساحلی دیوار نمی‌خواهد
+                                        # پرتگاه ساحلی — تا کفِ دامن
+                                        var e1 := _cc_world(ci, dir, true)
+                                        var e2 := _cc_world(ci, dir, false)
+                                        _add_wall(st, e1, e2, lip_col,
+                                                        Vector3(dir.x, 0, dir.y))
+                                        continue
+                                # پرتگاه داخلی؟ فقط اختلافِ بلند (>DUPLEX_RAMP_DIFF)
+                                var top_b := float(_island["tops"][ni])
+                                if absf(top_a - top_b) <= WfcIsland.DUPLEX_RAMP_DIFF:
+                                        continue
+                                if top_a <= top_b:
+                                        continue  # دیوار از سمتِ بالاتر کشیده می‌شود
+                                var u1 := _cc_world(ci, dir, true)
+                                var u2 := _cc_world(ci, dir, false)
+                                # گوشه‌های پایین از «یالِ مشترک» در سمتِ سلولِ
+                                # پایین‌تر — جهتِ معکوس (-dir) تا همان دو گوشه‌ی
+                                # لبه برداشته شود؛ وگرنه دیوار به یالِ دیگری
+                                # کشیده می‌شود (آرتیفکتِ پاپیونِ سفید ۶R۱۵)
+                                var d1 := _cc_world(ni, -dir, true)
+                                var d2 := _cc_world(ni, -dir, false)
+                                _add_wall_to(st, u1, u2, d1, d2, lip_col,
+                                                Vector3(dir.x, 0, dir.y))
         st.index()
         var wmesh := st.commit()
         _walls_mesh = MeshInstance3D.new()
@@ -257,6 +401,30 @@ func _build_cliff_walls(mottle_s: PackedFloat32Array) -> void:
         wmat.roughness = 1.0
         _walls_mesh.material_override = wmat
         add_child(_walls_mesh)
+
+
+## رنگِ سلول — موتِ چمن/مسیر/صخره (کپیِ سبکِ رنگ‌آمیزی سطح)
+func cell_col_of(ci: int, mottle_s: PackedFloat32Array) -> Color:
+        var walk := int(_island["walkable"][ci]) == 1
+        if not walk:
+                return GameConstants.COL_GRASS_DARK.lerp(GameConstants.COL_ROCK, 0.45)
+        if _levels[ci] == 2:
+                return _path_color(mottle_s[ci])
+        return _grass_color(mottle_s[ci], float(_island["tops"][ci]))
+
+
+## گوشه‌های جهانیِ «لبه‌ی dir» سلول — first=true یعنی گوشه‌ی اول در ترتیبِ لبه
+## شرق: (b,d) | غرب: (a,c) | جنوب: (c,d) | شمال: (a,b)
+func _cc_world(ci: int, dir: Vector2i, first: bool) -> Vector3:
+        var cx := ci % size
+        var cy := int(ci / float(size))
+        var gx: int = cx + (1 if dir.x > 0 else (0 if dir.x < 0 else (0 if first else 1)))
+        var gy: int = cy + (1 if dir.y > 0 else (0 if dir.y < 0 else (0 if first else 1)))
+        # گوشه‌ی (gx,gy) از _cc: c = (gy-cy)*2 + (gx-cx)
+        var c: int = (gy - cy) * 2 + (gx - cx)
+        var h := _cc[ci * 4 + c]
+        return Vector3(_origin.x + float(gx) * _cell, h,
+                        _origin.y + float(gy) * _cell)
 
 
 func _land_at(cx: int, cy: int) -> bool:
@@ -270,8 +438,13 @@ func _land_at(cx: int, cy: int) -> bool:
 ## نرمالِ attribute به «بیرونِ واقعی» ست می‌شود (نورِ صحیح)
 func _add_wall(st: SurfaceTool, p1: Vector3, p2: Vector3, lip_col: Color,
                 outward: Vector3) -> void:
-        var b1 := Vector3(p1.x, SKIRT_BOTTOM, p1.z)
-        var b2 := Vector3(p2.x, SKIRT_BOTTOM, p2.z)
+        _add_wall_to(st, p1, p2, Vector3(p1.x, SKIRT_BOTTOM, p1.z),
+                        Vector3(p2.x, SKIRT_BOTTOM, p2.z), lip_col, outward)
+
+
+## دیوار از لبه‌ی بالایی (p1,p2) تا کفِ دلخواه (b1,b2) — پرتگاه داخلی هم همین
+func _add_wall_to(st: SurfaceTool, p1: Vector3, p2: Vector3, b1: Vector3,
+                b2: Vector3, lip_col: Color, outward: Vector3) -> void:
         var lip := 0.13
         var m1 := Vector3(p1.x, p1.y - lip, p1.z)
         var m2 := Vector3(p2.x, p2.y - lip, p2.z)
@@ -574,21 +747,24 @@ func top_at(cell: Vector2i) -> float:
         return float(_island["tops"][_idx(cell)])
 
 
-## ارتفاع زمینِ هموار در نقطه‌ی جهانی — درون‌یابی دوخطی گوشه‌ها (provider واحدها)
+## ارتفاع زمین در نقطه‌ی جهانی — گام ۶R۱۵: بای‌لینیرِ ۴ گوشه‌ی «همان سلول»
+## (از _cc) — پرشِ ارتفاع بین دو سطح فقط از مرزِ سلول‌ها می‌گذرد و دیوارِ
+## گچی همان‌جا کشیده می‌شود؛ داخلِ هر سلول سطح نرم است.
 func height_at_world(xz: Vector2) -> float:
-        if size == 0:
+        if size == 0 or _cc.is_empty():
                 return 0.0
         var local := (xz - _origin) / _cell
-        var fx := clampf(local.x, 0.0, float(size) - 0.0001)
-        var fy := clampf(local.y, 0.0, float(size) - 0.0001)
-        var i := int(fx)
-        var j := int(fy)
-        var u := fx - float(i)
-        var v := fy - float(j)
-        var h00 := corner_height(i, j)
-        var h10 := corner_height(i + 1, j)
-        var h01 := corner_height(i, j + 1)
-        var h11 := corner_height(i + 1, j + 1)
+        var i := floori(local.x)
+        var j := floori(local.y)
+        if i < 0 or j < 0 or i >= size or j >= size:
+                return SEA_Y
+        var ci := j * size + i
+        var u := clampf(local.x - float(i), 0.0, 1.0)
+        var v := clampf(local.y - float(j), 0.0, 1.0)
+        var h00 := _cc[ci * 4 + 0]
+        var h10 := _cc[ci * 4 + 1]
+        var h01 := _cc[ci * 4 + 2]
+        var h11 := _cc[ci * 4 + 3]
         return lerpf(lerpf(h00, h10, u), lerpf(h01, h11, u), v)
 
 

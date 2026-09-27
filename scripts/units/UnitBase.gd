@@ -139,7 +139,8 @@ func _ready() -> void:
         # گام ۶R۱۲ — کاراکتر اسکلتی Quaternius با انیمیشن کامل؛ تینتِ ۴۲٪ رنگ دسته
         # روی پالت کاراکتر (قابل‌تفکیک از دور، شکل کاراکتر زیر رنگ گم نمی‌شود)
         _model = CharacterModel.new()
-        _model.setup(_model_kind(), _spawn_color, 0.55, _model_special())
+        # گام ۶R۱۵ — رنگِ عادی: بدون تینت (تینت فقط هنگامِ انتخاب)
+        _model.setup(_model_kind(), _spawn_color, 0.0, _model_special())
         add_child(_model)
         _body = _model.body_root()
 
@@ -562,8 +563,8 @@ func _process(delta: float) -> void:
                 _flash_t += delta
                 if _flash_t >= 0.12:
                         _flashing = false
-                        _set_color(GameConstants.COL_ARRIVED \
-                                        if _arrived else _flash_restore)
+                        # گام ۶R۱۵ — قرمزِ «رسیده» حذف شد؛ بدنه به رنگِ عادی برمی‌گردد
+                        _set_color(_flash_restore)
 
         # ---- لایه ۳: واکنش نبرد (بالاترین اولویت) ----
         # گام ۶R9 — تسک A: فراری‌ها نمی‌جنگند (گروه منحل شده — فقط فرار)
@@ -621,7 +622,8 @@ func _process(delta: float) -> void:
                 else:
                         _arrived = true
                         _vel = Vector2.ZERO
-                        _set_color(GameConstants.COL_ARRIVED)  # سرخ روشن = رسیده به هدف
+                        # گام ۶R۱۵ — رسیدن دیگر قرمز نمی‌کند؛ رنگِ عادی می‌ماند
+                        _set_color(_spawn_color)
                         # گام ۶R۱۳ — رسیدن = پایانِ راه رفتن؛ Idle از همین فریم
                         _bob_visual(false)
                         return
@@ -937,29 +939,45 @@ func set_selected_ring(on: bool) -> void:
                 _ring.visible = on
                 var rm := _ring.material_override as StandardMaterial3D
                 if rm != null:
-                        rm.albedo_color = GameConstants.COL_SELECTED \
+                        rm.albedo_color = _sel_color() \
                                         if on else Color(1, 1, 1, 0.35)
         if _model == null:
                 return
         var fl := _find_squad_flag()
         if on:
+                # گام ۶R۱۵ — گرادیانِ کاملِ «رنگِ پرچمِ خودِ دسته» از بالا به پایین
                 if _model != null:
-                        _model.apply_team_tint(GameConstants.COL_SELECTED, 0.78)
+                        _model.apply_team_tint(_sel_color(), 1.0)
                 if fl != null:
-                        fl.set_color(GameConstants.COL_SELECTED)
+                        fl.set_color(_spawn_color)
         else:
                 if _model != null:
-                        _model.apply_team_tint(_base_color, 0.55)
+                        _model.apply_team_tint(_base_color, 0.0)
                 if fl != null:
                         fl.set_color(_base_color)
 
 
-## گام ۶R۱۳ — شروعِ حرکت به پد: تینتِ انتخابی حذف، رنگِ دسته برمی‌گردد
+## رنگِ اشباعِ انتخاب — پالتِ دسته‌ها پاستلی است (عاجی/فیروزه/طلایی/لاجورد/
+## ارغوانی)؛ برای «خوانا مثل مرجع» در حالتِ انتخاب اشباعِ قوی می‌گیرد تا
+## پدهای گرادیانی هرگز «سفیدِ سوخته» دیده نشوند (۶R۱۵b: عاجی → طلایی-شنی)
+func _sel_color() -> Color:
+        var c := _spawn_color
+        c.s = clampf(c.s * 2.2 + 0.12, 0.0, 1.0)
+        c.v = clampf(c.v * 1.02, 0.45, 0.92)
+        return c
+
+
+## نسخه‌ی عمومی برای صحنه (پدهای گرادیانی همان رنگ را می‌گیرند)
+func selection_color() -> Color:
+        return _sel_color()
+
+
+## گام ۶R۱۳ — شروعِ حرکت به پد: تینتِ انتخابی حذف، رنگِ طبیعی برمی‌گردد
 ## (حلقه و پدها هنوز نمایان‌اند تا مقصدِ در جریان خوانا بماند)
 func clear_selected_tint() -> void:
         _sel_tinted = false
         if _model != null:
-                _model.apply_team_tint(_base_color, 0.55)
+                _model.apply_team_tint(_base_color, 0.0)
         var fl := _find_squad_flag()
         if fl != null:
                 fl.set_color(_base_color)
@@ -978,6 +996,13 @@ func body_shader_color() -> Color:
         if _model != null:
                 return _model.display_color()
         return _base_color
+
+
+## گام ۶R۱۵ — میزانِ گرادیانِ بدنه (۰=عادی، ۱=انتخابِ کامل) — تستِ انتخاب
+func model_tint_amount() -> float:
+        if _model != null:
+                return _model.tint_amount()
+        return 0.0
 
 
 func is_ring_visible() -> bool:
@@ -1158,7 +1183,9 @@ func _set_color(c: Color) -> void:
         if _sel_tinted:
                 return
         if _model != null:
-                _model.apply_team_tint(c, 0.55)
+                # گام ۶R۱۵ — بدنه در حالتِ عادی «رنگِ طبیعیِ انسانی» دارد؛
+                # رنگِ دسته فقط روی پرچم زندگی می‌کند (قرمزِ «رسیده» حذف شد)
+                _model.apply_team_tint(c, 0.0)
 
 
 # ---------------- Fidget (§۵.۳ پرامت — لایه ۲) ----------------

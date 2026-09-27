@@ -25,6 +25,13 @@ var flow: PackedVector2Array = PackedVector2Array()
 ## هزینه‌ی زمینِ این محاسبه (اسنپ‌شات کارگر — فقط کارگر می‌خواند)
 var _costs := PackedFloat32Array()
 
+## گام ۶R۱۵ — ماسکِ یال‌های حرکت (اختیاری؛ خالی = همه‌ی یال‌ها باز):
+## بیت‌های NavGrid.EDGE_E/W/S/N — پرتگاهِ دوبلکس یالِ بین دو سطح را قطع می‌کند
+var _edge := PackedInt32Array()
+## گام ۶R۱۵b — سطحِ هر سلول (۰ پایین/۱ سقف/۲ شیب) برای قانونِ قطری:
+## قطری فقط بین هم‌سطح‌ها (یا با مشارکتِ شیب) مجاز است
+var _lvl := PackedInt32Array()
+
 var _invalid := true
 
 # هیپ باینری باز-استفاده‌شونده (بدون تخصیص حافظه در هر محاسبه‌ی معمول)
@@ -49,11 +56,16 @@ func is_invalid() -> bool:
 ## محاسبه‌ی کامل — از نخ کارگر صدا زده می‌شود.
 ## walkable: اسنپ‌شاتِ کپی‌شده (مالک انحصاری همین نخ است)؛ goal_cell: سلول هدف.
 ## costs: هزینه‌ی زمین هر سلول (§۳.۲ پرامت) — اگر خالی باشد همه 1.0 فرض می‌شود.
+## edge_mask: ماسکِ یال‌های حرکت (گام ۶R۱۵) — اگر خالی باشد همه‌ی یال‌ها بازند.
 func compute(w: int, h: int, walkable: PackedByteArray, goal_cell: Vector2i,
-                costs: PackedFloat32Array = PackedFloat32Array()) -> void:
+                costs: PackedFloat32Array = PackedFloat32Array(),
+                edge_mask: PackedInt32Array = PackedInt32Array(),
+                level_mask: PackedInt32Array = PackedInt32Array()) -> void:
         if w != width or h != height:
                 setup(w, h)
         _costs = costs if costs.size() == w * h else PackedFloat32Array()
+        _edge = edge_mask if edge_mask.size() == w * h else PackedInt32Array()
+        _lvl = level_mask if level_mask.size() == w * h else PackedInt32Array()
         var g := goal_cell
         if not _in_bounds(g) or walkable[g.y * w + g.x] == 0:
                 g = _nearest_walkable(walkable, goal_cell)
@@ -100,6 +112,29 @@ func _nearest_walkable(walkable: PackedByteArray, from: Vector2i) -> Vector2i:
         return Vector2i(-1, -1)
 
 
+## گام ۶R۱۵ — آیا حرکتِ قائمِ از ci به (nx,ny) با ماسکِ یال مجاز است؟
+## d: 0=E | 1=W | 2=S | 3=N — بیتِ متناسب باید در هر دو سرِ یال روشن باشد
+func _edge_ok_straight(w: int, ci: int, ni: int, d: int) -> bool:
+        if _edge.is_empty():
+                return true
+        var bit := 1 << d
+        if (_edge[ci] & bit) == 0:
+                return false
+        var rev := 1 << (d ^ 1)   # جهتِ معکوس (E↔W، S↔N)
+        return (_edge[ni] & rev) != 0
+
+
+## گام ۶R۱۵b — حرکتِ قطری: عبورِ سطح ممنوع (هم‌سطح یا با مشارکتِ شیب).
+## نکته: بیت‌های یالِ قائم چک نمی‌شوند — قطریِ بین دو سلولِ هم‌سطح هیچ یالِ
+## قطع‌شده‌ای را رد نمی‌کند (تنگنای موربِ سقف را سالم نگه می‌دارد)
+func _edge_ok_diag(cx: int, cy: int, nx: int, ny: int) -> bool:
+        if _lvl.is_empty():
+                return true
+        var la := _lvl[cy * width + cx]
+        var lb := _lvl[ny * width + nx]
+        return la == lb or la == 2 or lb == 2
+
+
 ## Dijkstra با هیپ باینری + جریمه‌ی دیوار + ممنوعیت بریدن گوشه
 @warning_ignore("integer_division")
 func _dijkstra(w: int, h: int, walkable: PackedByteArray, goal: Vector2i) -> void:
@@ -133,6 +168,11 @@ func _dijkstra(w: int, h: int, walkable: PackedByteArray, goal: Vector2i) -> voi
                                 var o1 := cy * w + nx
                                 var o2 := ny * w + cx
                                 if walkable[o1] == 0 or walkable[o2] == 0:
+                                        continue
+                                if not _edge_ok_diag(cx, cy, nx, ny):
+                                        continue
+                        else:
+                                if not _edge_ok_straight(w, ci, ni, d):
                                         continue
                         var nc := cost + (COST_DIAG if diag else COST_STRAIGHT) \
                                         * _terrain_cost(ni)
@@ -179,6 +219,11 @@ func _compute_flow(w: int, h: int, walkable: PackedByteArray) -> void:
                                         var o1 := y * w + nx
                                         var o2 := ny * w + x
                                         if walkable[o1] == 0 or walkable[o2] == 0:
+                                                continue
+                                        if not _edge_ok_diag(x, y, nx, ny):
+                                                continue
+                                else:
+                                        if not _edge_ok_straight(w, ci, ni, d):
                                                 continue
                                 if integration[ni] < best_c:
                                         best_c = integration[ni]

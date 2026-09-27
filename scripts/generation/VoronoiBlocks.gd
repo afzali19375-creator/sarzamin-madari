@@ -1,22 +1,25 @@
 class_name VoronoiBlocks
 extends Node3D
-## پدهای بیضیِ زمین — گام ۶R۱۳ (بازخورد کاربر):
-##   * «نباید معلوم باشند؛ فقط وقتی روی دسته کلیک می‌کنم نمایش داده شوند»
-##     → پیش‌فرض مخفی؛ ورود به حالتِ فرمان (انتخاب دسته) = نمایان
-##   * «فاصله‌های کم از هم داشته باشند» → شبکه‌ی ۲٫۵ متری + بیضی‌های
-##     درشت‌تر نسبت به شکاف — گپِ دیداری ~۰٫۲-۰٫۴ متر
+## پدهای مستطیلیِ فرمان — گام ۶R۱۵ (بازخورد کاربر از اسکرین‌شات‌های مرجع):
 ##
-##   * هر پد = یک بیضیِ نرم هم‌راستای شیب زمین؛ پدِ خانه بزرگ‌تر — «خانه دقیقاً یک بلوک»
-##   * کلیک/پیکینگ: نزدیک‌ترین پد با متریکِ بیضی (تا ۱٫۳۵×)
-##   * حالت فرمان: پدها نمایان + هاور = پدِ زیر ماوس روشن‌تر
-##   * ثبتِ اشغال: هر سربازِ ایستاده یک پدِ آزاد را تصاحب می‌کند؛ پدِ خانه‌ها
-##     از قبل اشغال است (OWNER_OCCUPIED)
+##   * «پدها تقریباً دیفالت مستطیلی باشند با لبه‌های کمی نرم»
+##   * «پدها کل زمینه را تقریباً پوشش بدهند؛ از مستطیل‌های با ابعاد مختلف
+##     استفاده کن تا کامل زمین جزیره پوشش داده شود» → چیدمانِ حریصانه‌ی
+##     مستطیل‌های ۱×۱ تا ۳×۳ سلولیِ (۲ تا ۶ متر) روی شبکه‌ی فرمان ۲ متری
+##   * «تا قبل از انتخاب رنگ عادی داشته باشند» → سبزِ خنثیِ مرجع، همیشه نمایان
+##   * «با انتخاب دسته، پدها گرادیانِ همان رنگِ دسته بگیرند» → گرادیانِ
+##     از بالای صفحه (روشن) به پایین (تیره) — دقیقاً مثل Bad North
+##   * «با انتخاب، از اضلاعشان هاله‌ی نورانی بیرون بیاید» → باندِ گاوسیِ
+##     اطرافِ لبه‌ی هر مستطیل (SDF جعبه‌ی گرد) که بیرون می‌تابد
+##   * مسیرِ باریکِ دوبلکس پد نمی‌گیرد (سطحِ شیب، سلولِ فرمان نیست)
 ##
 ## API عمداً سازگار با نسخه‌های قبلی نگه داشته شد (صحنه/تست‌ها/probe).
 
-const LIFT := 0.045                       # بلندی پد روی زمین (ضد z-fight)
+const LIFT := 0.05                        # بلندی پد روی زمین (ضد z-fight)
 const OWNER_OCCUPIED := -1                # پدِ خانه‌ها — هرگز به سرباز نمی‌رسد
-const PICK_TOLERANCE := 1.35              # تلورانس پیکینگ بر حسبِ شعاعِ بیضی
+const PICK_TOLERANCE := 0.45              # تلورانس پیکینگ بر حسب متر (SDF)
+const GLOW_MARGIN := 0.5                  # حاشیه‌ی مش برای تابشِ هاله (m)
+const CORNER_R := 0.26                    # شعاع نرمی گوشه‌ها (m)
 
 var cell_count := 0                       # تعداد پدها (سازگاری نام قدیمی)
 
@@ -24,10 +27,10 @@ var _ground: IslandGround
 var _nav: NavGrid
 var _origin := Vector2.ZERO
 
-## هر پد: {center: Vector2, spot: Vector2, top: float, rx: float, ry: float,
-##         rot: float, aabb: Rect2}
+## هر پد: {center, spot, top, hw, hh, aabb}
 var _blocks: Array[Dictionary] = []
 var _claims: Dictionary = {}              # index → owner_id
+var _sit_of: Dictionary = {}              # owner_id → نقطه‌ی نشستِ واقعی
 var _command := false
 var _hover_index := -1
 
@@ -49,36 +52,80 @@ func rebuild(ground: IslandGround, nav: NavGrid, house_sites: Array[Vector2i]) -
         _origin = nav.origin
         _blocks.clear()
         _claims.clear()
+        _sit_of.clear()
         _hover_index = -1
         _command = false
 
         var rng := RandomNumberGenerator.new()
         rng.seed = _seed_value
+        var step := int(GameConstants.COMMAND_CELL / nav.cell_size)   # ۲ سلول nav
 
-        # ---- ۱) پدهای عادی: شبکه‌ی لرزان + فاصله‌ی حداقلی ----
-        var spacing := GameConstants.BLOCK_SITE_SPACING
-        var jitter := GameConstants.BLOCK_SITE_JITTER * 0.6
-        var gsz := float(ground.size) * nav.cell_size
-        var gy := 0.0
-        while gy < gsz:
-                var gx := 0.0
-                while gx < gsz:
-                        var raw := Vector2(_origin.x + gx + rng.randf_range(-jitter, jitter),
-                                        _origin.y + gy + rng.randf_range(-jitter, jitter))
-                        var spot := _nearest_walkable(nav, raw, 1.1)
-                        if spot != Vector2.INF and _far_enough(spot, 2.0):
-                                _add_pad(spot, rng.randf_range(1.16, 1.32),
-                                                rng.randf_range(0.86, 0.98),
-                                                rng.randf() * PI)
-                        gx += spacing
-                gy += spacing
+        # ---- ۱) ماسکِ سلول‌های فرمانِ مجاز: تقریباً کامل روی خشکی، هم‌سطح،
+        #         نه روی مسیرِ شیبِ دوبلکس ----
+        var present := {}
+        var max_c := int(ceil(float(ground.size) / float(step)))
+        for gy in max_c:
+                for gx in max_c:
+                        var cc := Vector2i(gx * step, gy * step)
+                        var walk := 0
+                        var lvl_ok := true
+                        for d: Vector2i in [Vector2i(0, 0), Vector2i(step - 1, 0),
+                                        Vector2i(0, step - 1), Vector2i(step - 1, step - 1)]:
+                                var c2 := cc + d
+                                if nav.is_walkable(c2):
+                                        walk += 1
+                                if ground.is_path_cell(c2):
+                                        lvl_ok = false
+                        var mid := ground.level_at(cc + Vector2i(step - 1, step - 1))
+                        for d: Vector2i in [Vector2i(0, 0), Vector2i(step - 1, 0),
+                                        Vector2i(0, step - 1)]:
+                                if ground.level_at(cc + d) != mid:
+                                        lvl_ok = false
+                        if walk >= 3 and lvl_ok and mid != 2:
+                                present[cc] = true
 
-        # ---- ۲) پدِ خانه‌ها: بیضیِ بزرگ‌تر — «خانه در یک بلوک» ----
+        # ---- ۲) چیدمانِ حریصانه‌ی مستطیل‌ها با ابعادِ متنوع ----
+        var used := {}
+        for gy in max_c:
+                for gx in max_c:
+                        var cc0 := Vector2i(gx * step, gy * step)
+                        if not present.has(cc0) or used.has(cc0):
+                                continue
+                        # ابعادِ هدفِ تصادفی — «مستطیل‌های با ابعاد مختلف»
+                        var mw := _rand_dim(rng)
+                        var mh := _rand_dim(rng)
+                        var w := 0
+                        var h := 0
+                        # گسترشِ عرضی
+                        while w < mw:
+                                var cx2 := cc0 + Vector2i(w * step, 0)
+                                if not present.has(cx2) or used.has(cx2):
+                                        break
+                                w += 1
+                        if w == 0:
+                                continue
+                        # گسترشِ طولی — کلِ ردیف باید آزاد باشد
+                        while h < mh:
+                                var row_ok := true
+                                for k in w:
+                                        var cell := cc0 + Vector2i(k * step, h * step)
+                                        if not present.has(cell) or used.has(cell):
+                                                row_ok = false
+                                                break
+                                if not row_ok:
+                                        break
+                                h += 1
+                        for yy in h:
+                                for xx in w:
+                                        used[cc0 + Vector2i(xx * step, yy * step)] = true
+                        _add_rect(cc0, w, h, step, rng)
+
+        # ---- ۳) پدِ خانه‌ها: مستطیلِ اختصاصی — «خانه دقیقاً یک بلوک» ----
         var house_centers: Array[Vector2] = []
         for site in house_sites:
                 var hc := nav.origin + (Vector2(site) + Vector2(1.0, 1.0)) * nav.cell_size
                 house_centers.append(hc)
-                _add_pad(hc, 1.58, 1.2, rng.randf() * PI)
+                _add_pad(hc, 0.94, 0.94)
 
         cell_count = _blocks.size()
 
@@ -91,28 +138,49 @@ func rebuild(ground: IslandGround, nav: NavGrid, house_sites: Array[Vector2i]) -
         _build_visuals()
 
 
-## seed قطعی — صحنه قبل از rebuild ست می‌کند
+## انتخابِ تصادفیِ بعدِ هدف (۱-۳ سلول) — توزیعِ متنوع ولی قطعی
+func _rand_dim(rng: RandomNumberGenerator) -> int:
+        var r := rng.randf()
+        if r < 0.30:
+                return 1
+        if r < 0.78:
+                return 2
+        return 3
+
+
 func set_island_seed(seed_value: int) -> void:
         _seed_value = seed_value
 
 
-func _add_pad(center: Vector2, rx: float, ry: float, rot: float) -> void:
+## ساخت پد از بلوکِ (w×h) سلولِ فرمان که از cc شروع می‌شود
+func _add_rect(cc: Vector2i, w: int, h: int, step: int, rng: RandomNumberGenerator) -> void:
+        var half_cells := Vector2(w, h) * (float(step) * 0.5)
+        var center := _origin + (Vector2(cc) + half_cells) * _nav.cell_size
+        var inset := GameConstants.COMMAND_TILE_INSET
+        var hw := half_cells.x * _nav.cell_size - inset
+        var hh := half_cells.y * _nav.cell_size - inset
+        # اگر مرکزِ پد دقیقاً روی خشکی نیست، نزدیک‌ترین نقطه‌ی مجاز
+        var spot := _nearest_walkable(_nav, center, 1.4)
+        if spot == Vector2.INF:
+                spot = center
+        _push_pad(center, spot, hw, hh)
+
+
+func _add_pad(center: Vector2, hw: float, hh: float) -> void:
         var spot := _nearest_walkable(_nav, center, 1.1)
         if spot == Vector2.INF:
                 spot = center
-        var aabb := Rect2(center - Vector2(rx, ry), Vector2(rx, ry) * 2.0).grow(0.2)
+        _push_pad(center, spot, hw, hh)
+
+
+func _push_pad(center: Vector2, spot: Vector2, hw: float, hh: float) -> void:
         _blocks.append({
                 "center": center, "spot": spot,
-                "top": _ground.height_at_world(spot),
-                "rx": rx, "ry": ry, "rot": rot, "aabb": aabb,
+                "top": _ground.height_at_world(center),
+                "hw": hw, "hh": hh,
+                "aabb": Rect2(center - Vector2(hw, hh),
+                                Vector2(hw, hh) * 2.0).grow(GLOW_MARGIN + 0.4),
         })
-
-
-func _far_enough(p: Vector2, min_d: float) -> bool:
-        for b in _blocks:
-                if (b["center"] as Vector2).distance_to(p) < min_d:
-                        return false
-        return true
 
 
 func _nearest_walkable(nav: NavGrid, from: Vector2, max_r: float) -> Vector2:
@@ -133,39 +201,37 @@ func _nearest_walkable(nav: NavGrid, from: Vector2, max_r: float) -> Vector2:
         return best
 
 
-# ================= متریک بیضی =================
+# ================= متریک مستطیل (SDF جعبه‌ی گرد) =================
 
-## فاصله‌ی نرمال‌شده از مرکز پد (۱٫۰ = روی لبه؛ داخل < ۱٫۰)
-func _pad_norm(i: int, xz: Vector2) -> float:
+## فاصله‌ی علامت‌دار از پد (متر؛ منفی = داخل)
+func _rect_sdf(i: int, xz: Vector2) -> float:
         var b := _blocks[i]
-        var d := xz - (b["center"] as Vector2)
-        var c := cos(float(b["rot"]))
-        var s := sin(float(b["rot"]))
-        var lx := (d.x * c + d.y * s) / float(b["rx"])
-        var ly := (-d.x * s + d.y * c) / float(b["ry"])
-        return sqrt(lx * lx + ly * ly)
+        var d := (xz - (b["center"] as Vector2)).abs()
+        var q := d - Vector2(float(b["hw"]), float(b["hh"]))
+        return Vector2(maxf(q.x, 0.0), maxf(q.y, 0.0)).length() \
+                        + minf(maxf(q.x, q.y), 0.0)
 
 
-## پدِ زیر نقطه (دقیقاً داخل بیضی) — برای مالکیت
+## پدِ زیر نقطه (داخلِ دقیق) — برای مالکیت
 func _index_at(xz: Vector2) -> int:
         for i in _blocks.size():
                 if not (_blocks[i]["aabb"] as Rect2).has_point(xz):
                         continue
-                if _pad_norm(i, xz) <= 1.0:
+                if _rect_sdf(i, xz) <= 0.0:
                         return i
         return -1
 
 
-## نزدیک‌ترین پد با تلورانس (کلیکِ لبه‌ی پد هم می‌گیرد)
-func _nearest_index(xz: Vector2, tol: float) -> int:
+## نزدیک‌ترین پد با تلورانس متر (کلیکِ حاشیه هم می‌گیرد)
+func _nearest_index(xz: Vector2, tol_m: float) -> int:
         var best := -1
-        var best_n := tol
+        var best_d := tol_m
         for i in _blocks.size():
-                if not (_blocks[i]["aabb"] as Rect2).grow(0.8).has_point(xz):
+                if not (_blocks[i]["aabb"] as Rect2).grow(0.6).has_point(xz):
                         continue
-                var n := _pad_norm(i, xz)
-                if n < best_n:
-                        best_n = n
+                var d := _rect_sdf(i, xz)
+                if d < best_d:
+                        best_d = d
                         best = i
         return best
 
@@ -173,22 +239,47 @@ func _nearest_index(xz: Vector2, tol: float) -> int:
 # ================= بصری‌ها =================
 
 func _pad_shader() -> Shader:
+        # گام ۶R۱۵ — پدِ مستطیلیِ لبه‌نرم + گرادیانِ انتخاب + هاله‌ی اضلاع:
+        #   * fill = SDF جعبه‌ی گرد با لبه‌ی نرم (۰٫۱m)
+        #   * گرادیان: SCREEN_UV.y — بالای کادر روشن → پایینِ کادر تیره
+        #   * هاله: باندِ گاوسی چسبیده به لبه که «بیرون» می‌تابد + درخششِ
+        #     داخلیِ ملایم — وسطِ پدِ غیرِ انتخابی هیچ نور اضافه‌ای ندارد
         var sh := Shader.new()
         sh.code = """
 shader_type spatial;
-render_mode unshaded, blend_mix, cull_back, depth_draw_opaque;
-uniform float intensity = 0.5;
-uniform vec3 edge_tint = vec3(0.62, 0.72, 0.48);
+render_mode unshaded, blend_mix, cull_back, depth_draw_never;
+uniform float intensity = 0.62;
+uniform float highlight = 0.0;      // ۱ = دسته‌ای انتخاب شده است
+uniform vec3 highlight_col : source_color = vec3(0.24, 0.86, 0.94);
+uniform float hover_boost = 0.0;    // فقط متریالِ هاور
+// INSTANCE_CUSTOM فقط در vertex() در دسترس است — به fragment واریینگ می‌شود
+varying vec2 v_size_m;
+void vertex() {
+        v_size_m = INSTANCE_CUSTOM.xy;
+}
 void fragment() {
-        vec2 p = UV - vec2(0.5);
-        float d = length(p * 2.0);
-        float a = 1.0 - smoothstep(0.78, 1.0, d);
-        // گام ۶R۱۴c — پدِ «روشن‌تر از چمن» مثل مرجع: مرکزِ روشن، لبه‌ی نرمِ
-        // سبزِ کمرنگ (قبلاً لبه‌ی زیتونیِ تیره بود — حسِ لکه)
-        vec3 col = COLOR.rgb * mix(1.14, 0.96, smoothstep(0.2, 1.0, d));
-        col = mix(col, edge_tint, smoothstep(0.82, 1.0, d) * 0.35);
+        vec2 size_m = v_size_m;
+        vec2 plane_m = size_m + vec2(0.5);
+        vec2 p = (UV - vec2(0.5)) * plane_m;
+        float r = 0.26;
+        vec2 half_m = size_m * 0.5;
+        vec2 q = abs(p) - (half_m - vec2(r));
+        float sd = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+        float fill = 1.0 - smoothstep(-0.10, 0.02, sd);
+        vec3 base = COLOR.rgb;
+        float gy = 1.0 - SCREEN_UV.y;
+        // گام ۶R۱۵b — گرادیانِ «شست‌وشو» نه «پوششِ کامل»: سبزِ پد زیر رنگ
+        // دسته دیده می‌شود و سفیدِ سوخته نمی‌زند (بازخورد تصویری شات۲)
+        vec3 grad = highlight_col * mix(0.35, 0.90, gy);
+        vec3 col = mix(base, grad, highlight * 0.72);
+        float band = exp(-pow(max(sd, 0.0) / 0.10, 2.0));
+        float halo = band * highlight;
+        float inner = exp(-pow(max(-sd, 0.0) / 0.38, 2.0)) * highlight * 0.20;
+        col += highlight_col * (halo * 0.75 + inner);
+        col += vec3(1.0) * hover_boost * fill * 0.25;
+        float a = fill * intensity + halo * 0.65;
         ALBEDO = col;
-        ALPHA = a * intensity;
+        ALPHA = clamp(a, 0.0, 1.0);
 }
 """
         return sh
@@ -196,12 +287,13 @@ void fragment() {
 
 func _build_visuals() -> void:
         var pm := PlaneMesh.new()
-        pm.size = Vector2(2.0, 2.0)
+        pm.size = Vector2(1.0, 1.0)
         pm.subdivide_width = 0
         pm.subdivide_depth = 0
         var mm := MultiMesh.new()
         mm.transform_format = MultiMesh.TRANSFORM_3D
         mm.use_colors = true
+        mm.use_custom_data = true
         mm.mesh = pm
         mm.instance_count = maxi(_blocks.size(), 1)
         var rng := RandomNumberGenerator.new()
@@ -209,42 +301,45 @@ func _build_visuals() -> void:
         for i in _blocks.size():
                 mm.set_instance_transform(i, _pad_transform(_blocks[i]))
                 var base := GameConstants.COL_PAD_LIGHT.lerp(
-                                GameConstants.COL_PAD_DARK, rng.randf())
+                                GameConstants.COL_PAD_DARK, rng.randf() * 0.8)
                 mm.set_instance_color(i, base)
+                var b := _blocks[i]
+                mm.set_instance_custom_data(i, Color(
+                                float(b["hw"]) * 2.0, float(b["hh"]) * 2.0, 0.0, 0.0))
         _mmi = MultiMeshInstance3D.new()
         _mmi.multimesh = mm
         _pad_mat = ShaderMaterial.new()
         _pad_mat.shader = _pad_shader()
         _pad_mat.set_shader_parameter("intensity", 0.62)
+        _pad_mat.set_shader_parameter("highlight", 0.0)
         _mmi.material_override = _pad_mat
-        # گام ۶R۱۳ — «پدها نباید معلوم باشند» — پیش‌فرض مخفی؛ فقط حالتِ فرمان
-        _mmi.visible = false
+        # گام ۶R۱۵ — پدها «بخشی از زمین»‌اند: همیشه نمایان (مثل مرجع)
+        _mmi.visible = true
         add_child(_mmi)
 
-        # هاور — همان بیضی پرنورتر روی پدِ زیر ماوس
+        # هاور — همان مستطیل پرنورتر روی پدِ زیر ماوس
         _hover_mesh = MeshInstance3D.new()
         _hover_mesh.mesh = pm
         _hover_mat = ShaderMaterial.new()
         _hover_mat.shader = _pad_shader()
-        _hover_mat.set_shader_parameter("intensity", 1.15)
+        _hover_mat.set_shader_parameter("intensity", 1.0)
+        _hover_mat.set_shader_parameter("hover_boost", 1.0)
         _hover_mesh.material_override = _hover_mat
         _hover_mesh.visible = false
         add_child(_hover_mesh)
 
 
-## ترنسفورم هم‌راستا با شیب زمین (تیلت) + lift — الگوی CommandGrid
+## ترنسفورم هم‌راستا با شیب زمین (تیلت) + lift — مقیاس = پد + حاشیه‌ی هاله
 func _pad_transform(b: Dictionary) -> Transform3D:
         var center: Vector2 = b["center"]
-        # گام ۶R۱۴c — پدها ۵۵٪ کوچک‌تر: در مرجع بیضی‌های «جدا و کوچک»‌اند،
-        # نه فرشِ تمام‌جزیره
-        var rx: float = b["rx"] * 0.55
-        var ry: float = b["ry"] * 0.55
-        var h00 := _ground.height_at_world(center + Vector2(-rx, -ry))
-        var h10 := _ground.height_at_world(center + Vector2(rx, -ry))
-        var h01 := _ground.height_at_world(center + Vector2(-rx, ry))
-        var h11 := _ground.height_at_world(center + Vector2(rx, ry))
-        var dx := Vector3(2.0 * rx, h10 - h00, 0.0)
-        var dz := Vector3(0.0, h11 - h01, 2.0 * ry)
+        var hw: float = float(b["hw"])
+        var hh: float = float(b["hh"])
+        var h00 := _ground.height_at_world(center + Vector2(-hw, -hh))
+        var h10 := _ground.height_at_world(center + Vector2(hw, -hh))
+        var h01 := _ground.height_at_world(center + Vector2(-hw, hh))
+        var h11 := _ground.height_at_world(center + Vector2(hw, hh))
+        var dx := Vector3(2.0 * hw, h10 - h00, 0.0)
+        var dz := Vector3(0.0, h11 - h01, 2.0 * hh)
         var n := dx.cross(dz).normalized()
         if n.y < 0.0:
                 n = -n
@@ -252,20 +347,17 @@ func _pad_transform(b: Dictionary) -> Transform3D:
         x_axis = x_axis.normalized() if x_axis.length() > 0.001 else Vector3(1, 0, 0)
         var z_axis := x_axis.cross(n).normalized()
         var basis := Basis(x_axis, n, z_axis)
-        basis = basis.rotated(n, float(b["rot"]))
         var mid_h := _ground.height_at_world(center)
         return Transform3D(basis,
                         Vector3(center.x, mid_h + LIFT, center.y)) \
-                        .scaled_local(Vector3(b["rx"], 1.0, b["ry"]))
+                        .scaled_local(Vector3(hw * 2.0 + GLOW_MARGIN, 1.0,
+                                        hh * 2.0 + GLOW_MARGIN))
 
 
-# ================= حالت فرمان و هاور =================
+# ================= انتخاب و حالت فرمان =================
 
 func set_command_mode(on: bool) -> void:
         _command = on
-        # گام ۶R۱۳ — پدها فقط هنگام انتخابِ دسته (کلیک روی سرباز) دیده می‌شوند
-        if _mmi != null:
-                _mmi.visible = on and not _blocks.is_empty()
         if _pad_mat != null:
                 _pad_mat.set_shader_parameter("intensity", 0.8 if on else 0.62)
         if not on:
@@ -274,6 +366,22 @@ func set_command_mode(on: bool) -> void:
 
 func is_command_mode() -> bool:
         return _command
+
+
+## گام ۶R۱۵ — رنگِ دسته‌ی انتخابی: گرادیان + هاله‌ی اضلاع روی «همه‌ی» پدها
+func set_selection(col: Color, on: bool) -> void:
+        if _pad_mat != null:
+                _pad_mat.set_shader_parameter("highlight", 1.0 if on else 0.0)
+                _pad_mat.set_shader_parameter("highlight_col", col)
+        if _hover_mat != null:
+                _hover_mat.set_shader_parameter("highlight", 1.0 if on else 0.0)
+                _hover_mat.set_shader_parameter("highlight_col", col)
+
+
+func is_selection_highlight() -> bool:
+        if _pad_mat == null:
+                return false
+        return float(_pad_mat.get_shader_parameter("highlight")) > 0.5
 
 
 func _clear_hover() -> void:
@@ -332,7 +440,6 @@ func beam_instance_count() -> int:
 # ================= ثبتِ اشغال پد (هر سرباز = یک بلوک) =================
 
 ## نزدیک‌ترین پدِ «آزاد» به نقطه — خروجی: نقطه‌ی نشستِ پدِ تصاحب‌شده
-## گام ۶R6 — from_xz: پدهایی که مسیرِ مستقیمِ باز به سرباز دارند ارجح‌اند
 func claim_unique_block(xz: Vector2, owner_id: int, max_r := 2.2,
                 from_xz := Vector2.INF) -> Vector2:
         release_owner(owner_id)
@@ -366,11 +473,26 @@ func claim_unique_block(xz: Vector2, owner_id: int, max_r := 2.2,
         if pick < 0:
                 return xz
         _claims[pick] = owner_id
-        return _blocks[pick]["spot"]
+        # گام ۶R۱۵ — نقطه‌ی نشست داخلِ مستطیل‌های بزرگ: روی پدِ ۳×۳ (۶ متر)
+        # مرکزِ پد تا ۲٫۵m از درخواست دور است؛ نقطه‌ی درخواست را داخلِ مستطیل
+        # گیر می‌اندازیم تا آرایشِ آیدل متراکم بماند (چکِ idle_squads_packed)
+        var b := _blocks[pick]
+        var c2: Vector2 = b["center"]
+        var hw2: float = maxf(float(b["hw"]) - 0.30, 0.2)
+        var hh2: float = maxf(float(b["hh"]) - 0.30, 0.2)
+        var clamped := Vector2(clampf(xz.x, c2.x - hw2, c2.x + hw2),
+                        clampf(xz.y, c2.y - hh2, c2.y + hh2))
+        var sit := _nearest_walkable(_nav, clamped, 1.6)
+        if sit == Vector2.INF:
+                sit = b["spot"]
+        _sit_of[owner_id] = sit
+        return sit
 
 
-## پدِ claimedِ یک مالک — برای تست «سرباز داخل بلوکِ خودش»
+## پدِ claimedِ یک مالک — نقطه‌ی نشستِ واقعی (برای تست «سرباز داخل بلوکِ خودش»)
 func spot_of_owner(owner_id: int) -> Vector2:
+        if _sit_of.has(owner_id):
+                return _sit_of[owner_id]
         for i in _claims:
                 if int(_claims[i]) == owner_id:
                         return _blocks[i]["spot"]
@@ -413,6 +535,7 @@ func release_owner(owner_id: int) -> void:
                         dead.append(i)
         for i in dead:
                 _claims.erase(i)
+        _sit_of.erase(owner_id)
 
 
 ## آزادسازی همه به‌جز پدهای خانه‌ها (بازتولید جزیره)
@@ -423,6 +546,7 @@ func release_all_claims() -> void:
                         dead.append(i)
         for i in dead:
                 _claims.erase(i)
+        _sit_of.clear()
 
 
 ## برای تست خودکار: تعداد پدهای اشغال‌شده توسط سربازان (بدون خانه‌ها)

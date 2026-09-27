@@ -78,12 +78,15 @@ func is_alive() -> bool:
 ## درخواست‌های هم‌کانال coalesce می‌شوند؛ کانال‌های مختلف در یک بیداریِ کارگر همه محاسبه می‌شوند.
 func request_compute(goal_cell: Vector2i, walkable_snapshot: PackedByteArray,
                 cost_snapshot: PackedFloat32Array = PackedFloat32Array(),
-                channel: int = 0) -> void:
+                channel: int = 0,
+                edge_snapshot: PackedInt32Array = PackedInt32Array(),
+                level_snapshot: PackedInt32Array = PackedInt32Array()) -> void:
         if not _started:
                 return
         _mutex.lock()
         _pending[channel] = {"goal": goal_cell, "walk": walkable_snapshot,
-                        "costs": cost_snapshot}
+                        "costs": cost_snapshot, "edge": edge_snapshot,
+                        "lvl": level_snapshot}
         _has_request = true
         _mutex.unlock()
         _sem.post()
@@ -166,6 +169,8 @@ func _run_jobs(jobs: Dictionary) -> void:
                         continue
                 var goal: Vector2i = job["goal"]
                 var costs: PackedFloat32Array = job["costs"]
+                var edge: PackedInt32Array = job.get("edge", PackedInt32Array())
+                var lvl: PackedInt32Array = job.get("lvl", PackedInt32Array())
                 _mutex.lock()
                 var work: FlowField = _work_fields.get(channel)
                 _mutex.unlock()
@@ -174,7 +179,7 @@ func _run_jobs(jobs: Dictionary) -> void:
                         work = FlowField.new()
                         work.setup(_w, _h)
                 var t0 := Time.get_ticks_usec()
-                work.compute(_w, _h, walk, goal, costs)
+                work.compute(_w, _h, walk, goal, costs, edge, lvl)
                 var ms := float(Time.get_ticks_usec() - t0) / 1000.0
                 _mutex.lock()
                 _compute_ms = ms

@@ -2376,18 +2376,18 @@ func _phase19_fleet_touch_gameover() -> void:
                                         target_scene.cmd_grid.beam_instance_count() == ccg,
                                         "blocks=%d count=%d" % [
                                         target_scene.cmd_grid.beam_instance_count(), ccg])
-                        # گام ۶R۱۳ — «پدها نباید معلوم باشند؛ فقط با کلیک روی دسته»:
-                        # پیش‌فرض مخفی + ورود به حالتِ فرمان = نمایان + خروج = مخفی
+                        # گام ۶R۱۵ — پدها «بخشی از زمین»‌اند (مثل مرجع): همیشه
+                        # نمایان — در idle، در حالتِ فرمان و بعد از لغوِ انتخاب
                         target_scene._deselect()
-                        _check("pads_hidden_by_default",
-                                        not target_scene.cmd_grid.tiles_visible())
+                        _check("pads_visible_in_idle",
+                                        target_scene.cmd_grid.tiles_visible())
                         target_scene._select_squad(0)
                         _check("pads_visible_in_command_mode",
                                         target_scene.cmd_grid.tiles_visible()
                                         and target_scene.cmd_grid.is_command_mode())
                         target_scene._deselect()
-                        _check("pads_hidden_after_deselect",
-                                        not target_scene.cmd_grid.tiles_visible())
+                        _check("pads_still_visible_after_deselect",
+                                        target_scene.cmd_grid.tiles_visible())
                         # گام ۶R۱۲ — پدهای بیضیِ مجزا (زبانِ اسکرین‌شات): پوششِ کاملِ
                         # زمین دیگر هدفِ طراحی نیست؛ چکِ تازه = پوششِ معقولِ خشکی
                         var navw: NavGrid = PathService.nav
@@ -2479,15 +2479,16 @@ func _phase19_fleet_touch_gameover() -> void:
                                         sel_u10 = u20
                                         break
                         if sel_u10 != null:
-                                var before10: Color = sel_u10.body_shader_color()
                                 sel_u10.set_selected_ring(true)
+                                # گام ۶R۱۵ — انتخاب = گرادیانِ کاملِ رنگِ پرچمِ خودِ
+                                # دسته (amt=۱ + اشباع)؛ لغو = رنگِ طبیعی (amt=۰)
                                 var on_ok10: bool = sel_u10.is_ring_visible() \
                                                 and sel_u10.body_shader_color() \
-                                                == GameConstants.COL_SELECTED
+                                                == sel_u10.selection_color() \
+                                                and sel_u10.model_tint_amount() >= 0.99
                                 sel_u10.set_selected_ring(false)
                                 var off_ok10: bool = not sel_u10.is_ring_visible() \
-                                                and sel_u10.body_shader_color() \
-                                                == before10
+                                                and sel_u10.model_tint_amount() <= 0.01
                                 _check("selection_tints_bad_north",
                                                 on_ok10 and off_ok10)
                         # — دسته‌ی ۳ نفره: بارِ پیش‌فرض = سبک×۲ + پرتاب‌گر×۱ →

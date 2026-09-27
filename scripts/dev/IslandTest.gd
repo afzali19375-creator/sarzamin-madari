@@ -217,6 +217,23 @@ func _run_screenshot_probe() -> void:
                 _target_height = 5.0
                 await get_tree().create_timer(1.5).timeout
                 _snap(out_dir + "/shot5_enemy_close.png")
+        # ۶) گام ۶R۱۵ — نمای دوبلکس: پرتگاهِ داخلی + مسیرِ باریک + سقف
+        var duplex: Dictionary = island.get("duplex", {})
+        if not duplex.is_empty():
+                var ramp_cells: PackedInt32Array = duplex["path_cells"]
+                if not ramp_cells.is_empty():
+                        var mid: int = ramp_cells[ramp_cells.size() / 2]
+                        var mc := Vector2(mid % int(island["size"]),
+                                        int(mid) / int(island["size"]))
+                        var mwx := PathService.nav.origin + mc * CELL
+                        var axis: Vector2 = duplex["axis"]
+                        # دوربین از سمتِ سقف به سمتِ مسیر نگاه کند
+                        _cam_pivot.position = Vector3(mwx.x + axis.x * 2.0,
+                                        ground.height_at_world(mwx) + 0.5,
+                                        mwx.y + axis.y * 2.0)
+                        _target_height = 11.0
+                        await get_tree().create_timer(1.5).timeout
+                        _snap(out_dir + "/shot6_duplex.png")
         print("[SHOT] done -> ", out_dir)
         get_tree().quit(0)
 
@@ -379,6 +396,39 @@ func _apply_island_to_nav() -> void:
                         elif mname.begins_with("grass_path"):
                                 nav.set_cost(c, 1.0)
         # صخره‌های کم‌ارتفاع غیرقابل‌عبورند؛ صحنه‌ی dev هزینه‌ی پیش‌فرض ۱ را نگه می‌دارد
+        # --- گام ۶R۱۵ — قفلِ پرتگاهِ دوبلکس (نسخه‌ی یال‌محور): «گره‌ها»
+        # باز می‌مانند تا فلاتوی سقف همیشه متصل باشد (شبه‌جزیره‌های لبه‌ای
+        # هرگز ایزوله نمی‌شوند) — فقط «یالِ» عبورِ بین دو سطح قطع می‌شود،
+        # مگر بین دو سلولِ مسیرِ شیب (کوتاه‌ترین اتصالِ مجاز).
+        var levels: PackedInt32Array = island.get("levels", PackedInt32Array())
+        if levels.size() == GRID * GRID:
+                nav.set_level_field(levels)
+                var tops: PackedFloat32Array = island["tops"]
+                var cuts := 0
+                for y2 in GRID:
+                        for x2 in GRID:
+                                var a := Vector2i(x2, y2)
+                                if w[y2 * GRID + x2] == 0:
+                                        continue
+                                var la := levels[y2 * GRID + x2]
+                                for d in [Vector2i(1, 0), Vector2i(0, 1)]:
+                                        var nb: Vector2i = a + d
+                                        if nb.x >= GRID or nb.y >= GRID:
+                                                continue
+                                        if w[nb.y * GRID + nb.x] == 0:
+                                                continue
+                                        var lb := levels[nb.y * GRID + nb.x]
+                                        if la == 2 and lb == 2:
+                                                continue  # یالِ داخلِ مسیرِ شیب باز
+                                        var diff := absf(tops[y2 * GRID + x2]
+                                                        - tops[nb.y * GRID + nb.x])
+                                        if diff > 0.55:
+                                                nav.cut_edge(a, nb)
+                                                cuts += 1
+                if cuts > 0:
+                        print("[DUPLEX] cliff edges cut: ", cuts)
+        else:
+                nav.set_level_field(PackedInt32Array())
 
 
 func _clear_units() -> void:
@@ -596,7 +646,9 @@ func _build_environment() -> void:
         # گام ۶R۱۴c — ضدِ اوراکسوز: قبلاً ambient ۱٫۰ + خورشید ۰٫۸۵ جمعاً
         # چمنِ پاستلی را به سفیدِ کلیپ‌شده می‌شست (زمینِ «راه‌راهِ زرد-سفید»)
         # — مرجع نرم است ولی رنگ‌ها اشباعِ واضح دارند
-        env.ambient_light_energy = 0.30
+        # گام ۶R۱۵ — کاراکترها بافتِ طبیعی گرفتند؛ نورِ ۶R۱۴ آن‌ها را لجن‌матیک
+        # می‌کرد (بافتِ تیره × نورِ کم = سیاه) → ambient ×۱٫۵ و خورشید ×۱٫۲
+        env.ambient_light_energy = 0.45
         env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
         env.fog_enabled = true
         env.fog_light_color = Color("d3dcd9")            # هم‌خانواده‌ی پس‌زمینه
@@ -609,7 +661,7 @@ func _build_environment() -> void:
         var sun := DirectionalLight3D.new()
         _sun = sun
         sun.rotation_degrees = Vector3(-48.0, -35.0, 0.0)
-        sun.light_energy = 0.27
+        sun.light_energy = 0.33
         sun.light_color = Color("fff8ea")
         # گام ۶R۱۴b — «GPU را ببر بالا» (کاربر): سایه‌ی نرمِ PCF با بلورِ
         # زیاد — سایه‌روشنِ مرجع زیر درخت/خانه/سرباز، بدونِ لبه‌ی تیز
@@ -1137,7 +1189,9 @@ func _select_squad(idx: int) -> void:
         mode = Mode.COMMAND
         selected = idx
         _slow_select = true  # §۶ — اسلوموشن هنگام انتخاب
-        cmd_grid.set_command_mode(true)  # هاله‌ی سفید ظاهر می‌شود
+        cmd_grid.set_command_mode(true)
+        # گام ۶R۱۵ — پدها گرادیانِ رنگِ پرچمِ دسته + هاله‌ی اضلاع می‌گیرند
+        cmd_grid.set_selection(squads[idx][0].selection_color(), true)
         _update_selection_rings()
         squad_selected_fired = true
         GameEvents.squad_selected.emit(squads[idx])
@@ -1154,6 +1208,7 @@ func _deselect() -> void:
         selected = -1
         _slow_select = false  # §۶.۲ — لغو انتخاب = پایان اسلوموشن (۰.۲s)
         cmd_grid.set_command_mode(false)
+        cmd_grid.set_selection(Color.WHITE, false)
         _update_selection_rings()
         waypoints.clear()
         _last_input_msg = "deselected"

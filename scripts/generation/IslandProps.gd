@@ -86,6 +86,10 @@ func _pick_house_sites(ground: IslandGround, nav: NavGrid) -> Array[Vector2i]:
                                 if not nav.is_walkable(c2):
                                         ok = false
                                         break
+                                # گام ۶R۱۵ — مسیرِ باریکِ دوبلکس خانه نمی‌گیرد
+                                if ground.is_path_cell(c2):
+                                        ok = false
+                                        break
                                 if not String(ground.module_name_at(c2)).begins_with("grass"):
                                         ok = false
                                         break
@@ -98,6 +102,20 @@ func _pick_house_sites(ground: IslandGround, nav: NavGrid) -> Array[Vector2i]:
                 cands[i] = cands[j]
                 cands[j] = t
         var picked: Array[Vector2i] = []
+        # گام ۶R۱۵ — جزیره‌ی دوبلکس: حداقل «یک خانه روی سقف» و «یک خانه روی
+        # تراسِ پایین» تا روستای دوطبقه‌ی مرجع دیده شود (مثل اسکرین‌شات‌ها)
+        var want_upper := Vector2i(-9999, -9999)
+        var want_lower := Vector2i(-9999, -9999)
+        if ground.has_duplex():
+                for p in cands:
+                        if want_upper.x < -100 and ground.level_at(p + Vector2i(1, 1)) == 1:
+                                want_upper = p
+                        if want_lower.x < -100 and ground.level_at(p + Vector2i(1, 1)) == 0:
+                                want_lower = p
+        if want_upper.x > -100:
+                picked.append(want_upper)
+        if want_lower.x > -100 and picked.size() < HOUSE_SITES:
+                picked.append(want_lower)
         for p in cands:
                 if picked.size() >= HOUSE_SITES:
                         break

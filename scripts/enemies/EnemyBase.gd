@@ -112,9 +112,10 @@ func _ready() -> void:
         _channel = GameConstants.ENEMY_CHANNEL_BASE + raid_group
         _body_color = _default_color()
         # گام ۶R12 — کاراکتر انسانی با انیمیشن کامل (Idle/Walk/Attack/Hit/Death)
-        # تینتِ قرمزِ تیم مهاجم — از دور قابل‌تفکیک از دسته‌های پاستلیِ خودی
+        # گام ۶R۱۵ — تینتِ گرادیانیِ ~۵۰٪: از دور «سرخِ مهاجم» خوانده می‌شود
+        # ولی بافتِ پک هم دیده می‌شود (بدونِ دوده‌ی سیاهِ ۶R۱۴)
         _model = CharacterModel.new()
-        _model.setup(_model_kind(), _body_color, 0.55)
+        _model.setup(_model_kind(), _body_color, 0.5)
         add_child(_model)
         _body = _model.body_root()
 
@@ -535,11 +536,11 @@ func _turn_to(target: float, delta: float) -> void:
         rotation.y = _heading
 
 
-## رنگ پایه‌ی بدنه — گام ۶R12: تینتِ تیمِ مهاجم روی مدل انسانی
+## رنگ پایه‌ی بدنه — گام ۶R۱۵: گرادیانِ نیمه‌ی تیمِ مهاجم روی مدل انسانی
 func _set_color(c: Color) -> void:
         _body_color = c
         if _model != null:
-                _model.apply_team_tint(c, 0.55)
+                _model.apply_team_tint(c, 0.5)
 
 
 ## یورش کوتاه به جلو هنگام ضربه/پرتاب

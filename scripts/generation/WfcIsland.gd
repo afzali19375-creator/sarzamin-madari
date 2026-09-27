@@ -341,6 +341,13 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
         # §۸.۳ پرامت: «هیچ آب در وسط جزیره نباید» — سلول آب که هر ۸ همسایه‌اش
         # خشکی است به چمن تبدیل می‌شود (چند گذر تا جابه‌جایی ثابت).
         _melt_inner_lakes(modules, walkable, tops)
+        # --- گام ۶R۱۵ — جزیره‌ی دوبلکس (بازخورد کاربر از اسکرین‌شات‌های مرجع):
+        # «جزیره باید حالت دوبلکس داشته باشد؛ کاراکترها از فضای بالایی به فضای
+        # پایین بیایند؛ یک مسیر کوتاه و باریک» — سقفِ بالایی ~۴۰٪ خشکی در یک
+        # کلاهکِ سمت‌دار + پرتگاهِ داخلی + یک گذرگاهِ ۲ سلولی با شیب نرم.
+        var duplex_rng := RandomNumberGenerator.new()
+        duplex_rng.seed = hash("%d:%d:duplex" % [seed_used, attempt])
+        var duplex := _assign_duplex(modules, walkable, tops, duplex_rng)
         land = 0
         walk = 0
         for i in n:
@@ -362,7 +369,7 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
         var hsh := 0
         for m in modules:
                 hsh = ((hsh * 31 + m) & 0x7FFFFFFF)
-        return {
+        var out := {
                 "ok": true,
                 "size": _size,
                 "modules": modules,
@@ -380,6 +387,10 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
                 "walkable_count": walk,
                 "hash": hsh,
         }
+        if not duplex.is_empty():
+                out["levels"] = duplex["levels"]
+                out["duplex"] = duplex
+        return out
 
 
 ## ذوبِ «همه‌ی» دریاچه‌های محصور در خشکی (§۸.۳: «هیچ آب در وسط جزیره نباید»)
@@ -481,3 +492,296 @@ func _scan_land(walkable: PackedByteArray, cx: int, cy: int,
                 if walkable[ny * _size + nx] == 1:
                         return true
         return false
+
+
+# ---------------- گام ۶R۱۵ — جزیره‌ی دوبلکس ----------------
+## مثل اسکرین‌شات‌های مرجع: یک «کلاهکِ» بلند (~۳۰-۴۵٪ خشکی) در یک سمتِ جزیره
+## با ارتفاعِ ثابتِ UPPER_TOP، پرتگاهِ گچیِ داخلی، و «یک مسیرِ کوتاهِ باریک»
+## (۲ سلول پهنا، ۵-۷ سلول طول) که دو سطح را با شیبِ نرم به هم وصل می‌کند.
+##
+## خروجی (اگر ممکن نشد = دیکشنری خالی → جزیره تختِ عادی):
+##   levels: PackedInt32Array  (۰ = سطح پایین، ۱ = سقف، ۲ = سلولِ شیبِ مسیر)
+##   axis / entry / len  — هندسه‌ی شیب برای IslandGround (میان‌یابی گوشه‌ها)
+##   path_cells          — سلول‌های مسیر (پدِ فرمان نباید رویشان بنشیند)
+
+const DUPLEX_UPPER_TOP := 2.1       # بلندی سقف (m) — بالاتر از بلندترین چمنِ پایین
+                                    # (grass_high=1.3) تا هیچ عبورِ غیرمسیر نماند
+const DUPLEX_MIN_FRAC := 0.22       # کمترین سهمِ مجازِ سقف از خشکی
+const DUPLEX_MAX_FRAC := 0.46
+const DUPLEX_RAMP_DIFF := 0.55      # اختلافِ ارتفاعی که «پرتگاه» حساب می‌شود
+
+@warning_ignore("integer_division")
+func _assign_duplex(modules: PackedInt32Array, walkable: PackedByteArray,
+                tops: PackedFloat32Array, rng: RandomNumberGenerator) -> Dictionary:
+        var n := _size * _size
+        # --- مرکز و شعاعِ خشکی (در سلول) ---
+        var cx_acc := 0.0
+        var cy_acc := 0.0
+        var wcount := 0
+        for i in n:
+                if walkable[i] == 1:
+                        cx_acc += i % _size
+                        cy_acc += i / _size
+                        wcount += 1
+        if wcount < 90:
+                return {}
+        var cc := Vector2(cx_acc / wcount, cy_acc / wcount)
+        var r_max := 0.0
+        for i in n:
+                if walkable[i] == 1:
+                        var p := Vector2(i % _size, i / _size)
+                        r_max = maxf(r_max, p.distance_to(cc))
+        # --- ۸ جهتِ نامزد؛ اولین جهتی که کلاهکِ مجاز بدهد برنده است ---
+        var levels := PackedInt32Array()
+        levels.resize(n)
+        var base_ang := rng.randf() * TAU
+        for attempt_dir in 8:
+                var ang := base_ang + attempt_dir * (TAU / 8.0)
+                var dirv := Vector2(cos(ang), sin(ang))
+                var upper: Array[int] = []
+                for i in n:
+                        if walkable[i] != 1:
+                                continue
+                        var p := Vector2(i % _size, i / _size)
+                        if (p - cc).dot(dirv) > r_max * 0.32:
+                                upper.append(i)
+                var frac := float(upper.size()) / float(wcount)
+                if frac < DUPLEX_MIN_FRAC or frac > DUPLEX_MAX_FRAC:
+                        continue
+                # --- گام ۶R۱۵b — سقف باید ۴جهته هم‌بند باشد: سقفِ چندتکه
+                # یعنی قطعه‌ای بدونِ دسترسی به مسیر (قانونِ قطریِ هم‌سطح
+                # هم بخشِ مورب را پاس می‌دهد، پس هم‌بندیِ ۴جهته کافی است)
+                if not _upper_connected(upper):
+                        continue
+                # --- یال‌های مرزیِ بالایی-پایینی (هر دو قابل‌عبور) ---
+                var edges: Array[Vector2i] = []   # x=ایندکسِ پایین، y=ایندکسِ بالایی
+                for ui in upper:
+                        var ux: int = ui % _size
+                        var uy: int = ui / _size
+                        for d in 4:
+                                var nx: int = ux + DIR_X[d]
+                                var ny: int = uy + DIR_Y[d]
+                                if nx < 0 or ny < 0 or nx >= _size or ny >= _size:
+                                        continue
+                                var ni: int = ny * _size + nx
+                                if walkable[ni] == 1 and levels_scan_is_lower(ni, upper):
+                                        edges.append(Vector2i(ni, ui))
+                if edges.size() < 3:
+                        continue
+                # --- انتخابِ محلِ مسیر از میانِ یال‌ها (تصادفیِ قطعی) ---
+                var e := edges[rng.randi_range(0, edges.size() - 1)]
+                var path := _carve_ramp(e, walkable, modules, upper, rng)
+                if path.is_empty():
+                        continue
+                # --- اعمال ارتفاع سقف + سلول‌های شیب ---
+                for i in n:
+                        levels[i] = 0
+                for ui in upper:
+                        levels[ui] = 1
+                        if walkable[ui] == 1:
+                                tops[ui] = DUPLEX_UPPER_TOP
+                var ramp_cells: PackedInt32Array = path["cells"]
+                var axis: Vector2 = path["axis"]
+                var entry := Vector2(path["entry"].x, path["entry"].y)
+                var plen: float = path["len"]
+                for ci in ramp_cells:
+                        levels[ci] = 2
+                        var center := Vector2(ci % _size, ci / _size)
+                        var t := clampf((center - entry).dot(axis) / plen, 0.0, 1.0)
+                        tops[ci] = lerpf(path["low_top"], DUPLEX_UPPER_TOP, t)
+                return {
+                        "levels": levels,
+                        "upper_top": DUPLEX_UPPER_TOP,
+                        "axis": axis,
+                        "entry": entry,
+                        "len": plen,
+                        "low_top": float(path["low_top"]),
+                        "path_cells": ramp_cells,
+                        "upper_count": upper.size(),
+                }
+        return {}
+
+
+## آیا ایندکس در فهرستِ «بالایی»ها نیست؟ (کمکیِ کوچک — O(1) با ستِ موقت)
+func levels_scan_is_lower(ci: int, upper: Array[int]) -> bool:
+        return not upper.has(ci)
+
+
+## هم‌بندیِ ۴جهته‌ی سلول‌های سقف (BFS از اولین عضو)
+@warning_ignore("integer_division")
+func _upper_connected(upper: Array[int]) -> bool:
+        if upper.is_empty():
+                return false
+        var member := {}
+        for ui in upper:
+                member[ui] = true
+        var seen := {upper[0]: true}
+        var q: Array[int] = [upper[0]]
+        var head := 0
+        while head < q.size():
+                var cur: int = q[head]
+                head += 1
+                var cx: int = cur % _size
+                var cy: int = cur / _size
+                for d in 4:
+                        var nx: int = cx + DIR_X[d]
+                        var ny: int = cy + DIR_Y[d]
+                        if nx < 0 or ny < 0 or nx >= _size or ny >= _size:
+                                continue
+                        var ni: int = ny * _size + nx
+                        if seen.has(ni) or not member.has(ni):
+                                continue
+                        seen[ni] = true
+                        q.append(ni)
+        return seen.size() == upper.size()
+
+
+## تراشِ مسیرِ شیب از یالِ (پایین x، بالا y):
+## ۳ سلول به سمتِ پایین + یال + ۳ سلول به سمتِ بالا؛ پهنا = ۲ سلول.
+## گام ۶R۱۵b — راستی‌آزماییِ «اتصالِ واقعی»: ستونِ تراش‌خورده ممکن است
+## حفره‌ی آب/صخره داشته باشد و دهانه‌ها به هم نرسند (بذرهای ۳ و ۱۱ در پراب).
+## شرطِ پذیرش: BFS داخلِ سلول‌های شیب از سمتِ پایین به سمتِ بالا برقرار باشد
+## و هر دهانه به سلولِ walkableِ همان سطح ختم شود. در شکست، سمتِ مخالف
+## امتحان می‌شود؛ سپس {} (تا جهت/یالِ بعدی امتحان شود).
+@warning_ignore("integer_division")
+func _carve_ramp(edge: Vector2i, walkable: PackedByteArray,
+                modules: PackedInt32Array, upper: Array[int],
+                rng: RandomNumberGenerator) -> Dictionary:
+        var lo := edge.x
+        var hi := edge.y
+        var hx := hi % _size
+        var hy := hi / _size
+        var dx := hx - (lo % _size)
+        var dy := hy - (lo / _size)
+        if absi(dx) + absi(dy) != 1:
+                return {}
+        var axis := Vector2(dx, dy)          # از پایین به بالا (یکی از ۴ جهت)
+        var perp := Vector2(-dy, dx)         # عمود بر مسیر
+        var side0 := 1 if rng.randf() < 0.5 else -1
+        var boundary_proj := Vector2(hx, hy).dot(axis)
+        for side_try in 2:
+                var side := side0 if side_try == 0 else -side0
+                var cells_set := {}
+                # ستونِ اصلی: از ۳ پایین‌تر تا ۳ بالاتر
+                for k in range(-3, 4):
+                        var cx: int = hx - dx * k
+                        var cy: int = hy - dy * k
+                        if cx < 1 or cy < 1 or cx >= _size - 1 or cy >= _size - 1:
+                                continue
+                        var ci := cy * _size + cx
+                        if walkable[ci] == 1:
+                                cells_set[ci] = true
+                        # پهنای دوم: یک سلول کنارِ ستون
+                        var px: int = cx + int(perp.x) * side
+                        var py: int = cy + int(perp.y) * side
+                        if px < 1 or py < 1 or px >= _size - 1 or py >= _size - 1:
+                                continue
+                        var pi2 := py * _size + px
+                        if walkable[pi2] == 1:
+                                cells_set[pi2] = true
+                if cells_set.size() < 6:
+                        continue
+                var path := _validate_ramp(cells_set, walkable, axis,
+                                boundary_proj)
+                if path.is_empty():
+                        continue
+                var cells: PackedInt32Array = path["cells"]
+                # ارتفاعِ دهانه‌ی پایین از ماژولِ واقعیِ اولین سلول
+                var min_proj := 1e9
+                var entry_cell := -1
+                var max_proj := -1e9
+                for ci2 in cells:
+                        var center := Vector2(ci2 % _size, ci2 / _size)
+                        var pr := center.dot(axis)
+                        if pr < min_proj:
+                                min_proj = pr
+                                entry_cell = ci2
+                        max_proj = maxf(max_proj, pr)
+                if entry_cell < 0:
+                        continue
+                var low_top := 0.55
+                var mi := int(modules[entry_cell])
+                if mi >= 0 and mi < _mods.size():
+                        low_top = float(_mods[mi]["top"])
+                return {
+                        "cells": cells,
+                        "axis": axis,
+                        "entry": Vector2(min_proj * axis.x, min_proj * axis.y),
+                        "entry_proj": min_proj,
+                        "len": maxf(max_proj - min_proj, 1.0),
+                        "low_top": low_top,
+                }
+        return {}
+
+
+## BFS داخلِ ستونِ شیب + شرطِ اتصالِ دو دهانه به سطوحِ واقعی
+@warning_ignore("integer_division")
+func _validate_ramp(cells_set: Dictionary, walkable: PackedByteArray,
+                axis: Vector2, boundary_proj: float) -> Dictionary:
+        # جداسازیِ دو سرِ ستون با پروجکشن روی محور (مرز = پروجکشنِ سلولِ بالاییِ یال)
+        var low_side: Array[int] = []
+        var high_side: Array[int] = []
+        for c in cells_set:
+                var ci := int(c)
+                var center := Vector2(ci % _size, ci / _size)
+                if center.dot(axis) <= boundary_proj:
+                        low_side.append(ci)
+                else:
+                        high_side.append(ci)
+        if low_side.is_empty() or high_side.is_empty():
+                return {}
+        # BFS از هر سلولِ سمتِ پایین داخلِ ستون
+        var seen := {}
+        var q: Array[int] = []
+        for c in low_side:
+                seen[c] = true
+                q.append(c)
+        var head := 0
+        while head < q.size():
+                var cur: int = q[head]
+                head += 1
+                var cx: int = cur % _size
+                var cy: int = cur / _size
+                for d in 4:
+                        var nx: int = cx + DIR_X[d]
+                        var ny: int = cy + DIR_Y[d]
+                        var ni: int = ny * _size + nx
+                        if nx < 0 or ny < 0 or nx >= _size or ny >= _size:
+                                continue
+                        if seen.has(ni) or not cells_set.has(ni):
+                                continue
+                        seen[ni] = true
+                        q.append(ni)
+        var reached_high := false
+        for c in high_side:
+                if seen.has(c):
+                        reached_high = true
+        if not reached_high:
+                return {}
+        # دهانه‌ی پایین: حداقل یکی از سلول‌های دیده‌شده همسایه‌ی walkableِ
+        # «سمتِ پایینِ مرز» داشته باشد
+        var low_ok := false
+        var high_ok := false
+        for c in seen:
+                var ci3 := int(c)
+                var cx3: int = ci3 % _size
+                var cy3: int = ci3 / _size
+                for d in 4:
+                        var nx3: int = cx3 + DIR_X[d]
+                        var ny3: int = cy3 + DIR_Y[d]
+                        if nx3 < 0 or ny3 < 0 or nx3 >= _size or ny3 >= _size:
+                                continue
+                        var ni3: int = ny3 * _size + nx3
+                        if walkable[ni3] == 0 or cells_set.has(ni3):
+                                continue
+                        var pr3 := Vector2(nx3, ny3).dot(axis)
+                        if pr3 < boundary_proj:
+                                low_ok = true
+                        else:
+                                high_ok = true
+        if not (low_ok and high_ok):
+                return {}
+        var cells := PackedInt32Array()
+        for c in cells_set:
+                cells.append(int(c))
+        return {"cells": cells}
