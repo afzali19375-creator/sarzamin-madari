@@ -82,7 +82,8 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
 
         _shoot_cooldown = maxf(0.0, _shoot_cooldown - delta)
         if _shoot_cooldown > 0.0:
-                _nock.visible = true  # در حال کمان‌کشیدن
+                if _nock != null:
+                        _nock.visible = true  # در حال کمان‌کشیدن
                 return
 
         var from_xz := Vector2(global_position.x, global_position.z)
@@ -97,7 +98,8 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
                 return  # قانون: آسیب دوستانه ندارد — نگه!
 
         _shoot_cooldown = GameConstants.ARCHER_COOLDOWN
-        _nock.visible = false
+        if _nock != null:
+                _nock.visible = false
         shots_fired += 1
         # گام ۶R2 — shooter پاس می‌شود تا مهاجمِ تیرخورده به «این کماندار» تلافی کند
         ArrowProjectile.fire(get_parent(), global_position + Vector3(0, 0.5, 0),
@@ -106,5 +108,6 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
 
 
 func _combat_end() -> void:
-        _nock.visible = false
+        if _nock != null:
+                _nock.visible = false
         _shoot_cooldown = 0.0

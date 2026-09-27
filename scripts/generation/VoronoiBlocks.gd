@@ -359,7 +359,9 @@ func _pad_transform(b: Dictionary) -> Transform3D:
 func set_command_mode(on: bool) -> void:
         _command = on
         if _pad_mat != null:
-                _pad_mat.set_shader_parameter("intensity", 0.8 if on else 0.62)
+                # گام ۶R۱۶ — جزیره‌ی کوچک‌تر = تایل‌های بزرگ‌تر در کادر؛
+                # شدتِ ۰٫۸ کلِ جزیره را «سوخته‌ی زرد» می‌کرد → ۰٫۷۰
+                _pad_mat.set_shader_parameter("intensity", 0.70 if on else 0.62)
         if not on:
                 _clear_hover()
 

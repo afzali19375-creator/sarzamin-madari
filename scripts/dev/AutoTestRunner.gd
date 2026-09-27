@@ -13,6 +13,10 @@ extends Node
 
 const CLICK_CELL := Vector2i(6, 6)          # مقصد کلیکِ شبیه‌سازی‌شده‌ی اول
 const CLICK_CELL_2 := Vector2i(26, 26)      # کلیک دوم — «بعد از رسیدن» (باگ آیدل)
+## گام ۶R۱۶ — جزیره‌ی کوچک (شبکه ۲۴): ثابت‌های بالا ممکن است در آب بیفتند؛
+## اولین مصرف، نزدیک‌ترین سلولِ قابل‌عبورِ واقعی جایگزین می‌شود (اسنپ)
+var _cc1 := Vector2i(-1, -1)
+var _cc2 := Vector2i(-1, -1)
 const MOVE_MIN_UNITS := 8                    # حداقل واحدهایی که تا ثانیه ۳ باید تکان بخورند
 const ARRIVE_MIN_UNITS := 9                  # حداقل رسیده‌ها (۱۰ از ۱۰ ممکن است به جداسازی گیر کند)
 const ARRIVE_DEADLINE := 30.0                # سقف انتظار برای رسیدن (ثانیه)
@@ -37,6 +41,43 @@ var _redirect_t0 := 0.0
 
 func _ready() -> void:
         print("[AUTOTEST] harness attached — 6 phases (incl. post-arrival redirect)")
+
+
+## نزدیک‌ترین سلول قابل‌عبور به سلول درخواستی (BFS موجی — ضدِ «کلیک در آب»)
+func _snap_walkable(c: Vector2i) -> Vector2i:
+        var nav: NavGrid = PathService.nav
+        var w := nav.width
+        var h := nav.height
+        var start := Vector2i(clampi(c.x, 0, w - 1), clampi(c.y, 0, h - 1))
+        if nav.is_walkable(start):
+                return start
+        var seen := {}
+        var q: Array[Vector2i] = [start]
+        seen[start] = true
+        while not q.is_empty():
+                var cur: Vector2i = q.pop_front()
+                for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1),
+                                Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, -1),
+                                Vector2i(1, -1), Vector2i(-1, 1)]:
+                        var n2: Vector2i = cur + d
+                        if n2.x < 0 or n2.y < 0 or n2.x >= w or n2.y >= h:
+                                continue
+                        if seen.has(n2):
+                                continue
+                        seen[n2] = true
+                        if nav.is_walkable(n2):
+                                return n2
+                        q.append(n2)
+        return start
+
+
+## سلولِ کلیکِ اسنپ‌شده — یک‌بار محاسبه و کش
+func _click_cell(prim: bool) -> Vector2i:
+        if _cc1.x < 0:
+                _cc1 = _snap_walkable(CLICK_CELL)
+                _cc2 = _snap_walkable(CLICK_CELL_2)
+                print("[AUTOTEST] click cells snapped -> ", _cc1, " / ", _cc2)
+        return _cc1 if prim else _cc2
 
 
 func _check(name: String, ok: bool, detail: String = "") -> void:
@@ -113,7 +154,7 @@ func _phase1_motion_then_click() -> void:
                 return
 
         var nav: NavGrid = PathService.nav
-        var world: Vector2 = nav.cell_center(CLICK_CELL)
+        var world: Vector2 = nav.cell_center(_click_cell(true))
         var screen: Vector2 = cam.unproject_position(Vector3(world.x, 0.0, world.y))
 
         var ev := InputEventMouseButton.new()
@@ -143,7 +184,7 @@ func _phase2_field_follows_flag() -> void:
         _check("field_recomputed_after_click", computes_now > _computes_before, \
                         "computes before=%d now=%d" % [_computes_before, computes_now])
 
-        var want: Vector2 = PathService.nav.cell_center(CLICK_CELL)
+        var want: Vector2 = PathService.nav.cell_center(_click_cell(true))
         var g: Vector2 = info["goal"]
         _check("goal_is_click_point", g.distance_to(want) <= 1.01, \
                         "goal=(%.1f,%.1f) want=(%.1f,%.1f)" % [g.x, g.y, want.x, want.y])
@@ -178,7 +219,7 @@ func _phase4_wait_arrival() -> void:
         var units := _units()
         var arrived := 0
         var arrived_at_click := 0
-        var want: Vector2 = PathService.nav.cell_center(CLICK_CELL)
+        var want: Vector2 = PathService.nav.cell_center(_click_cell(true))
         for u in units:
                 if u is TestUnit and u.is_arrived():
                         arrived += 1
@@ -189,7 +230,7 @@ func _phase4_wait_arrival() -> void:
                 _check("units_arrive_flag", arrived >= ARRIVE_MIN_UNITS, \
                                 "%d/%d arrived in %.1fs" % [arrived, units.size(), _t - _arrive_t0])
                 _check("arrived_units_at_CLICKED_flag", arrived_at_click >= ARRIVE_MIN_UNITS, \
-                                "%d/%d within 1.5m of clicked cell %s" % [arrived_at_click, units.size(), CLICK_CELL])
+                                "%d/%d within 1.5m of clicked cell %s" % [arrived_at_click, units.size(), _click_cell(true)])
                 _phase = 5
                 _sub = 0
 
@@ -202,7 +243,7 @@ func _phase5_post_arrival_redirect() -> void:
                         # همان لحظه‌ای که همه دور پرچم اول قرمز شده‌اند، پرچم را برمی‌گردانیم
                         var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
                         var nav: NavGrid = PathService.nav
-                        var world: Vector2 = nav.cell_center(CLICK_CELL_2)
+                        var world: Vector2 = nav.cell_center(_click_cell(false))
                         var screen: Vector2 = cam.unproject_position(Vector3(world.x, 0.0, world.y))
                         var ev := InputEventMouseButton.new()
                         ev.button_index = MOUSE_BUTTON_RIGHT
@@ -226,7 +267,7 @@ func _phase5_post_arrival_redirect() -> void:
                                 _sub = 2
                 2:
                         # و در نهایت باید به پرچم دوم برسند
-                        var want: Vector2 = PathService.nav.cell_center(CLICK_CELL_2)
+                        var want: Vector2 = PathService.nav.cell_center(_click_cell(false))
                         var arrived2 := 0
                         for u in _units():
                                 if u is TestUnit and u.is_arrived():
@@ -235,7 +276,7 @@ func _phase5_post_arrival_redirect() -> void:
                                                 arrived2 += 1
                         if arrived2 >= ARRIVE_MIN_UNITS or (_t - _arrive2_t0) > ARRIVE_DEADLINE:
                                 _check("units_reach_SECOND_flag", arrived2 >= ARRIVE_MIN_UNITS, \
-                                                "%d/%d at cell %s in %.1fs" % [arrived2, _units().size(), CLICK_CELL_2, _t - _arrive2_t0])
+                                                "%d/%d at cell %s in %.1fs" % [arrived2, _units().size(), _click_cell(false), _t - _arrive2_t0])
                                 _phase = 6
 
 

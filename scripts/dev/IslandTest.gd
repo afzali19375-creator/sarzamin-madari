@@ -22,7 +22,9 @@ extends Node3D
 
 enum Mode { IDLE, COMMAND }
 
-const GRID := 32
+## گام ۶R۱۶ — «جزیره باید کوچک باشد، شبیه اسکرین‌شات‌ها»: شبکه‌ی ۳۲→۲۴
+## (قطرِ خشکی ~۱۳–۱۵ متر به‌جای ~۱۸–۲۰ — روستای کوچکِ مرجع)
+const GRID := 24
 const CELL := 1.0
 const FONT_FA := "res://assets/fonts/Vazirmatn-Regular.ttf"
 const DEFAULT_SEED := 20260924

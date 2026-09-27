@@ -98,7 +98,7 @@ func _combat_tick(delta: float) -> void:
 
 ## پرتاب — گام ۶R9: کلِ بازو به جلو شلاق می‌خورد + نیزه لحظه‌ای جلو می‌رود
 func _throw_anim() -> void:
-        if _hand == null:
+        if _hand == null or _swing_weapon == null:
                 return
         var tw := create_tween()
         tw.set_parallel(true)
@@ -109,7 +109,7 @@ func _throw_anim() -> void:
 
 
 func _javelin_back() -> void:
-        if _hand == null:
+        if _hand == null or _swing_weapon == null:
                 return
         var tw := create_tween()
         tw.set_parallel(true)

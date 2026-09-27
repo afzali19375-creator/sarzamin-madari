@@ -136,9 +136,12 @@ func _ready() -> void:
         # (رفع باگ «گیر کردن در آیدل بعد از رسیدن») — فقط برای کانال ۰/بدون اسلات
         GameEvents.goal_changed.connect(_on_goal_changed)
 
-        # گام ۶R۱۲ — کاراکتر اسکلتی Quaternius با انیمیشن کامل؛ تینتِ ۴۲٪ رنگ دسته
-        # روی پالت کاراکتر (قابل‌تفکیک از دور، شکل کاراکتر زیر رنگ گم نمی‌شود)
-        _model = CharacterModel.new()
+        # گام ۶R۱۶ — تکنیک ۲٫۵بعدی: اسپرایتِ بیلبوردی دوبعدی (Bad North)
+        # یا مدل اسکلتی سه‌بعدی Quaternius — با همان API کاراکتر
+        if GameConstants.CHARACTERS_2D:
+                _model = SpriteCharacter.new()
+        else:
+                _model = CharacterModel.new()
         # گام ۶R۱۵ — رنگِ عادی: بدون تینت (تینت فقط هنگامِ انتخاب)
         _model.setup(_model_kind(), _spawn_color, 0.0, _model_special())
         add_child(_model)
@@ -165,10 +168,14 @@ func _ready() -> void:
         _hand = Node3D.new()
         _hand.position = Vector3(0.15, 0.5, 0.1)
         add_child(_hand)
-        _build_gear()
+        # گام ۶R۱۶ — در حالت ۲بعدی سلاح داخل خودِ اسپرایت کشیده شده؛
+        # تجهیزات سه‌بعدی پروسیجرال کنار اسپرایتِ تخت ناجور دیده می‌شوند
+        if not GameConstants.CHARACTERS_2D:
+                _build_gear()
 
         # گام ۶R — نشان فرمانده: سربند طلایی (پرچم را صحنه وصل می‌کند)
-        if is_commander:
+        # گام ۶R۱۶ — در حالت ۲بعدی سربندِ سه‌بعدی حذف؛ فرمانده با پرچم شناخته می‌شود
+        if is_commander and not GameConstants.CHARACTERS_2D:
                 var band := MeshInstance3D.new()
                 var bm := TorusMesh.new()
                 bm.inner_radius = 0.11

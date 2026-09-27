@@ -9,9 +9,13 @@ extends Node3D
 ##   * بوته/درخت مینیمال سبک Bad North — مانع ناوبری نیستند
 ##   * چیدمان قطعی با seed جزیره (بازتولید = همان روستا)
 
-const HOUSE_SITES := 4          # ۳ خانه‌ی گنبددار + ۱ آتشکده
+## گام ۶R۱۶ — بازخورد کاربر: «خانه‌ها بزرگ‌تر باشن؛ در مرحله اول یکی خانه هم
+## کافیه» → یک خانه‌ی بزرگ (بدون آتشکده) — هدفِ مشعل/گاریسون/باخت همین یکی است
+const HOUSE_SITES := 1
 const SITE_MIN_DIST := 4.6      # فاصله‌ی حداقلی بین خانه‌ها (§۹.۱: ≥ 2 متر)
 const SITE_HALF := 1            # نیم‌اندازه‌ی سایت: ۲×۲ سلول NavGrid
+## گام ۶R۱۶ — مقیاسِ خانه: قدِ خانه ~۲٫۴ برابرِ سرباز (مثل مرجع)
+const HOUSE_SCALE := 1.45
 
 ## گام ۶R5 — سایت‌ها هم‌ترازِ شبکه‌ی فرمان‌اند (مبدا زوج) تا هر خانه دقیقاً
 ## «یک واحد بلوک مستطیلی» را پر کند (مرکز خانه = مرکز تایل) — بازخورد کاربر
@@ -48,7 +52,7 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
                 var y := ground.height_at_world(center) - 0.03
                 var pos := Vector3(center.x, y, center.y)
                 house_positions.append(pos)
-                if i < 3:
+                if i < 1:
                         _build_house(pos, i == 0)
                 else:
                         _build_fire_temple(pos)
@@ -212,6 +216,8 @@ func _build_house(pos: Vector3, with_flag_extra: bool) -> void:
         root.add_child(flag)
         # چرخش قطعی خانه برای تنوع
         root.rotation.y = _rng.randf() * TAU
+        # گام ۶R۱۶ — خانه‌ی بزرگ‌تر (قد ~۲٫۴ برابرِ سرباز — مثل مرجع)
+        root.scale = Vector3.ONE * HOUSE_SCALE
 
 
 ## آتشکده‌ی سنگی (چک‌پوینت گام‌های بعد) — مکعب ساده با پیش‌کمره‌ی بالا

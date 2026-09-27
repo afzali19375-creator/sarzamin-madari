@@ -65,7 +65,9 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
                         GameConstants.ROTATE_SPEED_RAD * delta), -PI, PI)
         rotation.y = _heading
         _brace_k = move_toward(_brace_k, 1.0, 3.0 * delta)
-        _spear_pivot.rotation_degrees.x = lerpf(-SPEAR_UP_DEG, -SPEAR_BRACE_DEG, _brace_k)
+        # گام ۶R۱۶ — حالت ۲بعدی: نیزه داخل اسپرایت است؛ پیوت سه‌بعدی وجود ندارد
+        if _spear_pivot != null:
+                _spear_pivot.rotation_degrees.x = lerpf(-SPEAR_UP_DEG, -SPEAR_BRACE_DEG, _brace_k)
         # گام ۶ — ضربه‌ی نیزه، فقط در آماده‌باش و در برد نیزه (قانون آهنین کلاس)
         # گام ۶R3 — ضربه‌ی نیزه داخل چرخه‌ی کشش→یورش→ضربه (reach قطعی پاس می‌شود)
         if _brace_k > 0.85 and _dist_xz_to(hostile) <= GameConstants.SPEARMAN_REACH:
@@ -77,11 +79,14 @@ func _combat_tick(delta: float, hostile: Node3D) -> void:
 func _combat_end() -> void:
         brace_active = false
         _brace_k = 0.0
-        _spear_pivot.rotation_degrees.x = -SPEAR_UP_DEG
+        if _spear_pivot != null:
+                _spear_pivot.rotation_degrees.x = -SPEAR_UP_DEG
 
 
 ## یورش نیزه به جلو هنگام ضربه — گام ۶R9: مبدأ نیزه روی جای دست است
 func _thrust() -> void:
+        if _spear == null:
+                return
         var tw := create_tween()
         tw.tween_property(_spear, "position:z", 0.55, 0.09).set_ease(Tween.EASE_OUT)
         tw.tween_property(_spear, "position:z", 0.0, 0.16)

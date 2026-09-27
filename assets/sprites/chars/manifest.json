@@ -1,0 +1,157 @@
+{
+ "frame_w": 128,
+ "frame_h": 128,
+ "ground_row": 120.0,
+ "kinds": {
+  "warrior": {
+   "anims": {
+    "idle": {
+     "frames": 4,
+     "fps": 5.0,
+     "loop": true
+    },
+    "walk": {
+     "frames": 6,
+     "fps": 10.0,
+     "loop": true
+    },
+    "hit": {
+     "frames": 2,
+     "fps": 12.0,
+     "loop": false
+    },
+    "death": {
+     "frames": 6,
+     "fps": 8.0,
+     "loop": false
+    },
+    "attack": {
+     "frames": 5,
+     "fps": 12.0,
+     "loop": false
+    }
+   },
+   "figure_px": 109.0
+  },
+  "ranger": {
+   "anims": {
+    "idle": {
+     "frames": 4,
+     "fps": 5.0,
+     "loop": true
+    },
+    "walk": {
+     "frames": 6,
+     "fps": 10.0,
+     "loop": true
+    },
+    "hit": {
+     "frames": 2,
+     "fps": 12.0,
+     "loop": false
+    },
+    "death": {
+     "frames": 6,
+     "fps": 8.0,
+     "loop": false
+    },
+    "attack": {
+     "frames": 5,
+     "fps": 12.0,
+     "loop": false
+    }
+   },
+   "figure_px": 109.0
+  },
+  "viking": {
+   "anims": {
+    "idle": {
+     "frames": 4,
+     "fps": 5.0,
+     "loop": true
+    },
+    "walk": {
+     "frames": 6,
+     "fps": 10.0,
+     "loop": true
+    },
+    "hit": {
+     "frames": 2,
+     "fps": 12.0,
+     "loop": false
+    },
+    "death": {
+     "frames": 6,
+     "fps": 8.0,
+     "loop": false
+    },
+    "attack": {
+     "frames": 5,
+     "fps": 12.0,
+     "loop": false
+    }
+   },
+   "figure_px": 111.0
+  },
+  "knight_heavy": {
+   "anims": {
+    "idle": {
+     "frames": 4,
+     "fps": 5.0,
+     "loop": true
+    },
+    "walk": {
+     "frames": 6,
+     "fps": 10.0,
+     "loop": true
+    },
+    "hit": {
+     "frames": 2,
+     "fps": 12.0,
+     "loop": false
+    },
+    "death": {
+     "frames": 6,
+     "fps": 8.0,
+     "loop": false
+    },
+    "attack": {
+     "frames": 5,
+     "fps": 12.0,
+     "loop": false
+    }
+   },
+   "figure_px": 109.0
+  },
+  "soldier": {
+   "anims": {
+    "idle": {
+     "frames": 4,
+     "fps": 5.0,
+     "loop": true
+    },
+    "walk": {
+     "frames": 6,
+     "fps": 10.0,
+     "loop": true
+    },
+    "hit": {
+     "frames": 2,
+     "fps": 12.0,
+     "loop": false
+    },
+    "death": {
+     "frames": 6,
+     "fps": 8.0,
+     "loop": false
+    },
+    "attack": {
+     "frames": 5,
+     "fps": 12.0,
+     "loop": false
+    }
+   },
+   "figure_px": 108.0
+  }
+ }
+}

@@ -114,7 +114,12 @@ func _ready() -> void:
         # گام ۶R12 — کاراکتر انسانی با انیمیشن کامل (Idle/Walk/Attack/Hit/Death)
         # گام ۶R۱۵ — تینتِ گرادیانیِ ~۵۰٪: از دور «سرخِ مهاجم» خوانده می‌شود
         # ولی بافتِ پک هم دیده می‌شود (بدونِ دوده‌ی سیاهِ ۶R۱۴)
-        _model = CharacterModel.new()
+        # گام ۶R۱۶ — تکنیک ۲٫۵بعدی: اسپرایتِ بیلبوردی دوبعدی (Bad North)
+        # یا مدل اسکلتی سه‌بعدی Quaternius — با همان API کاراکتر
+        if GameConstants.CHARACTERS_2D:
+                _model = SpriteCharacter.new()
+        else:
+                _model = CharacterModel.new()
         _model.setup(_model_kind(), _body_color, 0.5)
         add_child(_model)
         _body = _model.body_root()
@@ -125,7 +130,9 @@ func _ready() -> void:
         add_child(_hand)
 
         # تجهیزات اختصاصی کلاس (کلاه‌خود/سپر/نیزه‌ی پرتاب)
-        _build_gear()
+        # گام ۶R۱۶ — در حالت ۲بعدی سلاح داخل اسپرایت است؛ تجهیزات سه‌بعدی حذف
+        if not GameConstants.CHARACTERS_2D:
+                _build_gear()
 
 
 # ---------------- هوک‌های زیرکلاس ----------------

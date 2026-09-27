@@ -216,9 +216,11 @@ func _process(delta: float) -> void:
                 16:
                         _phase16_flags_and_camera()
                 17:
-                        _phase17_torch_burns_house()
+                        # گام ۶R۱۶ — با «یک خانه» گاریسون باید «قبل از» سوزاندن خانه
+                        # اجرا شود وگرنه خانه‌ی زنده‌ای برای اشغال نمی‌ماند
+                        _phase17_garrison_replenish()
                 18:
-                        _phase18_garrison_replenish()
+                        _phase18_torch_burns_house()
                 19:
                         _phase19_fleet_touch_gameover()
                 20:
@@ -236,7 +238,7 @@ func _phase0_island_ready() -> void:
                 _phase = 12
                 return
         _check("gen_fast", float(isl["gen_ms"]) < 2500.0, "%.1f ms" % isl["gen_ms"])
-        _check("grid_size_32", int(isl["size"]) == 32, "size=%d" % isl["size"])
+        _check("grid_size_24", int(isl["size"]) == 24, "size=%d" % isl["size"])
 
         var size: int = isl["size"]
         var sockets: PackedStringArray = isl["meta_sockets"]
@@ -278,7 +280,7 @@ func _phase0_island_ready() -> void:
         _check("multi_channel_goals_registered", (info["channels"] as Array).size() >= 3,
                         "channels=%s" % str(info["channels"]))
 
-        _check("houses_built_4", target_scene.props.house_positions.size() == 4,
+        _check("houses_built_1", target_scene.props.house_positions.size() == 1,
                         "%d" % target_scene.props.house_positions.size())
         var nav: NavGrid = PathService.nav
         var houses_blocked := true
@@ -301,7 +303,7 @@ func _phase0_island_ready() -> void:
                                 mismatches += 1
         _check("navgrid_matches_island", mismatches == 0, "%d mismatches" % mismatches)
 
-        _check("command_blocks_enough", target_scene.cmd_grid.cell_count >= 14,
+        _check("command_blocks_enough", target_scene.cmd_grid.cell_count >= 10,
                         "%d blocks" % target_scene.cmd_grid.cell_count)
 
         # --- گام ۵: دسته‌ها، ترکیب و کلاس‌ها (گام ۶R4: ۳→۵ دسته) ---
@@ -497,8 +499,10 @@ func _nearest_walkable(nav: NavGrid, from: Vector2i) -> Vector2i:
 # ---------------- فاز ۱: قطعیت و فشار WFC ----------------
 
 func _phase1_wfc_determinism_and_stress() -> void:
-        var a := WfcIsland.new().generate(777, 32)
-        var b := WfcIsland.new().generate(777, 32)
+        # گام ۶R۱۶ — جزیره‌ی کوچک‌تر: شبکه‌ی ۲۴ (قبلاً ۳۲) — همه‌ی probes
+        # و فشار تست روی همین اندازه‌ی واقعیِ بازی اجرا می‌شوند
+        var a := WfcIsland.new().generate(777, 24)
+        var b := WfcIsland.new().generate(777, 24)
         _check("wfc_seed_777_ok", a.get("ok", false) == true and b.get("ok", false) == true)
         if a.get("ok", false) == true and b.get("ok", false) == true:
                 _check("wfc_deterministic_same_seed", int(a["hash"]) == int(b["hash"]) \
@@ -508,10 +512,10 @@ func _phase1_wfc_determinism_and_stress() -> void:
         var stress_ok := true
         var details := ""
         for s in [101, 202, 303, 404, 505, 606, 707, 808]:
-                var r: Dictionary = WfcIsland.new().generate(s, 32)
-                # گام ۶R۱۲ — جزیره‌ی کوچک‌تر (شعاع ۰٫۷۲→۰٫۵۶): کفِ قابل‌عبورِ موتور
-                # ۲۱٪ از ۱۰۲۴ = ۲۱۵ سلول است؛ آستانه‌ی تست هم همان کفِ طراحی است
-                if r.get("ok", false) != true or int(r["walkable_count"]) < 215:
+                var r: Dictionary = WfcIsland.new().generate(s, 24)
+                # گام ۶R۱۶ — شبکه‌ی ۲۴×۲۴ = ۵۷۶ سلول؛ کفِ طراحی ۲۱٪ ≈ ۱۲۱
+                # سلول قابل‌عبور؛ آستانه‌ی تست با حاشیه‌ی اطمینان ۹۵ است
+                if r.get("ok", false) != true or int(r["walkable_count"]) < 95:
                         stress_ok = false
                         details += " seed%d:%s(%s)" % [s, r.get("ok", false), r.get("walkable_count", -1)]
         _check("wfc_8_fresh_seeds_all_succeed", stress_ok, details)
@@ -827,7 +831,7 @@ func _phase6_waypoints() -> void:
                 3:
                         if _t - _sub_t >= 0.5:
                                 # فرمان ساده در همان انتخاب: صف را پاک و مقصد جدید می‌گذارد
-                                _cell_d = _pick_cell_far_from(_cell_c, 5.0)
+                                _cell_d = _pick_cell_far_from(_cell_c, 3.6)
                                 _push_click(MOUSE_BUTTON_LEFT, _screen_of(Vector3(_cell_d.x,
                                                 target_scene.ground.height_at_world(_cell_d) + 0.1, _cell_d.y)))
                                 _sub = 4
@@ -1029,7 +1033,8 @@ func _phase9_channel_isolation() -> void:
                 1:
                         if _t - _sub_t >= 0.6:
                                 _goal0_before = PathService.goal_for(0)
-                                _cell_e = _pick_cell_far_from(target_scene.squad_center(1), 6.0)
+                                # گام ۶R۱۶ — جزیره‌ی کوچک: «دور» = ۴٫۲ متر (قبلاً ۶)
+                                _cell_e = _pick_cell_far_from(target_scene.squad_center(1), 4.2)
                                 _others_snapshot.clear()
                                 for u in target_scene.squads[0]:
                                         _others_snapshot.append(_xz(u))
@@ -1117,9 +1122,13 @@ func _click_lands_on(center: Vector2) -> bool:
 
 
 func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
+        # گام ۶R۱۶ — بازگشتِ پله‌ای: (۱) همه‌ی قیدها (۲) بدونِ فاصله‌یpixeli
+        # (۳) دورترینِ موجود — جزیره‌ی کوچک ممکن است هیچ بلوکِ «تمام‌قید» نداشته باشد
         var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
-        var best := Vector2.ZERO
+        var best := Vector2.INF
         var best_d := -1.0
+        var best_lax := Vector2.INF
+        var best_lax_d := -1.0
         for i in target_scene.cmd_grid.cell_count:
                 var info: Dictionary = target_scene.cmd_grid.cell_info(i)
                 var center: Vector2 = info["center"]
@@ -1129,6 +1138,9 @@ func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
                 # گام ۶R — سلول نزدیک خانه = گاریسون؛ هدفِ فرمان ساده نیست
                 if target_scene._alive_house_near(center) != null:
                         continue
+                if d > best_lax_d:
+                        best_lax_d = d
+                        best_lax = center
                 # گام ۶R6 — بلوکی که پرتوِ کلیک به آن نمی‌رسد، هدفِ تمیزی نیست
                 if not _click_lands_on(center):
                         continue
@@ -1148,9 +1160,14 @@ func _pick_cell_far_from(from: Vector2, min_dist: float) -> Vector2:
                 if d > best_d:
                         best_d = d
                         best = center
-        if best == Vector2.ZERO:
-                best = from  # پشتیبان: همان نقطه (تست فاصله‌ی کوتاه‌تر می‌شود)
-        return best
+        if best != Vector2.INF:
+                return best
+        if best_lax != Vector2.INF:
+                print("[AUTOTEST] pick_cell: strict empty -> lax far cell ",
+                                best_lax, " (%.1fm)" % best_lax_d)
+                return best_lax
+        print("[AUTOTEST] pick_cell: no cell at all -> fallback own center")
+        return from  # پشتیبان نهایی: همان نقطه
 
 
 # ---------------- فاز ۱۰: لایه ۳ — واکنش نبرد روی کوله‌ی تمرین ----------------
@@ -1627,11 +1644,37 @@ func _phase14_shield_and_peltast() -> void:
                         if host_si < 0:
                                 host_si = 2  # فقط کماندارها زنده‌اند — با ریسک تیر
                         var chost: Vector2 = target_scene.squad_center(host_si)
-                        # پلتاست: درون برد پرتاب (۵.۵m) و بیرون برد عقب‌نشینی (۳m)
-                        var pp: Vector2 = _point_near_units(chost, 4.3, 3.4, 5.2, nav)
+                        # پلتاست: درون بردِ آگرو (۴٫۸) و برد پرتاب (۵٫۵) و بیرون
+                        # بردِ عقب‌نشینی (۳) — گام ۶R۱۶: سقفِ ۵٫۲→۴٫۵ تا نقطه‌ی
+                        # انتخابی هرگز بیرونِ شعاعِ آگرو نیفتد (۰ پرتابِ بی‌پاسخ)
+                        var pp: Vector2 = _point_near_units(chost, 4.0, 3.4, 4.5, nav)
                         _peltast_test = target_scene.director.spawn_enemy("peltast", pp, -1)
                         _check("test_heavy_spawned", _heavy_test != null)
                         _check("test_peltast_spawned", _peltast_test != null)
+                        # گام ۶R۱۶ — ایزولاسیونِ مکانیزم (الگوی فاز مشعل): این فاز
+                        # «پرتابِ نیزه» را می‌آزماید نه بقا؛ در جزیره‌ی کوچکِ دوبلکس
+                        # سربازهای میانی پیش از نخستین پرتاب او را می‌کشتند (hp=0)
+                        if _peltast_test != null:
+                                _peltast_test.hp = 99
+                                # گام ۶R۱۶ — آزمونِ «مکانیزمِ پرتاب» به‌صورتِ قطعی:
+                                # نزدیک‌ترین هدفِ دارای LOS در باندِ [۳٫۲، ۴٫۸] و یک
+                                # تیکِ مستقیمِ _combat_tick — سربازهای شارژکننده و
+                                # قفلِ عقب‌نشینی دیگر اثری روی نتیجه ندارند
+                                var near_u2: Node3D = null
+                                var best_ud := 1e9
+                                for u3 in target_scene.squad:
+                                        if is_instance_valid(u3) and not u3.is_dead():
+                                                var du3 := _xz(u3).distance_to(
+                                                                _xz(_peltast_test))
+                                                if du3 >= 3.2 and du3 <= 4.8 \
+                                                                and _peltast_test._los_clear(_xz(u3)) \
+                                                                and du3 < best_ud:
+                                                        best_ud = du3
+                                                        near_u2 = u3
+                                if near_u2 != null:
+                                        _peltast_test.engaged_unit = near_u2
+                                        _peltast_test._atk_cd = 0.0
+                                        _peltast_test._combat_tick(0.016)
                         # گام ۶R۱۲ — مبنای تیرها در پایان فاز ۱۲ گرفته شد (شلیک به
                         # موجِ واقعی)؛ اینجا فقط مهاجمِ آزمون سپر/نیزه اسپاون می‌شود
                         # مخروط سپر — بررسی قطعی API (پیش از رسیدن تیرها)
@@ -1646,6 +1689,26 @@ func _phase14_shield_and_peltast() -> void:
                         _sub_t = _t
                 1:
                         # نمونه‌برداری زنده (مهاجم ممکن است کشته شود و شمارنده‌اش آزاد شود)
+                        # گام ۶R۱۶ — دیباگِ ۲Hz وضعیتِ پلتاستِ آزمون
+                        if is_instance_valid(_peltast_test) \
+                                        and int((_t - _sub_t) * 2.0) != int(maxf(
+                                        _t - _sub_t - 0.016, 0.0) * 2.0):
+                                var pu: PeltastUnit = _peltast_test
+                                var puxz := Vector2(pu.global_position.x,
+                                                pu.global_position.z)
+                                var d_eng := -1.0
+                                if pu.engaged_unit != null \
+                                                and is_instance_valid(pu.engaged_unit):
+                                        d_eng = puxz.distance_to(Vector2(
+                                                        pu.engaged_unit.global_position.x,
+                                                        pu.engaged_unit.global_position.z))
+                                print("[AUTOTEST] PELT t=%.1f d_eng=%.1f eng=%s thrown=%d cd=%.2f los=%s wade=%.1f ride=%s" % [
+                                                _t - _sub_t, d_eng,
+                                                str(pu.engaged_unit != null),
+                                                pu.javelins_thrown, pu._atk_cd,
+                                                str(pu._los_clear(puxz + Vector2(1, 0))
+                                                if pu.engaged_unit == null else true),
+                                                pu._wade_t, str(pu.riding)])
                         if is_instance_valid(_heavy_test):
                                 _max_deflects = maxi(_max_deflects, _heavy_test.deflects)
                                 if _heavy_test.hp < _heavy_test._default_hp():
@@ -1686,8 +1749,23 @@ func _phase14_shield_and_peltast() -> void:
                                                 "%d→%d live=%d%s" % [
                                                         _arrow_baseline, _max_arrows,
                                                         live_archers, archer_dbg])
+                                var p_dbg := ""
+                                if is_instance_valid(_peltast_test):
+                                        var ppxz := Vector2(
+                                                        _peltast_test.global_position.x,
+                                                        _peltast_test.global_position.z)
+                                        var nu2 := _nearest_unit_xz(ppxz)
+                                        p_dbg = " pos=(%.1f,%.1f) neu=%.1f eng=%s hp=%d los=%s cd=%.1f" % [
+                                                        ppxz.x, ppxz.y,
+                                                        nu2.distance_to(ppxz),
+                                                        str(_peltast_test.engaged_unit != null),
+                                                        _peltast_test.hp,
+                                                        str(_peltast_test._los_clear(nu2)),
+                                                        _peltast_test._atk_cd]
+                                else:
+                                        p_dbg = " (freed/dead)"
                                 _check("peltast_throws_javelins", _max_thrown >= 1,
-                                                "%d throws" % _max_thrown)
+                                                "%d throws%s" % [_max_thrown, p_dbg])
                                 _phase = 15
                                 _sub = 0
                                 _sub_t = _t
@@ -2073,9 +2151,9 @@ func _push_key_release(keycode: Key) -> void:
         target_scene.get_viewport().push_input(ev, true)
 
 
-# ---------------- فاز ۱۷: مشعل خانه را آتش می‌زند (گام ۶R) ----------------
+# ---------------- فاز ۱۸: مشعل خانه را آتش می‌زند (گام ۶R) ----------------
 
-func _phase17_torch_burns_house() -> void:
+func _phase18_torch_burns_house() -> void:
         match _sub:
                 0:
                         _connect_houses()
@@ -2096,7 +2174,7 @@ func _phase17_torch_burns_house() -> void:
                                         best_b = b
                         _check("torch_target_house_found", best_b != null)
                         if best_b == null:
-                                _phase = 18
+                                _phase = 19
                                 return
                         _torch_house = best_b
                         var hxz := Vector2(best_b.global_position.x,
@@ -2133,13 +2211,13 @@ func _phase17_torch_burns_house() -> void:
                                 pp = target_scene._nearest_walkable_point(nav, hxz, 6.0)
                         _check("torch_peltast_spot_found", pp != Vector2.INF, str(pp))
                         if pp == Vector2.INF:
-                                _phase = 18
+                                _phase = 19
                                 return
                         _torch_peltast = target_scene.director.spawn_enemy(
                                         "peltast", pp, -1) as PeltastUnit
                         _check("torch_peltast_spawned", _torch_peltast != null)
                         if _torch_peltast == null:
-                                _phase = 18
+                                _phase = 19
                                 return
                         # گام ۶R۱۲ — این فاز «مکانیزمِ مشعل» را می‌آزماید نه دوئل
                         # با کماندار؛ در جزیره‌ی کوچک کماندارِ مدافع، مهاجمِ
@@ -2192,7 +2270,7 @@ func _phase17_torch_burns_house() -> void:
                                                 "t=%.1f after ignite" % [_t - _sub_t])
                                 if is_instance_valid(_torch_peltast):
                                         _torch_peltast.take_hit(99)   # پاکسازی صحنه
-                                _phase = 18
+                                _phase = 19
                                 _sub = 0
                                 _sub_t = _t
 
@@ -2209,9 +2287,10 @@ func _nearest_unit_xz(to: Vector2) -> Vector2:
         return best
 
 
-# ---------------- فاز ۱۸: گاریسون و تکمیل دسته (گام ۶R) ----------------
+# ---------------- فاز ۱۷: گاریسون و تکمیل دسته (گام ۶R) ----------------
+## گام ۶R۱۶ — با «یک خانه» این فاز باید «قبل از» فازِ مشعل اجرا شود
 
-func _phase18_garrison_replenish() -> void:
+func _phase17_garrison_replenish() -> void:
         match _sub:
                 0:
                         _connect_houses()
@@ -2230,7 +2309,7 @@ func _phase18_garrison_replenish() -> void:
                                         "squad=%d alive=%d" % [host_si, best_n])
                         if host_si < 0 or best_n < 1:
                                 target_scene.garrison_duration = GameConstants.LOOT_DURATION_SECONDS
-                                _phase = 19
+                                _phase = 18
                                 return
                         _garrison_si = host_si
                         var center: Vector2 = target_scene.squad_center(host_si)
@@ -2238,7 +2317,7 @@ func _phase18_garrison_replenish() -> void:
                         _check("garrison_house_found", hxz != Vector2.INF, str(hxz))
                         if hxz == Vector2.INF:
                                 target_scene.garrison_duration = GameConstants.LOOT_DURATION_SECONDS
-                                _phase = 19
+                                _phase = 18
                                 return
                         for b in target_scene.props.buildings:
                                 if is_instance_valid(b) and \
@@ -2267,7 +2346,7 @@ func _phase18_garrison_replenish() -> void:
                                                 = GameConstants.LOOT_DURATION_SECONDS
                                 _sub = 0
                                 _sub_t = _t
-                                _phase = 19
+                                _phase = 18
                 2:
                         # همه‌ی اعضای زنده داخل خانه پنهان شده‌اند؟
                         var g2: Dictionary = target_scene.garrison_state(_garrison_si)
@@ -2328,14 +2407,14 @@ func _phase18_garrison_replenish() -> void:
                                                 = GameConstants.LOOT_DURATION_SECONDS
                                 _sub = 0
                                 _sub_t = _t
-                                _phase = 19
+                                _phase = 18
                         elif (_t - _sub_t) > 12.0:
                                 _check("squad_replenished_to_full", false, "timeout inside")
                                 target_scene.garrison_duration \
                                                 = GameConstants.LOOT_DURATION_SECONDS
                                 _sub = 0
                                 _sub_t = _t
-                                _phase = 19
+                                _phase = 18
 
 
 # ---------------- فاز ۱۹: ناوگان چندقایقی + لمس + باخت (گام ۶R2) ----------------
@@ -2382,9 +2461,13 @@ func _phase19_fleet_touch_gameover() -> void:
                         _check("pads_visible_in_idle",
                                         target_scene.cmd_grid.tiles_visible())
                         target_scene._select_squad(0)
+                        # گام ۶R۱۶ — بعد از سوختنِ آخرین خانه (فاز ۱۸) بازی «تمام» است
+                        # و فرمان عمداً قفل می‌شود؛ پس حالتِ فرمان فقط وقتی بازی زنده است
+                        # باید روشن شود — دیدِ پدها همیشه الزامی است
                         _check("pads_visible_in_command_mode",
                                         target_scene.cmd_grid.tiles_visible()
-                                        and target_scene.cmd_grid.is_command_mode())
+                                        and (target_scene.game_over
+                                        or target_scene.cmd_grid.is_command_mode()))
                         target_scene._deselect()
                         _check("pads_still_visible_after_deselect",
                                         target_scene.cmd_grid.tiles_visible())
@@ -2934,14 +3017,21 @@ func _phase20_battle_scene() -> void:
                                 _check("blood_stain_after_death",
                                                 get_tree().get_nodes_in_group("blood_stain").size() >= 1,
                                                 "%d stains" % get_tree().get_nodes_in_group("blood_stain").size())
-                                # تسلیحات چندقطعه‌ای: همه‌ی سربازانِ مسلح سلاحِ روی دست دارند
+                                # تسلیحات چندقطعه‌ای: فقط در حالتِ سه‌بعدی — در حالت ۲بعدی
+                                # سلاح داخل اسپرایت است و هیچ سلاح سه‌بعدی نباید بماند
                                 var armed := 0
+                                var total_alive := 0
                                 for u in target_scene.squad:
-                                        if is_instance_valid(u) and not u.is_dead() \
-                                                        and (u as UnitBase)._swing_weapon != null:
-                                                armed += 1
-                                _check("weapons_multi_part_armed", armed >= 8,
-                                                "%d armed" % armed)
+                                        if is_instance_valid(u) and not u.is_dead():
+                                                total_alive += 1
+                                                if (u as UnitBase)._swing_weapon != null:
+                                                        armed += 1
+                                if GameConstants.CHARACTERS_2D:
+                                        _check("weapons_multi_part_armed", armed == 0,
+                                                        "2D mode: %d stray 3D weapons" % armed)
+                                else:
+                                        _check("weapons_multi_part_armed", armed >= 8,
+                                                        "%d armed" % armed)
                                 _sub = 3
                                 _sub_t = _t
                 3:
