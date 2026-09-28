@@ -35,6 +35,10 @@ signal unit_fled_island(unit: Node)
 ## پایان بازی — گام ۶R2 (بازخورد کاربر: «وقتی خانه‌ها کامل آتش گرفت کاربر می‌بازد»)
 signal game_over(reason: String)
 
+## گام M3 — نجاتِ جزیره: همه‌ی موج‌ها پاک‌سازی شد و حداقل یک خانه زنده ماند
+## stats = {"coins_earned": int, "houses_saved": int, "island_level": int}
+signal island_saved(stats: Dictionary)
+
 ## تغییر دوره‌ی تاریخی (وراثت از سیستم Era پروژه‌ی قبلی)
 signal era_changed(era_id: StringName)
 

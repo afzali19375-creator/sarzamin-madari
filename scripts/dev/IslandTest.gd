@@ -126,7 +126,13 @@ var _left_dragging := false
 
 # گام ۶R2 — پایان بازی: همه‌ی خانه‌ها کامل سوختند (بازخورد کاربر)
 var game_over := false
+var victory := false
+## گام M3 — گیتِ پیروزی: در autotest خاموش است (موج‌های اجباریِ فازها
+## waves_spawned را از سقف می‌گذرانند و پیروزیِ کاذب می‌ساخت)؛ فاز ۲۲ صریحاً روشنش می‌کند
+var victory_enabled := not OS.get_cmdline_user_args().has("--autotest")
 var _game_over_panel: Control
+var _victory_panel: Control
+var _victory_detail: Label
 
 # اسلوموشن (§۶ پرامت)
 var _slow_select := false
@@ -206,6 +212,32 @@ func _run_screenshot_probe() -> void:
         if OS.get_environment("SHOT_QUICK") != "":
                 _snap(out_dir + "/shot1_overview.png")
                 print("[SHOT] quick done")
+                get_tree().quit(0)
+                return
+        # گام M3 — SHOT_VICTORY=1: پرده‌ی پیروزی — یک موج نمیک آورده و پاک می‌شود
+        if OS.get_environment("SHOT_VICTORY") != "":
+                await get_tree().create_timer(8.0).timeout
+                victory_enabled = true
+                if director != null:
+                        director.spawn_wave({"force": true})
+                # انتظار برای پیاده‌شدن مهاجمان (قایقِ کند — سقفِ ۴۵ث)
+                var vwait := 0.0
+                while vwait < 45.0:
+                        await get_tree().create_timer(1.0).timeout
+                        vwait += 1.0
+                        var landed := 0
+                        for en in get_tree().get_nodes_in_group("hostiles"):
+                                if en is EnemyBase and not en.riding \
+                                                and not en.is_dead():
+                                        landed += 1
+                        if landed >= 3:
+                                break
+                if director != null:
+                        director.wave_limit = director.waves_spawned
+                        director.kill_all_raiders()
+                await get_tree().create_timer(3.5).timeout
+                _snap(out_dir + "/shot7_victory.png")
+                print("[SHOT] victory done")
                 get_tree().quit(0)
                 return
         _snap(out_dir + "/shot1_overview.png")
@@ -324,8 +356,14 @@ func _exit_tree() -> void:
 
 # ---------------- تولید و بازسازی جزیره ----------------
 
-func _regenerate(seed_value: int, announce: bool) -> void:
+func _regenerate(seed_value: int, announce: bool, fresh_run: bool = true) -> void:
         _island_seed = seed_value
+        # گام M3 — R/بوت = رانِ تازه (خزانه صفر)؛ Enter پس از برد = جزیره‌ی بعدیِ همان ران
+        if fresh_run:
+                WarChest.reset_run()
+        victory = false
+        if _victory_panel != null:
+                _victory_panel.visible = false
         var gen := WfcIsland.new()
         island = gen.generate(seed_value, GRID)
         if island.get("ok", false) != true:
@@ -395,9 +433,17 @@ func _regenerate(seed_value: int, announce: bool) -> void:
                 add_child(director)
                 # گام ۶R2 — ساحلِ رو به دوربین → قایق از گوشه‌ی دید وارد می‌شود
                 director.cam_xz_provider = Callable(self, "_cam_xz")
+                # گام M3 — هر مهاجمِ کشته‌شده سکه می‌دهد (خزانه‌ی جنگ)
+                if not director.enemy_slain.is_connected(_on_enemy_slain):
+                        director.enemy_slain.connect(_on_enemy_slain)
         director.auto_waves = not OS.get_cmdline_user_args().has("--autotest")
         director.setup(ground, props, _squad_posts)
         director.clear_all()
+        # گام M3 — سطحِ ران → تعداد موج و دشواریِ این جزیره
+        director.wave_limit = mini(
+                        GameConstants.ISLAND_WAVE_COUNT + WarChest.islands_cleared,
+                        GameConstants.ISLAND_WAVE_COUNT_MAX)
+        director.start_offset = WarChest.islands_cleared * GameConstants.ISLAND_DIFFICULTY_STEP
         # گام ۶R9 — لکه‌های خون و رجیستری جنازه‌ها با جزیره‌ی تازه پاک می‌شوند
         BattleFX.reset_stains()
         _corpses.clear()
@@ -875,6 +921,53 @@ func _build_ui() -> void:
                 go_hint.add_theme_font_override("font", load(FONT_FA))
         gv.add_child(go_hint)
 
+        # گام M3 — پرده‌ی پیروزی: همه‌ی موج‌های جزیره پاک‌سازی شد (قرینه‌ی پرده‌ی باخت)
+        _victory_panel = ColorRect.new()
+        var vp := _victory_panel as ColorRect
+        vp.color = Color(0.04, 0.14, 0.10, 0.82)
+        vp.set_anchors_preset(Control.PRESET_FULL_RECT)
+        vp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        vp.visible = false
+        layer.add_child(_victory_panel)
+        var vv := VBoxContainer.new()
+        vv.set_anchors_preset(Control.PRESET_CENTER)
+        vv.grow_horizontal = Control.GROW_DIRECTION_BOTH
+        vv.grow_vertical = Control.GROW_DIRECTION_BOTH
+        vv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+        vv.add_theme_constant_override("separation", 14)
+        vp.add_child(vv)
+        var v_fa := Label.new()
+        v_fa.text = "جزیره نجات یافت!"
+        v_fa.add_theme_font_size_override("font_size", 64)
+        v_fa.add_theme_color_override("font_color", GameConstants.COL_GOLD)
+        v_fa.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+        v_fa.add_theme_constant_override("outline_size", 10)
+        v_fa.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        if ResourceLoader.exists(FONT_FA):
+                v_fa.add_theme_font_override("font", load(FONT_FA))
+        vv.add_child(v_fa)
+        var v_en := Label.new()
+        v_en.text = "The island is saved — every raider wave has been repelled"
+        v_en.add_theme_font_size_override("font_size", 22)
+        v_en.add_theme_color_override("font_color", GameConstants.COL_IVORY)
+        v_en.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        vv.add_child(v_en)
+        _victory_detail = Label.new()
+        _victory_detail.add_theme_font_size_override("font_size", 26)
+        _victory_detail.add_theme_color_override("font_color", Color("ffe9a8"))
+        _victory_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        if ResourceLoader.exists(FONT_FA):
+                _victory_detail.add_theme_font_override("font", load(FONT_FA))
+        vv.add_child(_victory_detail)
+        var v_hint := Label.new()
+        v_hint.text = "Enter: جزیره‌ی بعدی (همان ران)  —  Next island: Enter   |   R: ران تازه — Fresh run: R"
+        v_hint.add_theme_font_size_override("font_size", 26)
+        v_hint.add_theme_color_override("font_color", GameConstants.COL_GOLD)
+        v_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+        if ResourceLoader.exists(FONT_FA):
+                v_hint.add_theme_font_override("font", load(FONT_FA))
+        vv.add_child(v_hint)
+
 
 func _toast_msg(msg: String) -> void:
         if _toast == null:
@@ -930,7 +1023,7 @@ func _refresh_stats() -> void:
                         if u.is_arrived():
                                 a += 1
                 sq += "%s(%d/%d) " % [_squad_label(si), a, squads[si].size()]
-        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d  |  island seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f pan %+.1f/%+.1f%s" % [
+        _stats_label.text = "build %s  |  FPS %d  |  field: %s  |  mode: %s  |  sel: %s  |  slow: %s\n%s\nunits %d  arrived %d  slots %d  |  waypoints %d  |  dummies %d  |  input: %s\nenemies %d  boats %d  waves %d/%d  |  island #%d seed %d  |  attempts %d  |  gen %.1f ms  |  land %d%%  |  cmd-cells %d\ncomputes: %d  |  ch-goals: %s  |  time_scale: %.2f  |  cam h %.0f yaw %.0f pan %+.1f/%+.1f%s" % [
                 GameConstants.BUILD_ID, Engine.get_frames_per_second(), field_state, mode_str,
                 sel_str, ("ON" if Engine.time_scale < 0.99 else "off"),
                 sq,
@@ -939,15 +1032,23 @@ func _refresh_stats() -> void:
                 director.alive_raiders_total() if director != null else 0,
                 director.boats_active() if director != null else 0,
                 director.waves_spawned if director != null else 0,
+                director.wave_limit if director != null else 0,
+                WarChest.islands_cleared,
                 island.get("seed_used", -1), island.get("attempts", -1), island.get("gen_ms", 0.0),
                 int(round(100.0 * float(island.get("land_count", 0)) / float(GRID * GRID))),
                 cmd_grid.cell_count if cmd_grid != null else 0,
                 computes, str(info["channels"]), Engine.time_scale,
                 _target_size, _yaw, _pan_v, _pan_h, gar,
-        ]
+        ] + ("\ncoins %d  |  slain %d  |  waves-left %d" % [
+                WarChest.coins, WarChest.raiders_slain,
+                director.waves_remaining() if director != null else 0,
+        ])
         # گام ۶R2 — نشان باخت روی پنل آمار
         if game_over:
                 _stats_label.text += "  |  ★ ISLAND FALLEN"
+        # گام M3 — نشان پیروزی روی پنل آمار
+        if victory:
+                _stats_label.text += "  |  ★ ISLAND SAVED — Enter: next"
 
 
 # ---------------- حلقه‌ی هر فریم ----------------
@@ -955,6 +1056,13 @@ func _refresh_stats() -> void:
 func _process(delta: float) -> void:
         # دلتای واقعی (بدون اثر time_scale) برای هموارسازی اسلوموشن و دوربین
         var raw := delta / maxf(Engine.time_scale, 0.05)
+
+        # گام M3 — چکِ پیروزی: همه‌ی موج‌ها آمدند + میدان پاک + خانه‌ی زنده
+        # (ارزان است — دو شمارشِ ساده روی گروه‌های کارگردان)
+        if victory_enabled and not game_over and not victory \
+                        and director != null and director.field_cleared() \
+                        and _any_house_alive():
+                _trigger_victory()
 
         # §۶ — اسلوموشن با Tween: ورود 0.15s، بازگشت 0.2s
         var target := GameConstants.SLOWMO_SCALE if (_slow_select or _slow_space) else 1.0
@@ -1180,8 +1288,11 @@ func _input(event: InputEvent) -> void:
                                 KEY_D:
                                         _clear_dummies()
                                 KEY_N:
-                                        if not game_over:
+                                        if not game_over and not victory:
                                                 _spawn_wave_manual()   # گام ۶ — موج هجوم دستی
+                                KEY_ENTER, KEY_KP_ENTER:
+                                        # گام M3 — پس از برد: جزیره‌ی بعدیِ همان ران
+                                        _next_island()
                                 KEY_ESCAPE:
                                         _deselect()
                 elif not event.pressed:
@@ -1194,6 +1305,9 @@ func _input(event: InputEvent) -> void:
 func _on_left_tap(screen: Vector2, shift: bool) -> void:
         if game_over:
                 _toast_msg("جزیره سقوط کرده — R: جزیره‌ی جدید\nThe island has fallen — R: new island")
+                return
+        if victory:
+                _toast_msg("جزیره نجات یافت — Enter: جزیره‌ی بعدی\nThe island is saved — Enter: next island")
                 return
         var u := _unit_at_screen(screen)
         if u != null:
@@ -1596,6 +1710,63 @@ func _trigger_game_over() -> void:
                 _game_over_panel.visible = true
         GameEvents.game_over.emit("all_houses_burned")
         _last_input_msg = "game over — all houses burned"
+
+
+# ---------------- گام M3 — پیروزی: پاک‌سازیِ موج‌های جزیره ----------------
+
+## حداقل یک خانه‌ی زنده؟ (شرطِ برد — جزیره بی‌خانه معنا ندارد)
+func _any_house_alive() -> bool:
+        if props == null:
+                return false
+        for b in props.buildings:
+                if is_instance_valid(b) and not b.burned:
+                        return true
+        return false
+
+
+## هر مهاجمِ کشته‌شده سکه می‌دهد (خزانه‌ی ران — با بازتولیدِ جزیره می‌ماند)
+func _on_enemy_slain(_e: EnemyBase) -> void:
+        WarChest.earn(GameConstants.COIN_PER_RAIDER)
+        WarChest.raiders_slain += 1
+
+
+## گام M3 — پایانِ مرحله: همه‌ی موج‌های سهمِ جزیره آمدند، میدان پاک است و
+## حداقل یک خانه زنده مانده → پرده‌ی پیروزی + پاداش سکه + سطحِ بعد
+func _trigger_victory() -> void:
+        if victory or game_over:
+                return
+        victory = true
+        if director != null:
+                director.auto_waves = false   # میدان پاک است — موج بی‌معنا
+        _deselect()
+        var houses_saved := 0
+        if props != null:
+                for b in props.buildings:
+                        if is_instance_valid(b) and not b.burned:
+                                houses_saved += 1
+        var earned: int = houses_saved * GameConstants.COIN_PER_HOUSE_SAVED \
+                        + GameConstants.COIN_ISLAND_BONUS
+        WarChest.earn(earned)
+        WarChest.islands_cleared += 1
+        if _victory_detail != null:
+                _victory_detail.text = "سکه: +%d (خانه‌ی نجات‌یافته ×%d + پاداش جزیره)  |  خزانه: %d سکه  —  Coins +%d | Chest: %d" % [
+                        earned, houses_saved * GameConstants.COIN_PER_HOUSE_SAVED,
+                        WarChest.coins, earned, WarChest.coins]
+        if _victory_panel != null:
+                _victory_panel.visible = true
+        GameEvents.island_saved.emit({
+                "coins_earned": earned,
+                "houses_saved": houses_saved,
+                "island_level": WarChest.islands_cleared,
+        })
+        _last_input_msg = "victory — island saved (coins %d)" % WarChest.coins
+
+
+## گام M3 — Enter پس از برد: جزیره‌ی بعدیِ همان ران (سکه‌ها و سطح می‌مانند)
+func _next_island() -> void:
+        if not victory:
+                return
+        _regenerate(randi(), true, false)
 
 
 ## گام M2 — چینشِ بلوکیِ لوزیِ لانه‌زنبوری (بازخورد «چینش» با تصویر مرجع Bad North):

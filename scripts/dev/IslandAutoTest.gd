@@ -225,6 +225,8 @@ func _process(delta: float) -> void:
                         _phase19_fleet_touch_gameover()
                 20:
                         _phase20_battle_scene()
+                22:
+                        _phase22_m3_victory_loop()
                 21:
                         _finish()
 
@@ -3230,6 +3232,146 @@ func _phase20_battle_scene() -> void:
                                 var parked := _parked_boats_count()
                                 _check("p20_boats_parked_despite_deaths", parked >= 1,
                                                 "%d parked" % parked)
+                                # گام M3 — فاز ۲۲: چرخه‌ی برد/باخت + خزانه
+                                _phase = 22
+                                _sub = 0
+                                _sub_t = _t
+
+
+# ---------------- فاز ۲۲: گام M3 — سقف موج، پیروزی، خزانه، جزیره‌ی بعدی ----------------
+
+var _m22_coins_at_victory := 0
+
+func _phase22_m3_victory_loop() -> void:
+        var sc: Node = target_scene
+        var d: InvasionDirector = sc.director
+        match _sub:
+                0:
+                        # پاک‌سازی: خزانه‌ی تازه + سقفِ موجِ کوچک (۲ موج) + میدانِ خالی
+                        # clear_all = قایق‌ها/مهاجمانِ مانده از فاز ۲۰ آزاد و شمارنده‌ها صفر
+                        WarChest.reset_run()
+                        sc.victory_enabled = true   # گام M3 — گیتِ پیروزی برای این فاز روشن
+                        d.clear_all()
+                        d.wave_limit = 2
+                        d.start_offset = 0
+                        d.auto_waves = false
+                        _check("m3_wave_limit_set", d.waves_remaining() == 2,
+                                        "remaining=%d" % d.waves_remaining())
+                        _sub = 1
+                        _sub_t = _t
+                1:
+                        # موج اول (۳ نفر) — سکه‌ی هر کشته ۱۰
+                        var gid: int = d.spawn_wave({"size": 3, "force": true})
+                        _check("m3_wave1_spawned", gid >= 0, "gid=%d" % gid)
+                        _sub = 2
+                        _sub_t = _t
+                2:
+                        # صبر برای پیاده‌شدن (مانند p20 — آسیب‌ناپذیری روی عرشه)
+                        for b8 in get_tree().get_nodes_in_group("enemy_boats"):
+                                for r8 in b8.get_children():
+                                        if r8 is EnemyBase and not (r8 as EnemyBase).is_dead():
+                                                (r8 as EnemyBase).hp = 99
+                        var landed_live := 0
+                        for e in get_tree().get_nodes_in_group("hostiles"):
+                                var en := e as EnemyBase
+                                if en != null and not en.riding and not en.is_dead():
+                                        landed_live += 1
+                        if landed_live >= 3 or (_t - _sub_t) > 110.0:
+                                _check("m3_wave1_landed", landed_live >= 3,
+                                                "%d landed" % landed_live)
+                                d.kill_all_raiders()
+                                _sub = 3
+                                _sub_t = _t
+                3:
+                        # بعد از مرگِ موج اول: سکه = ۳ × COIN_PER_RAIDER
+                        if _t - _sub_t >= 1.5:
+                                var want: int = 3 * GameConstants.COIN_PER_RAIDER
+                                _check("m3_coins_on_kill", WarChest.coins >= want,
+                                                "coins=%d want>=%d" % [WarChest.coins, want])
+                                _check("m3_slain_counted", WarChest.raiders_slain >= 3,
+                                                "slain=%d" % WarChest.raiders_slain)
+                                _sub = 4
+                                _sub_t = _t
+                4:
+                        # موج دوم (۲ نفر) — بعد از آن سقف پر می‌شود
+                        var gid: int = d.spawn_wave({"size": 2, "force": true})
+                        _check("m3_wave2_spawned", gid >= 0, "gid=%d" % gid)
+                        _sub = 5
+                        _sub_t = _t
+                5:
+                        for b8 in get_tree().get_nodes_in_group("enemy_boats"):
+                                for r8 in b8.get_children():
+                                        if r8 is EnemyBase and not (r8 as EnemyBase).is_dead():
+                                                (r8 as EnemyBase).hp = 99
+                        var landed_live := 0
+                        for e in get_tree().get_nodes_in_group("hostiles"):
+                                var en := e as EnemyBase
+                                if en != null and not en.riding and not en.is_dead():
+                                        landed_live += 1
+                        if landed_live >= 2 or (_t - _sub_t) > 110.0:
+                                _check("m3_wave2_landed", landed_live >= 2,
+                                                "%d landed" % landed_live)
+                                d.kill_all_raiders()
+                                _sub = 6
+                                _sub_t = _t
+                6:
+                        # میدان پاک شد؟ (مرگ‌ها پردازش شوند) — سپس به انتظارِ پیروزی
+                        if sc.director.field_cleared() or (_t - _sub_t) > 8.0:
+                                _check("m3_field_cleared", sc.director.field_cleared(),
+                                                "spawned=%d limit=%d active=%d" % [
+                                                sc.director.waves_spawned,
+                                                sc.director.wave_limit,
+                                                sc.director.waves_active()])
+                                _sub = 60
+                                _sub_t = _t
+                60:
+                        # پیروزی باید خودکار در _process صحنه روشن شود
+                        if sc.victory or (_t - _sub_t) > 3.0:
+                                _check("m3_victory_triggered", sc.victory == true,
+                                                "victory=%s" % str(sc.victory))
+                                _check("m3_victory_panel_visible",
+                                                sc._victory_panel != null \
+                                                and sc._victory_panel.visible,
+                                                "panel=%s" % str(
+                                                sc._victory_panel != null \
+                                                and sc._victory_panel.visible))
+                                _m22_coins_at_victory = WarChest.coins
+                                var alive_houses := 0
+                                for b in sc.props.buildings:
+                                        if is_instance_valid(b) and not b.burned:
+                                                alive_houses += 1
+                                var want: int = 5 * GameConstants.COIN_PER_RAIDER \
+                                                + alive_houses * GameConstants.COIN_PER_HOUSE_SAVED \
+                                                + GameConstants.COIN_ISLAND_BONUS
+                                _check("m3_coins_total", WarChest.coins == want,
+                                                "coins=%d want=%d houses=%d" % [
+                                                WarChest.coins, want, alive_houses])
+                                _check("m3_islands_cleared",
+                                                WarChest.islands_cleared == 1,
+                                                "cleared=%d" % WarChest.islands_cleared)
+                                _sub = 7
+                                _sub_t = _t
+                7:
+                        # Enter → جزیره‌ی بعدیِ همان ران: سکه‌ها می‌مانند، دشواری بالا می‌رود
+                        _push_key(KEY_ENTER)
+                        _sub = 8
+                        _sub_t = _t
+                8:
+                        if _t - _sub_t >= 2.5:
+                                var d2: InvasionDirector = sc.director
+                                _check("m3_next_island_harder",
+                                                d2.wave_limit == mini(
+                                                GameConstants.ISLAND_WAVE_COUNT + 1,
+                                                GameConstants.ISLAND_WAVE_COUNT_MAX)
+                                                and d2.start_offset == GameConstants.ISLAND_DIFFICULTY_STEP,
+                                                "limit=%d offset=%d" % [
+                                                d2.wave_limit, d2.start_offset])
+                                _check("m3_coins_persist",
+                                                WarChest.coins == _m22_coins_at_victory,
+                                                "coins=%d want=%d" % [
+                                                WarChest.coins, _m22_coins_at_victory])
+                                _check("m3_victory_reset_on_regen", sc.victory == false,
+                                                "victory=%s" % str(sc.victory))
                                 _phase = 21
                                 _sub = 0
                                 _sub_t = _t

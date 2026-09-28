@@ -37,6 +37,8 @@ extends Node
 
 signal wave_started(group_id: int, count: int)
 signal wave_cleared(group_id: int)
+## گام M3 — مرگِ هر مهاجم (برای خزانه‌ی جنگ: سکه و آمار)
+signal enemy_slain(enemy: EnemyBase)
 
 var ground: IslandGround
 var props: IslandProps
@@ -48,6 +50,11 @@ var cam_xz_provider: Callable = Callable()
 var auto_waves := true
 var wave_interval := GameConstants.WAVE_INTERVAL
 var waves_spawned := 0
+## گام M3 — سقفِ موجِ این جزیره (مرحله = جزیره): بعد از این تعداد، موجِ خودکار
+## دیگر نمی‌آید و پاک‌سازیِ میدان = پیروزی. تستِ خودکار این را کوچک می‌کند
+var wave_limit := GameConstants.ISLAND_WAVE_COUNT
+## گام M3 — آفستِ دشواری برای جزیره‌های بعدیِ یک ران (ascend_spec جلوتر شروع می‌شود)
+var start_offset := 0
 
 var boats_root: Node3D
 var raiders_root: Node3D
@@ -99,7 +106,8 @@ func _process(delta: float) -> void:
                 _check_groups()
         if auto_waves:
                 _wave_accum += delta
-                if _wave_accum >= wave_interval:
+                # گام M3 — سقفِ موج: جزیره فقط wave_limit موج می‌دهد؛ پاک‌سازیِ میدان = برد
+                if _wave_accum >= wave_interval and waves_spawned < wave_limit:
                         _wave_accum = 0.0
                         spawn_wave()
 
@@ -127,7 +135,8 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                 size = int(comp.get(KIND_LIGHT, 0)) + int(comp.get(KIND_HEAVY, 0)) \
                                 + int(comp.get(KIND_PELTAST, 0))
         else:
-                var asc := ascend_spec(waves_spawned)
+                # گام M3 — دشواریِ جزیره‌های بعدیِ ران: از start_offset جلوتر شروع می‌شود
+                var asc := ascend_spec(start_offset + waves_spawned)
                 size = int(asc["size"])
                 comp = asc["comp"]
         var hint: Vector2 = opts.get("near", Vector2.INF)
@@ -413,7 +422,10 @@ func _create_enemy(kind: String) -> EnemyBase:
                         script = PeltastUnit
                 _:
                         return null
-        return script.new()
+        var e: EnemyBase = script.new()
+        # گام M3 — سوارانِ قایق هم از این مسیر می‌آیند؛ مرگشان باید سکه بدهد
+        e.died.connect(func(en: EnemyBase) -> void: enemy_slain.emit(en))
+        return e
 
 
 func _landed_count(g: Dictionary) -> int:
@@ -466,6 +478,8 @@ func spawn_enemy(kind: String, at: Vector2, group: int = -1,
         if disembark != Vector2.INF:
                 e.disembark_target = disembark
         raiders_root.add_child(e)
+        # گام M3 — هر مرگِ مهاجم به بالا خبر می‌دهد (خزانه‌ی جنگ)
+        e.died.connect(func(en: EnemyBase) -> void: enemy_slain.emit(en))
         if group >= 0 and _groups.has(group):
                 PathService.set_goal_for(_groups[group]["channel"], raid)
         return e
@@ -872,6 +886,17 @@ func waves_active() -> int:
                 if raiders_alive(gid) > 0 or not _all_landed(_groups[gid]):
                         n += 1
         return n
+
+
+## گام M3 — موج‌های باقی‌مانده‌ی این جزیره
+func waves_remaining() -> int:
+        return maxi(0, wave_limit - waves_spawned)
+
+
+## گام M3 — میدان پاک شد؟ همه‌ی موج‌های سهمِ جزیره آمده‌اند و هیچ گروهِ فعالی
+## (مهاجمِ زنده یا قایقِ در راه) نمانده = زمانِ پیروزی
+func field_cleared() -> bool:
+        return waves_spawned >= wave_limit and waves_active() == 0
 
 
 func alive_raiders_total() -> int:
