@@ -181,6 +181,9 @@ func _ready() -> void:
                 add_child(bdp)
         elif OS.get_cmdline_user_args().has("--screenshot"):
                 _run_screenshot_probe()
+        elif OS.get_environment("GROUND_PROBE") != "":
+                # پراب شناوری: منطقِ ارتفاع در برابر مشِ رندرشده
+                load("res://scripts/dev/GroundProbe.gd").run(self)
 
 
 ## پراب اسکرین‌شات ۶R۱۳ — رندر واقعی (زیر Xvfb) برای بازبینی بصری:

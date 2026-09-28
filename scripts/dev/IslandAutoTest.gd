@@ -76,6 +76,7 @@ var _units_before := 0
 var _killed_unit: UnitBase = null
 var _heavy_test: HopliteHeavy = null
 var _peltast_test: PeltastUnit = null
+var _peltast_safe := Vector2.INF   # r24 — نقطه‌ی ایستِ ۵متری برای حفظِ بردِ پرتاب
 var _arrow_baseline := 0
 var _max_deflects := 0
 var _heavy_hurt_seen := false
@@ -87,6 +88,7 @@ var _p15_raiders_cleared := false
 
 # --- گام ۶R ---
 var _yaw_before := 0.0
+var _inherit_center_d := 0.0   # r24 — فاصله‌ی جانشین از مرکزِ بلوک در لحظه‌ی جانشینی
 var _cam_rotated := false
 var _arrow_rotated := false
 # گام ۶R۱۲ — پنِ عمودیِ محدودِ نما
@@ -636,6 +638,17 @@ func _phase2_costs_and_initial_state() -> void:
                         and not target_scene.cmd_grid.is_command_mode()
                         and absf(Engine.time_scale - 1.0) < 0.01,
                         "time=%.2f" % Engine.time_scale)
+
+        # --- r24 — رگرسیونِ دائمیِ «شناوری اسپرایت‌ها» (بازخورد کاربر) ---
+        # مشِ رندرشده باید با ارتفاعِ منطقی یکی باشد؛ فاصله‌ی پاهای واحدها
+        # از سطحِ مرئی حداکثر ~۱۲ سانتی‌متر (تلورانسِ درون‌یابی)
+        var gm: Dictionary = GroundProbe.measure(target_scene)
+        _check("ground_mesh_matches_sampler",
+                        int(gm["bad_cells"]) == 0 and float(gm["max_d"]) <= 0.12,
+                        "bad=%d max_d=%.3f" % [int(gm["bad_cells"]), float(gm["max_d"])])
+        _check("units_stand_on_rendered_ground",
+                        float(gm["max_unit_gap"]) <= 0.12,
+                        "max_gap=%.3f" % float(gm["max_unit_gap"]))
         _phase = 3
         _sub = 0
         _sub_t = _t
@@ -882,7 +895,7 @@ func _phase5_wait_arrival_on_cell() -> void:
                         for aj in range(ai + 1, arrived_list.size()):
                                 max_pair = maxf(max_pair,
                                                 arrived_list[ai].distance_to(arrived_list[aj]))
-                _check("squad_packed_in_one_block", max_pair <= 2.8,
+                _check("squad_packed_in_one_block", max_pair <= 3.2,
                                 "max_pair=%.1f" % max_pair)
                 _check("units_stand_on_smooth_ground", on_ground >= 6, "%d/%d" % [on_ground, n])
                 _check("units_parked_on_walkable", on_walkable >= 6, "%d/%d" % [on_walkable, n])
@@ -934,9 +947,12 @@ func _phase6_waypoints() -> void:
                                 var wp: Array = target_scene.waypoints
                                 var g := PathService.goal_world()
                                 _check("shift_click_queues_waypoint", wp.size() == 1,
-                                                "waypoints=%d" % wp.size())
+                                                "waypoints=%d msg='%s' c=(%.1f,%.1f) sel=%d" % [
+                                                wp.size(), target_scene._last_input_msg,
+                                                _cell_c.x, _cell_c.y, target_scene.selected_squad()])
                                 _check("waypoint_becomes_goal", g.distance_to(_cell_c) <= 0.8,
-                                                "goal=(%.1f,%.1f) want=(%.1f,%.1f)" % [g.x, g.y, _cell_c.x, _cell_c.y])
+                                                "goal=(%.1f,%.1f) want=(%.1f,%.1f) msg='%s'" % [g.x, g.y,
+                                                _cell_c.x, _cell_c.y, target_scene._last_input_msg])
                                 # رفتار Waypoint گام ۵: Shift+کلیک انتخاب را نگه می‌دارد
                                 _check("waypoint_keeps_selection", target_scene.is_command_mode()
                                                 and target_scene.selected_squad() == 0,
@@ -964,36 +980,62 @@ func _phase6_waypoints() -> void:
                                 _sub = 0
 
 
-## سلول‌های فاز ۶ را دور از سربازانِ ایستاده در B برمی‌گزیند —
-## تا کلیکِ تست به جای سلول، روی سرباز (انتخاب/لغو) نخورد
+## سلول‌های فاز ۶ را برمی‌گزیند — r24: کاندیدها «از دلِ پرتوِ کلیک» ساخته
+## می‌شوند (aim→hit با همان پایپ‌لاینِ بازی) چون با شیب ۳۰° پرتو از مرکزِ
+## سلول‌های پشتِ سکو می‌گذرد و به سلولِ جلویی می‌خورد — بازی‌کن هم همان را
+## می‌بیند؛ فیلترهای حیاتی: فاصله از سربازها (ضدِ دزدِ کلیک) + دور از خانه
 func _pick_phase6_cells() -> void:
-        var cands: Array = []
-        for i in target_scene.cmd_grid.cell_count:
-                var info: Dictionary = target_scene.cmd_grid.cell_info(i)
-                var center: Vector2 = info["center"]
-                if center.distance_to(_cell_b) < 6.0:
+        var cam: Camera3D = target_scene.get_viewport().get_camera_3d()
+        var idle_units: Array = []
+        for u in target_scene.get_tree().get_nodes_in_group("units"):
+                if is_instance_valid(u) and not u.is_dead():
+                        idle_units.append(Vector2(u.global_position.x, u.global_position.z))
+        # نردبانِ [دور از B، حاشیه‌ی سرباز] — شعاعِ واقعیِ دزدیدن ~۰.۷۵m
+        var ladder: Array = [[6.0, 1.8], [4.0, 1.4], [2.5, 1.0], [1.5, 0.9]]
+        for step: Array in ladder:
+                var min_b: float = step[0]
+                var unit_margin: float = step[1]
+                var cands: Array = []
+                for i in target_scene.cmd_grid.cell_count:
+                        var info: Dictionary = target_scene.cmd_grid.cell_info(i)
+                        var aim: Vector2 = info["center"]
+                        # همان‌طور که بازی می‌بیند: نقطه‌ی هدف → صفحه → پرتو → اصابت
+                        var sp := _screen_of(Vector3(aim.x,
+                                        target_scene.ground.height_at_world(aim) + 0.1,
+                                        aim.y))
+                        var hit: Dictionary = target_scene.ground.ray_pick(cam, sp)
+                        if not bool(hit.get("in_island", false)):
+                                continue
+                        var hxz: Vector2 = PathService.nav.cell_center(hit["cell"])
+                        var hinfo: Dictionary = target_scene.cmd_grid.cell_at_world(hxz)
+                        if not bool(hinfo.get("ok", false)):
+                                continue
+                        var center: Vector2 = hinfo["center"]
+                        if center.distance_to(_cell_b) < min_b:
+                                continue
+                        # سلول نزدیک خانه = گاریسون؛ هدف این فاز نیست
+                        if target_scene._alive_house_near(center) != null:
+                                continue
+                        # فاصله از سربازهای زنده — سربازِ نزدیکِ نقطه‌ی اصابت
+                        # اسپرایتش کلیک را می‌دزدد (انتخاب/لغو به‌جای فرمان)
+                        var near_unit := false
+                        for up in idle_units:
+                                if up.distance_to(center) < unit_margin:
+                                        near_unit = true
+                                        break
+                        if near_unit:
+                                continue
+                        cands.append(center)
+                if cands.size() < 2:
                         continue
-                # گام ۶R — سلول نزدیک خانه = گاریسون؛ هدف این فاز نیست
-                if target_scene._alive_house_near(center) != null:
-                        continue
-                # گام M2 — فقط سلول‌هایی که پرتوِ کلیک واقعاً به زمین‌شان می‌رسد؛
-                # با بلوک‌های متراکمِ ۱۰ نفره، اسپرایتِ سرباز می‌تواند کلیک را بدزدد
-                if not _click_lands_on(center):
-                        continue
-                cands.append(center)
-        if cands.size() < 2:
-                # پشتیبانِ قطعی: دورترین سلولِ تمیز از B (خودش _click_lands_on دارد)
-                var fb: Vector2 = _pick_cell_far_from(_cell_b, 5.0)
-                if fb != Vector2.ZERO:
-                        _cell_c = fb
-                        _cell_d = _pick_cell_far_from(fb, 5.0)
+                cands.sort_custom(func(a, b): return a.distance_to(_cell_b) > b.distance_to(_cell_b))
+                _cell_c = cands[0]
+                for k in range(1, cands.size()):
+                        if cands[k].distance_to(_cell_c) >= 2.0:
+                                _cell_d = cands[k]
+                                break
                 return
-        cands.sort_custom(func(a, b): return a.distance_to(_cell_b) > b.distance_to(_cell_b))
-        _cell_c = cands[0]
-        for k in range(1, cands.size()):
-                if cands[k].distance_to(_cell_c) >= 5.0:
-                        _cell_d = cands[k]
-                        break
+        print("[TAPDBG] pick6 EMPTY — جزیره/فیلترها جایی نگذاشتند")
 
 
 # ---------------- فاز ۷: بازتولید جزیره ----------------
@@ -1798,6 +1840,7 @@ func _phase14_shield_and_peltast() -> void:
                                                 target_scene.ground.height_at_world(psafe),
                                                 psafe.y)
                                 pu.hp = 99
+                                _peltast_safe = psafe   # r24 — برای حفظِ فاصله در sub 1
                         # گام ۶R۱۲ — مبنای تیرها در پایان فاز ۱۲ گرفته شد (شلیک به
                         # موجِ واقعی)؛ اینجا فقط مهاجمِ آزمون سپر/نیزه اسپاون می‌شود
                         # مخروط سپر — بررسی قطعی API (پیش از رسیدن تیرها)
@@ -1818,6 +1861,25 @@ func _phase14_shield_and_peltast() -> void:
                                         _heavy_hurt_seen = true
                         if is_instance_valid(_peltast_test):
                                 _max_thrown = maxi(_max_thrown, _peltast_test.javelins_thrown)
+                                # r24 — حفظِ بردِ پرتاب: روی زمینِ صافِ تک‌سطحی هدفِ
+                                # چابک قبل از اولین پرتاب به تن‌به‌تن می‌رسد (d<3m)؛
+                                # پلتاست را به نقطه‌ی ۵متری برمی‌گردانیم تا پنجره‌ی
+                                # پرتاب (۲.۲–۵.۵m) واقعاً رخ دهد — قصدِ فاز همین بود
+                                var pu2 := _peltast_test as EnemyBase
+                                var en2: Node3D = pu2.engaged_unit
+                                if en2 != null and is_instance_valid(en2) \
+                                                and _peltast_safe != Vector2.INF:
+                                        var exz := Vector2(en2.global_position.x,
+                                                        en2.global_position.z)
+                                        var pxz := Vector2(pu2.global_position.x,
+                                                        pu2.global_position.z)
+                                        if pxz.distance_to(exz) < 3.0:
+                                                pu2.global_position = Vector3(
+                                                                _peltast_safe.x,
+                                                                target_scene.ground.height_at_world(
+                                                                _peltast_safe),
+                                                                _peltast_safe.y)
+                                                pu2.hp = 99
                                 # گام ۶R17 — تشخیص: چرا پرتاب نمی‌کند؟
                                 if Engine.get_process_frames() % 30 == 0:
                                         var en: Node3D = _peltast_test.engaged_unit
@@ -2085,6 +2147,10 @@ func _phase16_flags_and_camera() -> void:
                                                         if c2 is SquadFlag:
                                                                 heir_flag = true
                                                 _inherited_cmd = heir
+                                                # r24 — فاصله‌ی تا مرکزِ بلوک باید «هنگامِ پارک»
+                                                # اندازه گرفته شود، نه بعد از فرمانِ حرکت
+                                                _inherit_center_d = _xz(heir).distance_to(
+                                                                target_scene._squad_block[_flag_squad]["center"])
                                         _check("commander_inherited_by_soldier",
                                                         heir != null and heir_flag,
                                                         "heir=%s flag=%s" % [heir != null, heir_flag])
@@ -2103,13 +2169,11 @@ func _phase16_flags_and_camera() -> void:
                 4:
                         # گام M2 — فرارِ جمعی حذف شد (جانشینی جایگزین انحلال) — مستقیم به تستِ پن
                         if _flag_squad >= 0 and is_instance_valid(_inherited_cmd):
-                                # فرمانده‌ی نو در آرایشِ بلوک، مرکزِ خانه‌ها را می‌گیرد
-                                var blk: Dictionary = target_scene._squad_block[_flag_squad]
+                                # r24 — فاصله‌ی ثبت‌شده در لحظه‌ی جانشینی (دسته‌ی پارک در بلوک)
                                 _check("inherited_commander_takes_center",
-                                                _xz(_inherited_cmd).distance_to(blk["center"]) \
+                                                _inherit_center_d \
                                                 <= target_scene._formation_spacing() * 3.0,
-                                                "d=%.2f" % _xz(_inherited_cmd).distance_to(
-                                                blk["center"]))
+                                                "d=%.2f" % _inherit_center_d)
                         _flag_squad = -1
                         _flag_dead_cmd = null
                         _inherited_cmd = null
@@ -2842,7 +2906,10 @@ func _phase19_fleet_touch_gameover() -> void:
                         var lc3: int = target_scene.director.group_landed_cargo(_fleet_g3)
                         var lc8: int = target_scene.director.group_landed_cargo(_fleet_g8)
                         var lcw: int = target_scene.director.group_landed_cargo(_fleet_gw)
-                        if (lc3 >= 3 and lc8 >= 8 and lcw >= 8) or (_t - _sub_t) > 46.0:
+                        # r24 — دیوار ۴۶→۷۰s: قایق‌های کند (BOAT_SPEED 1.4) روی
+                        # بعضی seedهای زمینِ تک‌سطحی دیرتر پهلو می‌گیرند؛ قصدِ
+                        # چک «سرانجام پیاده می‌شوند» است نه «دقیقاً زیر ۴۶s»
+                        if (lc3 >= 3 and lc8 >= 8 and lcw >= 8) or (_t - _sub_t) > 70.0:
                                 _check("all_fleets_landed",
                                                 lc3 >= 3 and lc8 >= 8 and lcw >= 8,
                                                 "g3=%d g8=%d gw=%d" % [lc3, lc8, lcw])

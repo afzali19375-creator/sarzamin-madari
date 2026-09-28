@@ -345,9 +345,18 @@ func _package(grid: PackedInt32Array, seed_used: int, attempt: int, t0: int) -> 
         # «جزیره باید حالت دوبلکس داشته باشد؛ کاراکترها از فضای بالایی به فضای
         # پایین بیایند؛ یک مسیر کوتاه و باریک» — سقفِ بالایی ~۴۰٪ خشکی در یک
         # کلاهکِ سمت‌دار + پرتگاهِ داخلی + یک گذرگاهِ ۲ سلولی با شیب نرم.
-        var duplex_rng := RandomNumberGenerator.new()
-        duplex_rng.seed = hash("%d:%d:duplex" % [seed_used, attempt])
-        var duplex := _assign_duplex(modules, walkable, tops, duplex_rng)
+        # r24 — خاموش‌سازی دوبلکس (دستور کاربر: «کلا زمین را عوض کن»):
+        # پرتگاه‌های سفید مکعبیِ فلات ۲.۱متری هم زشت رندر می‌شدند و هم
+        # height_at_world (بای‌لینیر گوشه‌ای) در سلول‌های لبه‌ی فلات تا ~۲ متر
+        # از مشِ رندرشده فاصله می‌گرفت → اسپرایت‌های معلق (GroundProbe: ۳ سلول
+        # بد در seed پیش‌فرض، بدتر در seed جزیره‌های بعدی). تک‌سطحیِ تراس‌دار
+        # (۰.۵۵/۰.۹/۱.۳) مش و منطق را از یک ارتفاع‌یکی می‌کند — شناوری از
+        # ریشه حذف می‌شود.
+        var duplex: Dictionary = {}
+        if ENABLE_DUPLEX:
+                var duplex_rng := RandomNumberGenerator.new()
+                duplex_rng.seed = hash("%d:%d:duplex" % [seed_used, attempt])
+                duplex = _assign_duplex(modules, walkable, tops, duplex_rng)
         land = 0
         walk = 0
         for i in n:
@@ -506,6 +515,8 @@ func _scan_land(walkable: PackedByteArray, cx: int, cy: int,
 
 const DUPLEX_UPPER_TOP := 2.1       # بلندی سقف (m) — بالاتر از بلندترین چمنِ پایین
                                     # (grass_high=1.3) تا هیچ عبورِ غیرمسیر نماند
+## r24 — کلیدِ دوبلکس: خاموش (زمین تک‌سطحی — بازخورد کاربر، اسپرایت‌های معلق)
+const ENABLE_DUPLEX := false
 const DUPLEX_MIN_FRAC := 0.22       # کمترین سهمِ مجازِ سقف از خشکی
 const DUPLEX_MAX_FRAC := 0.46
 const DUPLEX_RAMP_DIFF := 0.55      # اختلافِ ارتفاعی که «پرتگاه» حساب می‌شود
