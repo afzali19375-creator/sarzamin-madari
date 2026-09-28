@@ -147,6 +147,10 @@ func _ready() -> void:
                 add_child(runner)
         elif OS.get_cmdline_user_args().has("--blockprobe"):
                 _run_block_probe()
+        elif OS.get_cmdline_user_args().has("--waterprobe"):
+                _run_water_probe()
+        elif OS.get_cmdline_user_args().has("--watershot"):
+                _run_water_shot()
         elif OS.get_cmdline_user_args().has("--screenshot"):
                 _run_screenshot_probe()
 
@@ -180,6 +184,24 @@ func _run_screenshot_probe() -> void:
         if OS.get_environment("SHOT_QUICK") != "":
                 _snap(out_dir + "/shot1_overview.png")
                 print("[SHOT] quick done")
+                get_tree().quit(0)
+                return
+        # گام ۶R۱۷ — SHOT_ENEMY=1: اسپاونِ هر ۳ نوع مهاجم کنار دسته‌ی صفر و
+        # کلوزآپ — اثباتِ بصریِ اسپرایت‌های زره‌پوش (سنگین + سبک + پلتاست)
+        if OS.get_environment("SHOT_ENEMY") != "":
+                var near0: Vector2 = _squad_posts[0] + Vector2(2.4, 1.6)
+                # اول دوربین، بعد اسپاون — تا مهاجمانِ تازه در قابِ آرام باشند
+                _cam_pivot.position = Vector3(near0.x,
+                                ground.height_at_world(near0), near0.y)
+                _target_height = 5.5
+                _cam_arm.rotation_degrees.x = -58.0
+                await get_tree().create_timer(1.8).timeout
+                director.spawn_enemy("heavy", near0, 0)
+                director.spawn_enemy("light", near0 + Vector2(1.2, -0.9), 0)
+                director.spawn_enemy("peltast", near0 + Vector2(-0.9, -1.2), 0)
+                await get_tree().create_timer(0.8).timeout
+                _snap(out_dir + "/shot7_enemy_kinds.png")
+                print("[SHOT] enemy kinds done")
                 get_tree().quit(0)
                 return
         _snap(out_dir + "/shot1_overview.png")
@@ -289,6 +311,206 @@ func _run_block_probe() -> void:
 
 func _exit_tree() -> void:
         Engine.time_scale = 1.0
+
+
+## بذرِ اختیاری از محیط (WATER_SEED) — پراب‌های آب روی بذرهای مختلف بدوند
+func _waterprobe_seed_maybe() -> void:
+        var env := OS.get_environment("WATER_SEED")
+        if env != "":
+                _regenerate(int(env), false)
+
+
+## پراب عکسِ پیاده‌شدن — لحظه‌ی «واد» مهاجم‌ها را شکار می‌کند:
+## موجِ دستی → هر ۰٫۲s بررسی → به‌محضِ دیدنِ مهاجمِ درآب، سه عکسِ پیاپی
+func _run_water_shot() -> void:
+        var out_dir := OS.get_environment("SHOT_DIR")
+        if out_dir.is_empty():
+                out_dir = "/tmp"
+        await get_tree().create_timer(3.0).timeout
+        _waterprobe_seed_maybe()
+        await get_tree().create_timer(1.5).timeout
+        _spawn_wave_manual()
+        var nav := PathService.nav
+        for i in 240:   # سقف ۴۸ ثانیه
+                await get_tree().create_timer(0.2).timeout
+                var waders := 0
+                var far_wader: Vector3 = Vector3.ZERO
+                var far_d := 0.0
+                if director != null:
+                        for e in director.raiders_root.get_children():
+                                if not is_instance_valid(e) or e.is_dead():
+                                        continue
+                                if not e._wading:
+                                        continue
+                                waders += 1
+                                var p: Vector3 = e.global_position
+                                var d := _dist_to_blocked(nav,
+                                                Vector2(p.x, p.z))
+                                if d > far_d:
+                                        far_d = d
+                                        far_wader = p
+                if waders > 0 and far_d > 0.5:
+                        print("[WSHOT] waders=%d far=%.2fm at (%.1f,%.1f)"
+                                        % [waders, far_d, far_wader.x, far_wader.z])
+                        # دوربین نزدیکِ صحنه‌ی پیاده‌شدن
+                        _cam_pivot.position = Vector3(far_wader.x, 0.0,
+                                        far_wader.z)
+                        _target_height = 9.0
+                        await get_tree().create_timer(0.5).timeout
+                        _snap(out_dir + "/wshot1_wading.png")
+                        await get_tree().create_timer(0.6).timeout
+                        _snap(out_dir + "/wshot2_wading.png")
+                        await get_tree().create_timer(0.6).timeout
+                        _snap(out_dir + "/wshot3_landed.png")
+                        print("[WSHOT] done")
+                        get_tree().quit(0)
+                        return
+        print("[WSHOT] no wader caught in 48s")
+        get_tree().quit(1)
+
+
+## پراب تشخیصی ۶R16 — «چرا کاراکترها روی آب راه می‌روند؟» — سه اسکن:
+## ۱) ایستا: سلول‌های قابل‌عبوری که ارتفاعِ رندرشان هم‌سطح/زیرِ دریاست
+## ۲) اسلات‌ها: _dense_slots دورِ پست‌ها و پدِ ساحلی — اسلاتِ روی سلولِ بسته/آب
+## ۳) پویا: فرمان به پدِ ساحلی + موج دشمن؛ نمونه‌برداریِ y و سلولِ همه‌ی یونیت‌ها
+func _run_water_probe() -> void:
+        await get_tree().create_timer(3.0).timeout
+        _waterprobe_seed_maybe()
+        await get_tree().create_timer(1.5).timeout
+        _spawn_wave_manual()   # زودتر — قایق‌ها حینِ اسکن‌های ایستا دریانوردی می‌کنند
+        var nav := PathService.nav
+        var sea: float = ground.sea_y
+        print("[WATER] sea_y=%.3f" % sea)
+        # ---------- ۱) اسکن ایستای زمین ----------
+        var under := 0
+        var min_h := 1e9
+        var min_cell := Vector2i.ZERO
+        var samples: Array[String] = []
+        for cy in nav.height:
+                for cx in nav.width:
+                        var c := Vector2i(cx, cy)
+                        if not nav.is_walkable(c):
+                                continue
+                        var h := ground.height_at_world(nav.cell_center(c))
+                        if h < min_h:
+                                min_h = h
+                                min_cell = c
+                        if h < sea + 0.02:
+                                under += 1
+                                if samples.size() < 8:
+                                        samples.append(str(c) + "@%.3f" % h)
+        print("[WATER] static: walkable_underwater=%d  min_h=%.3f at %s  samples=%s"
+                        % [under, min_h, min_cell, samples])
+        # ---------- ۲) اسکن اسلات‌ها ----------
+        var centers: Array[Vector2] = []
+        for p in _squad_posts:
+                centers.append(p)
+        # پدِ ساحلی: سلولِ فرمانی که نزدیک‌ترین فاصله‌اش به سلولِ بسته کمینه است
+        var shore_center := Vector2.ZERO
+        var best_d := 1e9
+        for i in cmd_grid.cell_count:
+                var info: Dictionary = cmd_grid.cell_info(i)
+                var cc: Vector2 = info["center"]
+                var d := _dist_to_blocked(nav, cc)
+                if d < best_d:
+                        best_d = d
+                        shore_center = cc
+        centers.append(shore_center)
+        print("[WATER] shore pad (%.1f, %.1f) dist_to_blocked=%.2f"
+                        % [shore_center.x, shore_center.y, best_d])
+        for cz in centers:
+                var slots := _dense_slots(cz, 10)
+                var bad := 0
+                var low := 0
+                for s in slots:
+                        var sc := nav.world_to_cell(s)
+                        if not nav.is_walkable(sc):
+                                bad += 1
+                        elif ground.height_at_world(s) < sea + 0.02:
+                                low += 1
+                print("[WATER] slots at (%.1f,%.1f): bad_cell=%d low_h=%d of %d"
+                                % [cz.x, cz.y, bad, low, slots.size()])
+        # ---------- ۳) اسکن پویا ----------
+        _issue_move_to(shore_center, 0, true)
+        if centers.size() > 1:
+                _issue_move_to(centers[1], 1, true)
+        for tick in 70:   # ۳۵ ثانیه — قایق‌ها از افق می‌رسند و پیاده می‌شوند
+                await get_tree().create_timer(0.5).timeout
+                var report := _water_scan_units(nav, sea)
+                if report != "":
+                        print("[WATER] t+%.1fs %s" % [3.0 + 0.5 * float(tick + 1),
+                                        report])
+        print("[WATER] probe done")
+        get_tree().quit(0)
+
+
+## فاصله‌ی نقطه تا نزدیک‌ترین سلولِ بسته (۰٫۰ = خودش بسته است)
+func _dist_to_blocked(nav: NavGrid, p: Vector2) -> float:
+        var base := nav.world_to_cell(p)
+        var best := 1e9
+        for dy in range(-6, 7):
+                for dx in range(-6, 7):
+                        var c := base + Vector2i(dx, dy)
+                        if nav.is_walkable(c):
+                                continue
+                        best = minf(best, nav.cell_center(c).distance_to(p))
+        return best
+
+
+## یک نمونه‌گیری از همه‌ی یونیت‌ها: روی سلولِ بسته یا در آب — خروجی متن یا ""
+func _water_scan_units(nav: NavGrid, sea: float) -> String:
+        var msgs: Array[String] = []
+        for si in squads.size():
+                for u in squads[si]:
+                        if not is_instance_valid(u) or u.is_dead():
+                                continue
+                        var p: Vector3 = u.global_position
+                        var c := nav.world_to_cell(Vector2(p.x, p.z))
+                        var on_blocked := not nav.is_walkable(c)
+                        var in_water: bool = p.y < sea + 0.04 and not u._fleeing
+                        if on_blocked or in_water:
+                                msgs.append("sq%d y=%.2f cell=%s blocked=%s flee=%s (%.1f,%.1f)"
+                                                % [si, p.y, str(c), on_blocked,
+                                                u._fleeing, p.x, p.z])
+        if director != null:
+                var waders := 0
+                var far_w := 0.0
+                for e in director.raiders_root.get_children():
+                        if not is_instance_valid(e) or e.is_dead():
+                                continue
+                        var p: Vector3 = e.global_position
+                        var c := nav.world_to_cell(Vector2(p.x, p.z))
+                        var on_blocked := not nav.is_walkable(c)
+                        if e._wading:
+                                waders += 1
+                                far_w = maxf(far_w, _dist_to_walkable(nav,
+                                                Vector2(p.x, p.z)))
+                        if on_blocked and not e._wading:
+                                msgs.append("enemy y=%.2f cell=%s blocked (%.1f,%.1f)"
+                                                % [p.y, str(c), p.x, p.z])
+                if waders > 0:
+                        msgs.append("waders=%d far_from_land=%.2fm" % [waders, far_w])
+        return "" if msgs.is_empty() else " | ".join(msgs)
+
+
+## فاصله‌ی نقطه تا نزدیک‌ترین سلولِ قابل‌عبور (برای سنجشِ عمقِ واد)
+func _dist_to_walkable(nav: NavGrid, p: Vector2) -> float:
+        var base := nav.world_to_cell(p)
+        if nav.is_walkable(base):
+                return 0.0
+        var best := 1e9
+        for r in range(1, 10):
+                for dy in range(-r, r + 1):
+                        for dx in range(-r, r + 1):
+                                if maxi(absi(dx), absi(dy)) != r:
+                                        continue
+                                var c := base + Vector2i(dx, dy)
+                                if nav.is_walkable(c):
+                                        best = minf(best,
+                                                        nav.cell_center(c).distance_to(p))
+                if best < 1e8:
+                        return best
+        return best
 
 
 # ---------------- تولید و بازسازی جزیره ----------------
@@ -558,9 +780,9 @@ func _dense_slots(center: Vector2, n: int, min_r := 0.0) -> Array[Vector2]:
         var nav := PathService.nav
         var slots: Array[Vector2] = []
         if min_r <= 0.0:
-                # اسلاتِ مرکز — روی نزدیک‌ترین نقطه‌ی قابل‌عبور
-                var c0 := _nearest_walkable_point(nav, center, 1.2)
-                slots.append(c0 if c0 != Vector2.INF else center)
+                # گام ۶R16 — اسلاتِ مرکز: با snapِ تدریجی هرگز روی سلولِ بسته
+                # (آب/صخره) نمی‌افتد — ریشه‌ی «اسلاتِ آبی» در پدهای ساحلی
+                slots.append(_snap_walkable(nav, center))
         var rings := [
                 [min_r + 0.85, 6, PI / 6.0],
                 [min_r + 1.45, 10, 0.0],
@@ -576,8 +798,7 @@ func _dense_slots(center: Vector2, n: int, min_r := 0.0) -> Array[Vector2]:
                 for k in per:
                         var ang := a0 + TAU * float(k) / float(per)
                         var p := center + Vector2(cos(ang), sin(ang)) * r
-                        var np := _nearest_walkable_point(nav, p, 0.9)
-                        slots.append(np if np != Vector2.INF else p)
+                        slots.append(_snap_walkable(nav, p))
                         if slots.size() >= n:
                                 break
         # تضمین: همیشه به اندازه‌ی سربازها اسلات داریم
@@ -585,11 +806,29 @@ func _dense_slots(center: Vector2, n: int, min_r := 0.0) -> Array[Vector2]:
         while slots.size() < n and guard < 40:
                 var ang := _rng_scene() * TAU
                 var rr := min_r + 0.6 + float(guard % 4) * 0.35
-                var np := _nearest_walkable_point(nav,
-                                center + Vector2(cos(ang), sin(ang)) * rr, 1.2)
-                slots.append(np if np != Vector2.INF else center)
+                slots.append(_snap_walkable(nav,
+                                center + Vector2(cos(ang), sin(ang)) * rr))
                 guard += 1
         return slots
+
+
+## گام ۶R16 — نزدیک‌ترین نقطه‌ی قابل‌عبور با شعاعِ فزاینده (۰.۹→۴.۵m)؛
+## اگر هیچ‌کجا نبود: پیش‌روی به‌سمتِ مرکز جزیره تا اولین سلول آزاد.
+## خروجی همیشه یک سلولِ قابل‌عبور است — اسلاتِ روی آب دیگر ممکن نیست.
+func _snap_walkable(nav: NavGrid, p: Vector2) -> Vector2:
+        for r in [0.9, 1.8, 3.0, 4.5]:
+                var np := _nearest_walkable_point(nav, p, r)
+                if np != Vector2.INF:
+                        return np
+        var c := nav.origin + nav.size_world() * 0.5
+        var step := p.distance_to(c) / 24.0
+        if step > 0.01:
+                var dirv := (c - p).normalized()
+                for k in range(1, 25):
+                        var q := p + dirv * (step * float(k))
+                        if nav.is_walkable(nav.world_to_cell(q)):
+                                return nav.cell_center(nav.world_to_cell(q))
+        return c
 
 
 func _walkable_cells_near(center: Vector2, radius: float, want: int) -> Array[Vector2]:

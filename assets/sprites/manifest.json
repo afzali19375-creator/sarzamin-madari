@@ -1,0 +1,157 @@
+{
+ "warrior": {
+  "canvas_w": 181,
+  "canvas_h": 176,
+  "anims": {
+   "idle": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/warrior/idle.png"
+   },
+   "walk": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/warrior/walk.png"
+   },
+   "attack": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/warrior/attack.png"
+   },
+   "hit": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/warrior/hit.png"
+   },
+   "death": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/warrior/death.png"
+   }
+  }
+ },
+ "viking": {
+  "canvas_w": 167,
+  "canvas_h": 176,
+  "anims": {
+   "idle": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/viking/idle.png"
+   },
+   "walk": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/viking/walk.png"
+   },
+   "attack": {
+    "frames": 14,
+    "fps": 8,
+    "sheet": "res://assets/sprites/viking/attack.png"
+   },
+   "attak2": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/viking/attak2.png"
+   },
+   "hit": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/viking/hit.png"
+   },
+   "death": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/viking/death.png"
+   }
+  }
+ },
+ "ranger": {
+  "canvas_w": 172,
+  "canvas_h": 176,
+  "anims": {
+   "idle": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/ranger/idle.png"
+   },
+   "walk": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/ranger/walk.png"
+   },
+   "attack": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/ranger/attack.png"
+   },
+   "attak2": {
+    "frames": 15,
+    "fps": 8,
+    "sheet": "res://assets/sprites/ranger/attak2.png"
+   },
+   "hit": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/ranger/hit.png"
+   },
+   "death": {
+    "frames": 8,
+    "fps": 8,
+    "sheet": "res://assets/sprites/ranger/death.png"
+   }
+  }
+ },
+ "knight_heavy": {
+  "canvas_w": 179,
+  "canvas_h": 176,
+  "anims": {
+   "idle": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/knight_heavy/idle.png"
+   },
+   "walk": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/knight_heavy/walk.png"
+   },
+   "attack": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/knight_heavy/attack.png"
+   },
+   "death": {
+    "frames": 14,
+    "fps": 8,
+    "sheet": "res://assets/sprites/knight_heavy/death.png"
+   }
+  }
+ },
+ "soldier": {
+  "canvas_w": 168,
+  "canvas_h": 176,
+  "anims": {
+   "idle": {
+    "frames": 14,
+    "fps": 8,
+    "sheet": "res://assets/sprites/soldier/idle.png"
+   },
+   "walk": {
+    "frames": 14,
+    "fps": 8,
+    "sheet": "res://assets/sprites/soldier/walk.png"
+   },
+   "attack": {
+    "frames": 16,
+    "fps": 8,
+    "sheet": "res://assets/sprites/soldier/attack.png"
+   },
+   "death": {
+    "frames": 12,
+    "fps": 8,
+    "sheet": "res://assets/sprites/soldier/death.png"
+   }
+  }
+ }
+}

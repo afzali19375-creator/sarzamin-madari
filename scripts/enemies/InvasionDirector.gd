@@ -149,16 +149,21 @@ func spawn_wave(opts: Dictionary = {}) -> int:
         var gid := _next_group
         _next_group += 1
         var fleet: Array = []
-        var anchor0 := water_xz + outward * 1.4
+        var anchor0 := water_xz
         for bi in n_boats:
                 var spec: Dictionary = fleet_spec[bi]
                 var btype: EnemyBoat.BoatType = spec["type"]
-                var off := _anchor_offset_of(btype)
                 # قایق‌های ناوگان کنار هم پهلو می‌گیرند (فاصله‌ی FLEET_BOAT_GAP)
                 var side := (float(bi) - float(n_boats - 1) * 0.5) \
                                 * GameConstants.FLEET_BOAT_GAP
-                var anchor := water_xz + outward * off + tangent * side
-                # گام ۶R4fix — لنگر باید روی آب بماند: کمی به بیرون سُر می‌دهیم
+                # گام ۶R16 — ریشه‌ی «کاراکترها روی آب راه می‌روند»: قایق قبلاً
+                # با افستِ ۱٫۴+۱٫۱m از سلولِ آب دور می‌شد و سربازها با کفِ آب
+                # (WADE_Y بالاتر از سطح دریا!) تا ۴ متر روی سطح آب اسکی می‌کردند.
+                # حالا قایق دقیقاً پهلوی سلولِ آبِ مجاورِ ساحل پهلو می‌گیرد —
+                # دماغه به شن؛ پیاده‌شدن یک قدم به خشکی است.
+                var anchor := water_xz + tangent * side
+                # گام ۶R4fix — لنگر باید روی آب بماند (قایقِ کناری اگر به ساحل
+                # خورد، کمی به بیرون سُر می‌دهیم)
                 var wtries := 0
                 while wtries < 8 and nav.is_walkable(nav.world_to_cell(anchor)):
                         anchor += outward * 0.3
@@ -326,18 +331,53 @@ func _capacity_of(btype: EnemyBoat.BoatType) -> int:
                         return GameConstants.CAP_GALLEY
 
 
-func _anchor_offset_of(btype: EnemyBoat.BoatType) -> float:
-        # گام ۶R4fix — قایق‌ها چسبیده‌تر به لبه‌ی ساحل پهلو می‌گیرند: با لنگرِ
-        # رندومِ ساحلی، offset قبلی (۱.۱-۱.۸m به سمت آب) سلول‌های پیاده‌شدنِ
-        # ۳.۸m را آب‌دار می‌کرد و مهاجمِ دُمِ صف چند متر دورتر از قایقِ خودش
-        # فرود می‌آمد. بدنه‌ها کم‌ارتفاع‌اند و پهلوگیریِ نزدیک طبیعی‌تر است.
-        match btype:
-                EnemyBoat.BoatType.ROWBOAT:
-                        return 0.4
-                EnemyBoat.BoatType.WARSHIP:
-                        return 0.9
-                _:
-                        return 0.65
+## (۶R16 — تابع _anchor_offset_of حذف شد: قایق دیگر با افستِ
+## نوع‌به‌نوع از ساحل دور نمی‌شود؛ لنگر = خودِ سلولِ آبِ مجاورِ ساحل
+## تا پیاده‌شدن یک قدم به خشکی باشد و هیچ‌کس روی آب راه نرود)
+
+func _dist_walkable_dbg(p: Vector2) -> float:
+        var nav := PathService.nav
+        var base := nav.world_to_cell(p)
+        if nav.is_walkable(base):
+                return 0.0
+        var best := 1e9
+        for r in range(1, 12):
+                for dy in range(-r, r + 1):
+                        for dx in range(-r, r + 1):
+                                if maxi(absi(dx), absi(dy)) != r:
+                                        continue
+                                var c := base + Vector2i(dx, dy)
+                                if nav.is_walkable(c):
+                                        best = minf(best,
+                                                        nav.cell_center(c).distance_to(p))
+                if best < 1e8:
+                        return best
+        return best
+
+
+## گام ۶R16 — مسیرِ وادِ قایق→سلول: آب فقط به‌صورتِ «پیشوندِ» مسیر مجاز است؛
+## به‌محضِ رسیدنِ رَی به خشکی، بازگشتِ دوباره به آب رد می‌شود (خلیج/دماغه).
+## پیشوندِ آبیِ بلندتر از ۲.۲m هم رد — واد باید یک قدمِ ساحلی بماند.
+func _wade_path_ok(from: Vector2, to: Vector2) -> bool:
+        var nav := PathService.nav
+        if nav == null:
+                return true
+        var dist := from.distance_to(to)
+        if dist < 0.3:
+                return true
+        var steps := maxi(int(dist / 0.35), 2)
+        var seen_land := false
+        for i in range(1, steps + 1):
+                var k := float(i) / float(steps)
+                var p := from.lerp(to, k)
+                var ok := nav.is_walkable(nav.world_to_cell(p))
+                if ok:
+                        seen_land = true
+                elif seen_land:
+                        return false   # آبِ بعد از خشکی = پشتِ خلیج — رد
+                if not ok and not seen_land and from.distance_to(p) > 2.2:
+                        return false   # پیشوندِ آبیِ طولانی — رد
+        return true
 
 
 ## گام ۶R6 — قایق پهلو گرفت: فقط «سلول‌های پیاده‌شدن» را به خودِ قایق می‌دهیم؛
@@ -361,12 +401,26 @@ func _on_boat_landed(boat: EnemyBoat, gid: int) -> void:
                 boat.start_disembark([])   # بارِ مرده → مستقیم PARKED (۶R9)
                 return
         var boat_xz := Vector2(boat.global_position.x, boat.global_position.z)
+        # [WATERDBG] موقت — لنگرِ واقعیِ قایق هنگامِ فرود
+        if PathService.nav != null:
+                var _dbg_d := _dist_walkable_dbg(boat_xz)
+                print("[WATERDBG] boat landed at (%.2f, %.2f) dist_land=%.2f need=%d"
+                                % [boat_xz.x, boat_xz.y, _dbg_d, need])
         # شعاع = offset لنگر + یک سلول ساحل + حاشیه؛ پویا برای لنگرِ ضدقفل
         var cells := _walkable_cells_near(boat_xz, 3.8, need)
         if cells.size() < need:
                 cells = _walkable_cells_near(boat_xz, 5.5, need)
         if cells.size() < need:
                 cells = _walkable_cells_near(boat_xz, 8.0, need)
+        # گام ۶R16 — فقط سلول‌هایی که وادِ «آبِ پیوستهٔ ابتداییِ کوتاه» دارند:
+        # ریشهٔ دومِ «راه رفتن روی آب» — سلولِ نزدیک پشتِ خلیج/دماغه، رَیِ
+        # مستقیم قایق→سلول از وسط آب می‌گذشت و مهاجم ۲–۳ متر روی آب می‌رفت
+        var dry: Array[Vector2] = []
+        for c in cells:
+                if _wade_path_ok(boat_xz, c):
+                        dry.append(c)
+        if dry.size() >= mini(need, 3):
+                cells = dry
         boat.start_disembark(cells)
         # میدانِ گروه این لحظه به خانه ست می‌شود (سربازان با پیاده‌شدن فعال می‌شوند)
         PathService.set_goal_for(g["channel"], g["raid_target"])

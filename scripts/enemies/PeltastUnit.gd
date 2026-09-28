@@ -41,6 +41,10 @@ func _build_gear() -> void:
         _swing_weapon = WeaponLook.javelin(0.66)
         _swing_weapon.rotation_degrees = Vector3(-30.0, 0.0, -8.0)
         _hand.add_child(_swing_weapon)
+        # ۶R17 — اسپرایتِ زره‌پوش نیزه‌به‌دست دارد؛ نیزه‌ی سه‌بعدی تکراری است
+        # (مشعل می‌ماند — سیگنالِ مأموریتِ آتش‌زنی)
+        if _sprite_mode:
+                _swing_weapon.visible = false
 
         # مشعل روشن در دست دیگر (سمت چپ مدل) — روی کاراکترِ ۰٫۸۲ متری
         _torch_in_hand = MeshInstance3D.new()

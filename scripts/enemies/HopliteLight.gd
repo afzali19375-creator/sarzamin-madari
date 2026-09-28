@@ -23,7 +23,7 @@ func _default_color() -> Color:
 
 ## گام ۶R12 — مهاجمِ انسانی: وایکینگِ تبر‌دار (Quaternius Ultimate)
 func _model_kind() -> StringName:
-        return &"viking"
+        return &"soldier"
 
 
 func _build_gear() -> void:
@@ -31,3 +31,6 @@ func _build_gear() -> void:
         _swing_weapon = WeaponLook.sword(Color("c9963c"), 0.48)
         _swing_weapon.rotation_degrees.z = -12.0   # تیغه کمی به بیرونِ بدن
         _hand.add_child(_swing_weapon)
+        # ۶R17 — اسپرایتِ زره‌پوش خودش شمشیر دارد؛ سلاحِ سه‌بعدی تکراری است
+        if _sprite_mode:
+                _swing_weapon.visible = false

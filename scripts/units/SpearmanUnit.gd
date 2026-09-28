@@ -44,6 +44,10 @@ func _build_gear() -> void:
         _spear.rotation_degrees.x = 90.0
         _spear_pivot.add_child(_spear)
         _spear_pivot.rotation_degrees.x = -SPEAR_UP_DEG  # در مسیر: نیزه رو به بالا
+        # ۶R17 — اسپرایتِ نیزه‌دارِ کاربر نیزه‌ی بیرقدار دارد؛ نیزه‌ی سه‌بعدی خاموش
+        # (مکانیکِ THRUST روی پیوت می‌ماند، فقط دیده نمی‌شود)
+        if _sprite_mode:
+                _spear.visible = false
 
 
 func _combat_wants(_hostile: Node3D) -> bool:

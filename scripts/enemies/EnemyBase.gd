@@ -85,6 +85,8 @@ var _flash_restore := Color.WHITE
 var _model: CharacterModel
 var _body: Node3D
 var _body_color: Color
+## ۶R۱۷ — مدلِ اسپرایتیِ GIF فعال است؟ (سلاحِ پروسیجرالِ تکراری پنهان می‌شود)
+var _sprite_mode := false
 
 # گام ۶R5 — ضدِ گیرِ پیشروی (الگوی پیروی از دیوارِ UnitBase ۶R4):
 # مهاجمی که میدانِ کانال ندارد و مستقیم می‌رود، در گوشه‌ی مقعر (خانه+صخره)
@@ -111,11 +113,16 @@ func _ready() -> void:
         _heading = rotation.y
         _channel = GameConstants.ENEMY_CHANNEL_BASE + raid_group
         _body_color = _default_color()
-        # گام ۶R12 — کاراکتر انسانی با انیمیشن کامل (Idle/Walk/Attack/Hit/Death)
+        # گام ۶R۱۷ — اسپرایت‌های GIF کاربر اولویت دارند؛ مدلِ اسکلتی فقط
+        # جایگزینِ نقش‌های بی‌شیت است (کارخانه‌ی نوع‌آگاه)
         # گام ۶R۱۵ — تینتِ گرادیانیِ ~۵۰٪: از دور «سرخِ مهاجم» خوانده می‌شود
-        # ولی بافتِ پک هم دیده می‌شود (بدونِ دوده‌ی سیاهِ ۶R۱۴)
-        _model = CharacterModel.new()
-        _model.setup(_model_kind(), _body_color, 0.5)
+        var mkind := _model_kind()
+        if SpriteCharacterModel.has_kind(mkind):
+                _model = SpriteCharacterModel.new()
+                _sprite_mode = true
+        else:
+                _model = CharacterModel.new()
+        _model.setup(mkind, _body_color, 0.5)
         add_child(_model)
         _body = _model.body_root()
 
@@ -139,9 +146,9 @@ func _default_color() -> Color:
 
 
 ## نقشِ کاراکتر انسانیِ این مهاجم — زیرکلاس‌ها override می‌کنند
-## (۶R12: سبک=وایکینگ تبر‌دار، سنگین=شهسوار سپردار، پلتاست=رُگِ خنجر‌دار)
+## (۶R17: سنگین=واریرِ زره‌پوشِ سیاه، سبک/پلتاست=سولدیرِ زره‌پوشِ تاج‌قرمز)
 func _model_kind() -> StringName:
-        return &"viking"
+        return &"soldier"
 
 
 func _build_gear() -> void:
@@ -265,8 +272,26 @@ func _disembark_tick(pos: Vector2, delta: float) -> bool:
                 return false
         _wade_t += delta
         var d := pos.distance_to(disembark_target)
-        if d <= 0.35 or _wade_t > 4.0:
-                # مهلت ایمنی: مهاجم هرگز در حلقه‌ی پیاده‌شدن گیر نمی‌کند
+        # گام ۶R16 — پایانِ واد فقط وقتی که «خودِ سلول» آزاد است؛ ۰.۳۵m مانده
+        # به مرکزِ هدف می‌توانست هنوز روی سلولِ آب/صخره باشد و واحد وسطِ آب
+        # رها می‌شد (نمونهٔ گزارشِ پراب: enemy blocked cell y=0.14)
+        var nav := PathService.nav
+        var on_blocked := nav != null \
+                        and not nav.is_walkable(nav.world_to_cell(pos))
+        if d <= 0.35 and not on_blocked:
+                last_disembark_target = disembark_target
+                disembark_target = Vector2.INF
+                _wading = false
+                return false
+        if _wade_t > 6.0:
+                # گام ۶R16 — مهلت ایمنی: اما «وسط آب» رها نمی‌شود! اگر هنوز روی
+                # سلول بسته است، مقصدش نزدیک‌ترین خشکی می‌شود و واد ادامه دارد
+                # (وگرنه بعد از مهلت، روی بستر/سطح آب بی‌گارد راه می‌رفت)
+                if on_blocked:
+                        disembark_target = nav.cell_center(
+                                        _nearest_walkable_cell_esc(pos))
+                        _wade_t = 2.0   # مهلتِ دوباره‌ی ۴ ثانیه‌ای تا خشکی
+                        return true
                 last_disembark_target = disembark_target
                 disembark_target = Vector2.INF
                 _wading = false

@@ -114,9 +114,11 @@ var _spawn_color: Color
 var _base_color: Color
 var _body: Node3D
 var _ring: MeshInstance3D
-## کاراکتر Low-Poly واقعی — گام ۶R۱۲: پک Quaternius (CC0) با انیمیشن اسکلتی کامل
-## (Idle/Walk/حمله/ضربه/مرگ) — بازخورد: «کیفیت کاراکترها خوب نیست»
+## کاراکتر — گام ۶R۱۷: اسپرایت‌های GIF خودِ کاربر (بیلبورد Y) و اگر شیتی
+## برای نقش نبود، مدل اسکلتی Quaternius (CC0) جایگزین می‌شود
 var _model: CharacterModel
+## ۶R۱۷ — مدلِ اسپرایتی فعال است؟ (تجهیزاتِ پروسیجرالِ تکراری پنهان می‌شوند)
+var _sprite_mode := false
 
 
 func _ready() -> void:
@@ -136,11 +138,16 @@ func _ready() -> void:
         # (رفع باگ «گیر کردن در آیدل بعد از رسیدن») — فقط برای کانال ۰/بدون اسلات
         GameEvents.goal_changed.connect(_on_goal_changed)
 
-        # گام ۶R۱۲ — کاراکتر اسکلتی Quaternius با انیمیشن کامل؛ تینتِ ۴۲٪ رنگ دسته
-        # روی پالت کاراکتر (قابل‌تفکیک از دور، شکل کاراکتر زیر رنگ گم نمی‌شود)
-        _model = CharacterModel.new()
+        # گام ۶R۱۷ — اولویت با اسپرایت‌های GIF کاربر است؛ مدلِ اسکلتی فقط
+        # جایگزینِ نقش‌های بی‌شیت (کارخانه‌ی نوع‌آگاه)
+        var mkind := _model_kind()
+        if SpriteCharacterModel.has_kind(mkind):
+                _model = SpriteCharacterModel.new()
+                _sprite_mode = true
+        else:
+                _model = CharacterModel.new()
         # گام ۶R۱۵ — رنگِ عادی: بدون تینت (تینت فقط هنگامِ انتخاب)
-        _model.setup(_model_kind(), _spawn_color, 0.0, _model_special())
+        _model.setup(mkind, _spawn_color, 0.0, _model_special())
         add_child(_model)
         _body = _model.body_root()
 
@@ -168,7 +175,8 @@ func _ready() -> void:
         _build_gear()
 
         # گام ۶R — نشان فرمانده: سربند طلایی (پرچم را صحنه وصل می‌کند)
-        if is_commander:
+        # ۶R۱۷ — در حالت اسپرایت سربند شناور می‌شود؛ پرچم خودش نشانِ فرمانده است
+        if is_commander and not _sprite_mode:
                 var band := MeshInstance3D.new()
                 var bm := TorusMesh.new()
                 bm.inner_radius = 0.11

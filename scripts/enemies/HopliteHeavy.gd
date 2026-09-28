@@ -36,6 +36,9 @@ func _build_gear() -> void:
         _swing_weapon = WeaponLook.sword(Color("c9963c"), 0.44)
         _swing_weapon.rotation_degrees.z = -14.0
         _hand.add_child(_swing_weapon)
+        # ۶R17 — اسپرایتِ واریرِ زره‌پوش خودش شمشیر+سپر دارد؛ سه‌بعدیِ تکراری خاموش
+        if _sprite_mode:
+                _swing_weapon.visible = false
 
         # سپر بزرگ مستطیلی رو به +Z (سمت نگاه) — جلوی تنه
         _shield = MeshInstance3D.new()
@@ -60,6 +63,9 @@ func _build_gear() -> void:
         rim_mat.roughness = 0.5
         rim.material_override = rim_mat
         add_child(rim)
+        if _sprite_mode:
+                _shield.visible = false
+                rim.visible = false
 
 
 ## آیا این پرتابه در مخروط سپر پیش‌رو است؟ (سپر روی +Z مدل با heading فعلی)

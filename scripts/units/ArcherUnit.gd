@@ -47,6 +47,9 @@ func _build_gear() -> void:
         qmat.roughness = 0.6
         _quiver.material_override = qmat
         add_child(_quiver)
+        # ۶R17 — اسپرایتِ کماندارِ کاربر تیردان روی پشت دارد؛ سه‌بعدی تکراری است
+        if _sprite_mode:
+                _quiver.visible = false
 
         # تیرِ روی کمان (فقط هنگام هدف‌گیری دیده می‌شود)
         _nock = MeshInstance3D.new()

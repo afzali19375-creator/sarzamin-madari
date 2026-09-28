@@ -2942,6 +2942,15 @@ func _phase20_battle_scene() -> void:
                                                 armed += 1
                                 _check("weapons_multi_part_armed", armed >= 8,
                                                 "%d armed" % armed)
+                                # گام ۶R۱۷ — اسپرایت‌های GIF کاربر فعال‌اند
+                                var spr := 0
+                                for u17 in target_scene.squad:
+                                        if is_instance_valid(u17) \
+                                                        and (u17 as UnitBase)._model \
+                                                        is SpriteCharacterModel:
+                                                spr += 1
+                                _check("sprite_models_active", spr >= 8,
+                                                "%d sprite" % spr)
                                 _sub = 3
                                 _sub_t = _t
                 3:
@@ -2962,6 +2971,19 @@ func _phase20_battle_scene() -> void:
                                 _check("p20_ghosts_landed", landed_live >= 3,
                                                 "%d landed (t=%.1f)" % [landed_live,
                                                 _t - _sub_t])
+                                # گام ۶R۱۷ — مهاجمانِ زره‌پوش اسپرایتی‌اند
+                                var espr := 0
+                                var ekinds := {}
+                                for h17 in get_tree().get_nodes_in_group("hostiles"):
+                                        var e17 := h17 as EnemyBase
+                                        if e17 != null and not e17.riding \
+                                                        and not e17.is_dead() \
+                                                        and e17._model is SpriteCharacterModel:
+                                                espr += 1
+                                                var kk: String = (e17._model as SpriteCharacterModel).active_kind()
+                                                ekinds[kk] = int(ekinds.get(kk, 0)) + 1
+                                _check("enemy_sprite_models_armed", espr >= 3,
+                                                "%d sprite %s" % [espr, ekinds])
                                 target_scene.director.kill_all_raiders()
                                 _sub = 5
                                 _sub_t = _t
