@@ -5,7 +5,7 @@ class_name GameConstants
 
 # ---------- هویت بیلد ----------
 ## روی صفحه‌ی تست و منو نمایش داده می‌شود تا همیشه مشخص باشد کاربر کدام نسخه را اجرا می‌کند
-const BUILD_ID := "2026-09-28-r21"
+const BUILD_ID := "2026-09-28-r22"
 
 # ---------- گام ۶R10 — زبان انتخاب Bad North (اسکرین‌شات‌های کاربر) ----------
 ## در تصاویر مرجع کاربر: دسته‌ی انتخابی «تمام‌قد» فیروزه‌ای روشن می‌شود (بدنه +
@@ -50,7 +50,26 @@ const SPEED_BASE := 3.0                   # سرعت پایه m/s
 const SPEED_VARIATION := 0.05             # 0.95× تا 1.05× برای هر سرباز
 const ACCEL := 8.0                        # شتاب m/s²
 const ROTATE_SPEED_RAD := TAU             # چرخش ۳۶۰ درجه بر ثانیه
-const FORMATION_SPACING := 1.2            # فاصله‌ی آرایش بین سربازان (m)
+## گام M2 — چینشِ بلوکیِ دسته‌ها (بازخورد «چینش» با تصویر مرجع Bad North):
+## بلوکِ لوزیِ لانه‌زنبوری؛ فاصله‌ی همسایه‌ها از «اندازه‌ی واقعیِ کاراکتر» خوانده
+## می‌شود — عددِ ثابتِ دلخواه ممنوع. زنجیره:
+##   قطرِ بدنه = بلندیِ اسپرایت (UNIT_WORLD_HEIGHT) × UNIT_BODY_DIAMETER_FRAC
+##   فاصله‌ی مرکزتا‌مرکز = قطرِ بدنه × FORMATION_SPACING_MULT (بازه‌ی مجاز ۱٫۰۵..۱٫۱۵)
+##   فاصله‌ی ردیف‌ها = فاصله‌ی همسایه × FORMATION_ROW_FACTOR (√3/2 ≈ 0.87 لانه‌زنبوری)
+const UNIT_BODY_DIAMETER_FRAC := 0.45     ## عرضِ برخوردیِ بدنه نسبت به بلندیِ اسپرایت
+const FORMATION_SPACING_MULT := 1.12      ## پیش‌فرض — IslandTest با @export بازنویسی می‌کند
+const FORMATION_ROW_FACTOR := 0.87        ## فاصله‌ی ردیف‌ها (لانه‌زنبوری)
+const FORMATION_JITTER_FRAC := 0.08       ## لرزشِ ثابتِ هر سرباز ±۸٪ فاصله‌ی همسایه (seed ثابت)
+const FORMATION_HEADING_JITTER_DEG := 6.0 ## اختلافِ چرخشِ چند درجه‌ای سربازها
+const FORMATION_REFACE_DRIFT_RAD := 0.35  ## انحرافِ جهتِ حرکت برای بازچینیِ سمتِ بلوک
+
+## قطرِ برخوردیِ واقعیِ کاراکتر (m) — تنها مرجعِ مجاز برای چیدمان
+static func unit_body_diameter() -> float:
+        return UNIT_WORLD_HEIGHT * UNIT_BODY_DIAMETER_FRAC
+
+## فاصله‌ی مرکزتا‌مرکزِ همسایه‌ها (m) — mult = ضریبِ قابل‌تنظیم (Inspector)
+static func formation_spacing(mult := FORMATION_SPACING_MULT) -> float:
+        return unit_body_diameter() * mult
 
 # ---------- Fidget (§۵.۲ پرامت) ----------
 const FIDGET_INTERVAL_MIN := 2.0          # فاصله‌ی زمانی 2–5 s
@@ -276,6 +295,17 @@ const COL_PAD_EDGE := Color("93a96c")
 const COL_ROCK := Color("8b8073")             # صخره
 const COL_ROCK_DARK := Color("5e5548")        # صخره تیره
 const COL_SUN := Color("fff4d6")              # نور خورشید
+
+# ---------- گام M2 — سایه‌ی لکه‌ایِ نرم زیر پا (blob) + تک‌منبعِ خورشید ----------
+## سایه‌ی بیضیِ نرم، کمی به سمتِ مخالفِ نور کج — علاوه بر سایه‌ی جهت‌دار،
+## برای حسِ عمق (بازخورد چینش §۶). رنگِ سایه = خاکستریِ گرم، نه سیاهِ محض.
+const SUN_ROT_DEG := Vector3(-48.0, -35.0, 0.0)  ## جهتِ خورشید — IslandTest هم از همین می‌خواند
+const SUN_ENERGY := 0.33
+const SUN_COLOR := Color("fff8ea")
+const AMBIENT_ENERGY := 0.45
+const BLOB_OFFSET_FRAC := 0.22           ## جابجاییِ مرکزِ سایه = قطرِ بدنه × این، سمتِ مخالفِ نور
+const BLOB_OPACITY := 0.42
+const BLOB_COLOR := Color(0.16, 0.15, 0.14)  ## خاکستریِ گرمِ سایه
 
 # --- ساختمان‌ها ---
 const COL_DOME_WALL := Color("e8d9b8")        # دیوار گنبد

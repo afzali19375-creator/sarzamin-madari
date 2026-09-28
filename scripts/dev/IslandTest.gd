@@ -39,11 +39,11 @@ const SLOT_MAX_RING := 3
 ## گام ۶R4 — «تعداد دسته‌های سرباز های خودی خیلی کم هست. باید بیشتر بشه»:
 ## ۳ دسته (۱۱ سرباز) → ۵ دسته (۱۹ سرباز): گارد جاویدان دوم + نیزه‌دار دوم
 const SQUAD_DEFS := [
-        {"fa": "جاویدان", "en": "Immortal", "script": "res://scripts/units/ImmortalUnit.gd", "count": 4, "color": 0},
-        {"fa": "نیزه‌دار", "en": "Spearman", "script": "res://scripts/units/SpearmanUnit.gd", "count": 4, "color": 1},
-        {"fa": "کماندار", "en": "Archer", "script": "res://scripts/units/ArcherUnit.gd", "count": 3, "color": 3},
-        {"fa": "گارد جاویدان", "en": "Immortal Guard", "script": "res://scripts/units/ImmortalUnit.gd", "count": 4, "color": 2},
-        {"fa": "نیزه‌دار ارغوانی", "en": "Purple Spearman", "script": "res://scripts/units/SpearmanUnit.gd", "count": 4, "color": 4},
+        {"fa": "جاویدان", "en": "Immortal", "script": "res://scripts/units/ImmortalUnit.gd", "count": 10, "color": 0},
+        {"fa": "نیزه‌دار", "en": "Spearman", "script": "res://scripts/units/SpearmanUnit.gd", "count": 10, "color": 1},
+        {"fa": "کماندار", "en": "Archer", "script": "res://scripts/units/ArcherUnit.gd", "count": 10, "color": 3},
+        {"fa": "گارد جاویدان", "en": "Immortal Guard", "script": "res://scripts/units/ImmortalUnit.gd", "count": 10, "color": 2},
+        {"fa": "نیزه‌دار ارغوانی", "en": "Purple Spearman", "script": "res://scripts/units/SpearmanUnit.gd", "count": 10, "color": 4},
 ]
 
 var mode := Mode.IDLE
@@ -74,6 +74,20 @@ var _units_root: Node3D
 var _arrows_root: Node3D
 var _dummies: Array[TrainingDummy] = []
 var _squad_posts: Array[Vector2] = []   # مرکز پست هر دسته (برای تست لایه ۳/۴)
+
+# ---------------- گام M2 — چینشِ بلوکیِ دسته‌ها (بازخورد «چینش» با تصویر مرجع) ----------------
+## ضریبِ فاصله‌ی چینش — قابل تنظیم از Inspector (بازه‌ی پیشنهادی ۱٫۰۵..۱٫۱۵):
+## فاصله‌ی مرکزتامرکز = قطرِ برخوردیِ واقعیِ کاراکتر × این ضریب (عددِ ثابتِ ممنوع)
+@export_range(0.9, 2.0, 0.01) var formation_spacing_mult := 1.12
+## حالتِ هر دسته: {"center": مقصدِ بلوک, "facing": زاویه‌ی جلوی بلوک}
+var _squad_block: Array = []
+## تایمرِ کُندِ بازچینیِ سمتِ بلوک در حین حرکت (ضدِ churn هر فریم)
+var _squad_reface_t: Array[float] = []
+
+## فاصله‌ی مرکزتامرکزِ همسایه‌ها (m) — از اندازه‌ی واقعیِ کاراکترهای این پروژه
+func _formation_spacing() -> float:
+        return GameConstants.unit_body_diameter() \
+                        * clampf(formation_spacing_mult, 0.9, 2.0)
 
 # گام ۶R — گاریسون خانه (بازخورد کاربر: ورود به خانه → تکمیل دسته در ۲۰ ثانیه)
 ## در تست خودکار کوتاه‌تر می‌شود؛ پیش‌فرض = عدد کاربر
@@ -345,6 +359,9 @@ func _regenerate(seed_value: int, announce: bool) -> void:
         # ریست وضعیت فرمان و گاریسون (خانه‌های تازه = بناهای تازه)
         squad_garrison.clear()
         squad_dissolved.clear()
+        # گام M2 — وضعیتِ بلوکِ چینش هم ریست شود (دسته‌ها دوباره اسپاون می‌شوند)
+        _squad_block.clear()
+        _squad_reface_t.clear()
         for wq in squad_waypoints:
                 wq.clear()
         waypoints.clear()
@@ -537,6 +554,9 @@ func _spawn_squads() -> void:
                         units.append(u)
                         squad.append(u)
                 squads.append(units)
+                # گام M2 — وضعیتِ بلوکِ چینشِ هر دسته
+                _squad_block.append({"center": post, "facing": 0.0})
+                _squad_reface_t.append(0.0)
                 # فرمان اولیه: هر دسته روی پست خودش آرایش می‌گیرد (میدانِ کانال خودش)
                 _issue_move_to(post, si, true)
 
@@ -553,6 +573,12 @@ func _make_unit(def: Dictionary, si: int, center: Vector2,
         # گام ۶R۱۲ — «همش تکان می‌خوردن»: وول‌خوردنِ دوره‌ای با کاراکترهای
         # واقعی‌نما حسِ عصبی می‌داد — آیدلِ اسکلتی جای آن را می‌گیرد
         u.fidget_enabled = false
+        # گام M2 — لرزشِ ثابتِ هر سرباز (seedِ جزیره = قطعی) + اختلافِ چرخشِ چند درجه‌ای
+        u.formation_jitter = Vector2(
+                        rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)) \
+                        * GameConstants.FORMATION_JITTER_FRAC
+        u.heading_jitter_rad = deg_to_rad(
+                        rng.randf_range(-1.0, 1.0) * GameConstants.FORMATION_HEADING_JITTER_DEG)
         u.position = Vector3(center.x, ground.height_at_world(center), center.y)
         u.ground_provider = Callable(ground, "height_at_world")
         _units_root.add_child(u)
@@ -667,7 +693,7 @@ func _build_environment() -> void:
         # — مرجع نرم است ولی رنگ‌ها اشباعِ واضح دارند
         # گام ۶R۱۵ — کاراکترها بافتِ طبیعی گرفتند؛ نورِ ۶R۱۴ آن‌ها را لجن‌матیک
         # می‌کرد (بافتِ تیره × نورِ کم = سیاه) → ambient ×۱٫۵ و خورشید ×۱٫۲
-        env.ambient_light_energy = 0.45
+        env.ambient_light_energy = GameConstants.AMBIENT_ENERGY
         env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
         env.fog_enabled = true
         env.fog_light_color = Color("d3dcd9")            # هم‌خانواده‌ی پس‌زمینه
@@ -679,9 +705,10 @@ func _build_environment() -> void:
 
         var sun := DirectionalLight3D.new()
         _sun = sun
-        sun.rotation_degrees = Vector3(-48.0, -35.0, 0.0)
-        sun.light_energy = 0.33
-        sun.light_color = Color("fff8ea")
+        # گام M2 — تک‌منبعِ خورشید (BlobShadow هم از همین زاویه سایه را کج می‌کند)
+        sun.rotation_degrees = GameConstants.SUN_ROT_DEG
+        sun.light_energy = GameConstants.SUN_ENERGY
+        sun.light_color = GameConstants.SUN_COLOR
         # گام ۶R۱۴b — «GPU را ببر بالا» (کاربر): سایه‌ی نرمِ PCF با بلورِ
         # زیاد — سایه‌روشنِ مرجع زیر درخت/خانه/سرباز، بدونِ لبه‌ی تیز
         # گام ۶R۱۴c — ضدِ shadow-acne: نرمالِ attributeِ زمینِ تخت = UP است؛
@@ -1005,6 +1032,38 @@ func _process(delta: float) -> void:
                 else:
                         _hover_info = {}
                         cmd_grid.hover_at_world(Vector2(1e6, 1e6))
+
+        # گام M2 — چرخشِ بلوک به سمتِ جهتِ حرکت (بازخورد چینش §۵):
+        # «بلوک باید به سمتِ جهتِ حرکت بچرخد تا ردیف جلو همیشه سمتِ حرکت باشد»
+        # کُند و throttle‌شده (هر ۰٫۴ث) — فقط وقتی دسته در راه است
+        for si in mini(squads.size(), _squad_reface_t.size()):
+                _squad_reface_t[si] -= delta
+                if _squad_reface_t[si] > 0.0:
+                        continue
+                _squad_reface_t[si] = 0.4
+                if si >= squad_dissolved.size() or squad_dissolved[si]:
+                        continue
+                if si < squad_garrison.size() and squad_garrison[si] != null:
+                        continue
+                var members: Array = squads[si]
+                var moving := false
+                for u2 in members:
+                        if is_instance_valid(u2) and not (u2 as UnitBase).is_dead() \
+                                        and not (u2 as UnitBase).is_arrived():
+                                moving = true
+                                break
+                if not moving:
+                        continue
+                var goal := PathService.goal_for(si)
+                var blk: Dictionary = _squad_block[si]
+                var dvec: Vector2 = goal - blk["center"]
+                if dvec.length() < 0.3:
+                        continue
+                var face_target := Formation.facing_from_dir(dvec)
+                if absf(wrapf(face_target - float(blk["facing"]), -PI, PI)) \
+                                > GameConstants.FORMATION_REFACE_DRIFT_RAD:
+                        blk["facing"] = lerp_angle(float(blk["facing"]), face_target, 0.6)
+                        _assign_slots(blk["center"], si, float(blk["facing"]))
 
         # پیشروی Waypoint هر دسته: رسیدن → 0.2s انتظار → مقصد بعدی (§۴.۳)
         for si in squads.size():
@@ -1539,43 +1598,138 @@ func _trigger_game_over() -> void:
         _last_input_msg = "game over — all houses burned"
 
 
-## گام ۶R7 — آرایشِ دسته = خوشه‌ی متراکم دورِ نقطه‌ی فرمان (بازخورد کاربر):
-## «واحدها کاملاً متراکم؛ همه در یک بلوک» — فرمانده (عضو اول = حامل پرچم)
-## همیشه مرکز خوشه است تا پرچم وسطِ دسته بایستد (مثل تصویر مرجع)
-func _assign_slots(center: Vector2, idx: int) -> void:
+## گام M2 — چینشِ بلوکیِ لوزیِ لانه‌زنبوری (بازخورد «چینش» با تصویر مرجع Bad North):
+## «هر دسته ۱۰ نفره؛ بلوکِ فشرده‌ی لوزی/مثلث مایل؛ ردیف‌های زیگزاگی نیم‌فاصله؛
+## فرمانده وسط و کمی عقب‌تر از ردیف جلو؛ پرچم از میان سربازها بالا می‌آید»
+## * فاصله‌ی همسایه‌ها از قطرِ برخوردیِ واقعیِ کاراکتر (بدون عددِ ثابت) خوانده می‌شود
+## * فرمانده همیشه خانه‌ی ۰ = مرکز بلوک (قاعده‌ی چینشِ نو — جایگزینِ تصادفِ ۶R۱۲)
+## * سربازها: نزدیک‌ترین به مرکز اول — هرکدام نزدیک‌ترین خانه‌ی خالی (کمترین تقاطع)
+## * مقصد و همه‌ی خانه‌ها داخلِ مرزِ قابل‌عبورِ جزیره snap می‌شوند
+func _assign_slots(center: Vector2, idx: int, facing := INF) -> void:
         var members: Array = squads[idx]
         var n := members.size()
         if n == 0:
                 return
-        var slots := _dense_slots(center, n)
-        # گام ۶R۱۲ — فرمانده دیگر همیشه مرکزِ خوشه نیست (بازخورد: «فرمانده
-        # همیشه آخرین نفر کشته میشه»): اسلاتِ تصادفیِ غیرمرکزی می‌گیرد تا جانِ
-        # مستقلِ هر سرباز معنا پیدا کند
-        var cmd_slot := 0
-        if n > 2:
-                var ring_count := mini(n - 1, 6)
-                if ring_count > 0:
-                        cmd_slot = 1 + (randi() % ring_count)
-        var tmp := slots[0]
-        slots[0] = slots[cmd_slot]
-        slots[cmd_slot] = tmp
-        members[0].set_slot(slots[0])   # فرمانده + پرچم = اسلاتِ تصادفی
-        # اختصاص حریصانه‌ی بقیه: هر اسلات به نزدیک‌ترین سربازِ آزاد
-        var used := {0: true}
-        for si in range(1, slots.size()):
-                var s := slots[si]
+        var nav := PathService.nav
+        # مقصد دسته داخل مرز جزیره — هیچ سربازی از لبه بیرون نمی‌افتد
+        var c := _nearest_walkable_point(nav, center, 4.0)
+        if c == Vector2.INF:
+                c = _nearest_walkable_point(nav, center, 12.0)
+        if c == Vector2.INF:
+                c = center
+        # سمتِ بلوک = جهتِ حرکت (از مرکزِ فعلی به مقصد)؛ در حرکتِ بعدی بازچینیِ کُند آن را می‌چرخاند
+        var blk: Dictionary = _squad_block[idx] if idx < _squad_block.size() \
+                        else {"center": c, "facing": 0.0}
+        if facing == INF:
+                var dvec := c - _block_center(idx, members)
+                facing = Formation.facing_from_dir(dvec) if dvec.length() > 0.05 \
+                                else float(blk.get("facing", 0.0))
+        _squad_block[idx] = {"center": c, "facing": facing}
+        # گام M2 — اگر بلوک در این مرکز جا نمی‌شود (خانه/صخره)، مرکز را طوری
+        # جابه‌جا کن که بیشترین خانه‌ها روی زمینِ قابل‌عبور بیفتد
+        if n >= 6:
+                c = _fit_block_center(c, n, facing)
+                _squad_block[idx] = {"center": c, "facing": facing}
+        # خانه‌های محلی → جهان (چرخش به سمت حرکت) + snap به قابل‌عبور
+        var sp := _formation_spacing()
+        var worlds := Formation.to_world(Formation.block_locals(n), c, facing)
+        var claimed := {}
+        # فرمانده = مرکز بلوک (پرچم از میان سربازها بالا می‌آید)
+        for i in members.size():
+                if members[i] is UnitBase and (members[i] as UnitBase).is_commander \
+                                and is_instance_valid(members[i]) and not (members[i] as UnitBase).is_dead():
+                        (members[i] as UnitBase).set_slot(_snap_slot(worlds[0]))
+                        (members[i] as UnitBase).separation_dist = sp
+                        (members[i] as UnitBase).slot_arrive_radius = sp * 0.55
+                        claimed[i] = true
+                        break
+        # سربازها: نزدیک‌ترین به مرکز اول → نزدیک‌ترین خانه‌ی خالی
+        var order: Array[int] = []
+        for i in members.size():
+                if not claimed.has(i):
+                        order.append(i)
+        order.sort_custom(func(a: int, b: int) -> bool:
+                return _unit_xz(members[a]).distance_to(c) \
+                                < _unit_xz(members[b]).distance_to(c))
+        var used := {0: true} if not claimed.is_empty() else {}
+        for i in order:
+                var u := members[i] as UnitBase
+                if u == null or u.is_dead():
+                        continue
                 var best := -1
                 var best_d := 1e9
-                for i in members.size():
-                        if used.has(i):
+                for j in worlds.size():
+                        if used.has(j):
                                 continue
-                        var d := _unit_xz(members[i]).distance_to(s)
+                        var d := _unit_xz(u).distance_to(worlds[j])
                         if d < best_d:
                                 best_d = d
-                                best = i
+                                best = j
                 if best >= 0:
-                        members[best].set_slot(s)
                         used[best] = true
+                        # لرزشِ ثابتِ هر سرباز (seed ثابت) — بلوک ماشینی و خشک نیست
+                        u.set_slot(_snap_slot(worlds[best]) + u.formation_jitter * sp)
+                        u.separation_dist = sp
+                        u.slot_arrive_radius = sp * 0.55
+
+
+## گام M2 — مارپیچِ کوتاه دورِ مرکزِ خواسته‌شده: اولین/بهترین جایی که بلوکِ
+## n نفره بیشترین خانه‌هایش روی سلولِ قابل‌عبور بیفتد (ضدِ خانه/صخره)
+func _fit_block_center(base: Vector2, n: int, facing: float) -> Vector2:
+        var nav := PathService.nav
+        var locals := Formation.block_locals(n)
+        var best_c := base
+        var best_score := -1
+        var best_off := Vector2.INF
+        for ring in 3:
+                var cnt := 1 if ring == 0 else 10
+                for k in cnt:
+                        var off := Vector2.ZERO
+                        if ring > 0:
+                                var a := TAU * float(k) / float(cnt) \
+                                                + (0.3 * float(ring))
+                                off = Vector2(cos(a), sin(a)) * (0.45 * float(ring))
+                        var c := base + off
+                        if not nav.is_walkable(nav.world_to_cell(c)):
+                                continue
+                        var score := 0
+                        for w in Formation.to_world(locals, c, facing):
+                                if nav.is_walkable(nav.world_to_cell(w)):
+                                        score += 1
+                        if score > best_score or (score == best_score \
+                                        and off.length() < best_off.length()):
+                                best_score = score
+                                best_c = c
+                                best_off = off
+                if best_score == n:
+                        break
+        return best_c
+
+
+## snap یک خانه به نقطه‌ی قابل‌عبور — ولی اگر خودِ نقطه داخلِ سلولِ قابل‌عبور است،
+## «دقیقاً همان‌جا» می‌ماند (اسنپِ مرکزِ سلول، هندسه‌ی شش‌ضلعیِ چیدمان را خراب می‌کرد —
+## فاصله‌ی همسایه‌ها ۰٫۴۱m < سلولِ ۰٫۶۲m است و همه روی یک مرکز جمع می‌شدند)
+func _snap_slot(p: Vector2) -> Vector2:
+        var nav := PathService.nav
+        if nav.is_walkable(nav.world_to_cell(p)):
+                return p
+        var np := _nearest_walkable_point(nav, p, 1.6)
+        return np if np != Vector2.INF else p
+
+
+## مرکزِ فعلیِ بلوک: از وضعیتِ ثبت‌شده یا میانگینِ اعضا
+func _block_center(idx: int, members: Array) -> Vector2:
+        if idx < _squad_block.size() and not members.is_empty():
+                var acc := Vector2.ZERO
+                var k := 0
+                for u in members:
+                        if is_instance_valid(u) and not (u as UnitBase).is_dead():
+                                acc += _unit_xz(u)
+                                k += 1
+                if k > 0:
+                        return acc / float(k)
+                return _squad_block[idx]["center"]
+        return _unit_xz(members[0]) if not members.is_empty() else Vector2.ZERO
 
 
 var _scene_rng := RandomNumberGenerator.new()
@@ -1786,11 +1940,30 @@ func _on_unit_died(u: Node) -> void:
         if cmd_grid != null and u is UnitBase:
                 cmd_grid.release_owner(u.get_instance_id())
         if u is UnitBase:
-                _dissolve_squad_if_commander(u)   # گام ۶R9 — مرگ فرمانده = انحلال گروه
+                # گام M2 — جانشینیِ فرمانده (جایگزین انحلال)
+                _inherit_commander(u)
+                # گام M2 — بازچینیِ بلوک: خانه‌ها فشرده می‌شوند تا فاصله‌ی خالی نماند
+                _relayout_after_death(u)
         if selected >= 0 and (selected >= squads.size() or squads[selected].is_empty()):
                 _deselect()
         _toast_msg("یک سرباز از دست رفت — مرگ دائمی است\nA soldier has fallen — death is permanent")
         _last_input_msg = "unit died — alive %d" % alive_units_total()
+
+
+## گام M2 — با هر مرگ، بازماندگانِ دسته روی اولِ n خانه‌ی بلوک بازچینی می‌شوند
+## (بلوک فشرده‌تر می‌شود؛ شکلِ لوزی حفظ می‌شود)
+func _relayout_after_death(dead_u: UnitBase) -> void:
+        var si := dead_u.squad_id
+        if si < 0 or si >= squads.size() or si >= squad_dissolved.size():
+                return
+        if squad_dissolved[si] or squad_garrison[si] != null:
+                return
+        var members: Array = squads[si]
+        if members.is_empty():
+                return
+        var blk: Dictionary = _squad_block[si] if si < _squad_block.size() \
+                        else {"center": _block_center(si, members), "facing": 0.0}
+        _assign_slots(blk["center"], si, float(blk["facing"]))
 
 
 ## گام ۶R۹ — تسک A: ضربه/افتادن → انرژیِ لرزش (تضعیف با فاصله‌ی دوربین تا میدان نبرد)
@@ -1837,14 +2010,15 @@ func _fade_corpse(c: Node) -> void:
 
 
 ## گام ۶R9 — تسک A (بازخورد کاربر): مرگ فرمانده → «پرتره‌ی» گروه خاکستری می‌شود
-## و گروه منحل می‌شود: پرچم خاکستری با جسد فرمانده می‌ماند، دسته فرمان نمی‌پذیرد،
-## و بازماندگان بی‌فرمانده به نزدیک‌ترین ساحل می‌گریزند و جزیره را ترک می‌کنند
-## (الگوی Bad North: سقوطِ فرمانده = پایانِ گروه).
-func _dissolve_squad_if_commander(dead_u: UnitBase) -> void:
+## گام M2 — جانشینیِ فرمانده (بازخورد چینش §۵): «اگر فرمانده مرد، نزدیک‌ترین
+## سرباز فرمانده شود و پرچم را بگیرد» — جایگزینِ انحلالِ ۶R۹.
+## پیکرِ فرمانده با پرچمِ خاکستری می‌ماند (الگوی Bad North) ولی گروه نمی‌گریزد؛
+## نزدیک‌ترین سربازِ زنده‌ی بیرونِ خانه پرچمِ نو را برمی‌دارد و گروه به جنگ ادامه می‌دهد.
+func _inherit_commander(dead_u: UnitBase) -> void:
         if not dead_u.is_commander:
                 return
         dead_u.is_commander = false
-        # پرتره‌ی خاکستری: پرچمِ دسته رنگِ عزا می‌گیرد + پیکرِ فرمانده خاکستری
+        # پرتره‌ی خاکستری: پرچمِ مرده روی پیکر + پیکرِ خاکستری
         var flag: SquadFlag = null
         for c in dead_u.get_children():
                 if c is SquadFlag:
@@ -1856,22 +2030,34 @@ func _dissolve_squad_if_commander(dead_u: UnitBase) -> void:
         var si := dead_u.squad_id
         if si < 0 or si >= squads.size() or si >= squad_dissolved.size():
                 return
-        squad_dissolved[si] = true
-        if selected == si:
-                _deselect()
-        # بازماندگان: فرار از جزیره — به نزدیک‌ترین ساحلِ نقطه‌ی فرمانده
-        var shore := _nearest_shore_xz(Vector2(dead_u.global_position.x,
-                        dead_u.global_position.z))
+        if squad_dissolved[si]:
+                return
+        # نزدیک‌ترین سربازِ زنده (ترجیحاً بیرونِ خانه) → فرماندهِ نو
+        var dp := Vector2(dead_u.global_position.x, dead_u.global_position.z)
+        var best: UnitBase = null
+        var best_d := 1e9
+        var fallback: UnitBase = null
         for u in squads[si]:
-                if is_instance_valid(u) and not u.is_dead() and u != dead_u:
-                        if u.garrisoned:
-                                # داخلِ خانه بود — بیرون می‌آید و فرار می‌کند
-                                u.exit_house(Vector3(shore.x,
-                                                ground.height_at_world(shore), shore.y))
-                        u.start_flee(shore)
-        GameEvents.squad_dissolved.emit(si)
-        _toast_msg("فرمانده افتاد! گروه منحل شد — بازماندگان فرار می‌کنند\nCommander down! Squad dissolved — survivors are fleeing")
-        _last_input_msg = "squad %d dissolved (commander died)" % (si + 1)
+                if not is_instance_valid(u) or (u as UnitBase).is_dead() \
+                                or u == dead_u:
+                        continue
+                if (u as UnitBase).garrisoned:
+                        if fallback == null:
+                                fallback = u
+                        continue
+                var d := Vector2(u.global_position.x, u.global_position.z).distance_to(dp)
+                if d < best_d:
+                        best_d = d
+                        best = u
+        var promote: UnitBase = best if best != null else fallback
+        if promote == null:
+                return   # کسی نمانده — گروه عملاً خالی است
+        promote.is_commander = true
+        var nf := SquadFlag.new()
+        promote.add_child(nf)
+        nf.set_color(GameConstants.UNIT_PALETTE[int(SQUAD_DEFS[si]["color"])])
+        _toast_msg("نزدیک‌ترین سرباز پرچم را برداشت — گروه می‌جنگد\nNearest soldier took the flag — the squad keeps fighting")
+        _last_input_msg = "squad %d promoted new commander" % (si + 1)
 
 
 ## گام ۶R9-fix — آبِ واقعیِ دریا: سلول‌های غیرقابل‌عبوری که از لبه‌ی شبکه

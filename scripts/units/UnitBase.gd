@@ -109,6 +109,18 @@ var is_commander := false
 ## داخل خانه پنهان است (گاریسون): دیداری خاموش، خارج از گروه «units»، بدون لایه‌ها
 var garrisoned := false
 
+# ---------------- گام M2 — چینشِ بلوکی (بازخورد چینش) ----------------
+## لرزشِ ثابتِ هر سرباز ±۸٪ فاصله‌ی همسایه (کسر؛ در لحظه‌ی اسلات‌دهی در spacing ضرب می‌شود)
+## seed ثابت = در _make_unit از rngِ جزیره داده می‌شود و هرگز عوض نمی‌شود
+var formation_jitter := Vector2.ZERO
+## اختلافِ چرخشِ چند درجه‌ایِ سربازها (رادیان؛ فقط دیداری — منطق از _heading خالص می‌خواند)
+var heading_jitter_rad := 0.0
+## کفِ جداسازی این واحد (m) = فاصله‌ی چینشِ دسته‌اش — ضدِ تداخلِ برخوردی
+var separation_dist := SEPARATION_DIST
+## گام M2 — شعاعِ رسیدن به اسلات؛ در چینشِ فشرده (فاصله‌ی ۰٫۴۱m) باید کوچک‌تر از
+## نصفِ فاصله‌ی همسایه‌ها باشد وگرنه سرباز «رسیده» روی خانه‌ی همسایه می‌ایستد
+var slot_arrive_radius := SLOT_ARRIVE_RADIUS
+
 # ---------------- بصری ----------------
 var _spawn_color: Color
 var _base_color: Color
@@ -145,6 +157,8 @@ func _ready() -> void:
         _model.setup(_model_kind(), _spawn_color, 0.0, _model_special())
         add_child(_model)
         _body = _model.body_root()
+        # گام M2 — سایه‌ی لکه‌ایِ نرم زیر پا (علاوه بر سایه‌ی جهت‌دار — بازخورد چینش §۶)
+        BlobShadow.attach(self)
 
         # حلقه‌ی انتخاب (فقط دسته‌ی انتخابی — الگوی Bad North)
         _ring = MeshInstance3D.new()
@@ -490,7 +504,8 @@ func _combat_move_toward(delta: float, hostile: Node3D, stop_at: float,
         _heading = wrapf(_heading + clampf(diff,
                         -GameConstants.ROTATE_SPEED_RAD * delta,
                         GameConstants.ROTATE_SPEED_RAD * delta), -PI, PI)
-        rotation.y = _heading
+        # گام M2 — چند درجه اختلافِ چرخشِ هر سرباز (بدنه‌ی کلی هم‌جهت — بازخورد چینش §۴)
+        rotation.y = _heading + heading_jitter_rad
         _bob_visual(true)
         return true
 
@@ -554,7 +569,7 @@ func _effective_goal() -> Vector2:
 func _effective_arrive_radius() -> float:
         if _fleeing:
                 return GameConstants.FLEE_ARRIVE_RADIUS
-        return SLOT_ARRIVE_RADIUS if _has_slot else ARRIVE_RADIUS
+        return slot_arrive_radius if _has_slot else ARRIVE_RADIUS
 
 
 # ---------------- حلقه‌ی اصلی: ۴ لایه با اولویت ----------------
@@ -597,7 +612,7 @@ func _process(delta: float) -> void:
                 # ⚠️ در حین Fidget اعمال نمی‌شود (قدم وول تا 0.8m قانونی است)
                 if _has_slot and _fidget_state == 0 \
                                 and Vector2(global_position.x, global_position.z).distance_to(_slot) \
-                                > SLOT_ARRIVE_RADIUS + 0.10:
+                                > slot_arrive_radius + 0.10:
                         _arrived = false
                         _vel = Vector2.ZERO
                         _set_color(_spawn_color)
@@ -608,6 +623,17 @@ func _process(delta: float) -> void:
                         # ایست در آرایش — گام ۶R12: بدنه‌ی اسکلتی با انیمیشن Idle
                         # خودش نفس می‌کشد؛ bobِ قدیمیِ چینی لرزش می‌ساخت (حذف شد)
                         _tick_fidget_timer(delta)
+                        # گام M2 — نشستِ نرم روی خانه‌ی چینش (بازخورد چینش §۲:
+                        # «بعد به جای خود برگردند») + تضمینِ فاصله‌ی همسایه‌ها
+                        if _has_slot:
+                                var spp := Vector2(global_position.x, global_position.z)
+                                var dss := spp.distance_to(_slot)
+                                if dss > 0.03 and dss < slot_arrive_radius * 3.0:
+                                        var npp := spp.move_toward(_slot, 1.2 * delta)
+                                        npp = _slide_walkable(spp, npp)
+                                        npp = PathService.clamp_to_grid(npp)
+                                        global_position = Vector3(npp.x, global_position.y,
+                                                        npp.y)
                         # گام ۶R۱۳ — «واحدها دائم در حال راه رفتن‌اند» (بازخورد
                         # کاربر): با رسیدن، Walk هیچ‌وقت Idle نمی‌شد چون هیچ‌کس
                         # set_moving(false) را صدا نمی‌زد — اینجا تضمین می‌شود
@@ -731,7 +757,7 @@ func _process(delta: float) -> void:
                 var diff := wrapf(target - _heading, -PI, PI)
                 _heading = wrapf(_heading + clampf(diff, -GameConstants.ROTATE_SPEED_RAD * delta,
                                 GameConstants.ROTATE_SPEED_RAD * delta), -PI, PI)
-                rotation.y = _heading
+                rotation.y = _heading + heading_jitter_rad
         _bob_visual(moving)
 
 
@@ -887,7 +913,7 @@ func _is_practically_home(n: Node3D) -> bool:
         if not u.has_slot():
                 return false
         return u.slot_pos().distance_to(Vector2(u.global_position.x,
-                        u.global_position.z)) <= SLOT_ARRIVE_RADIUS + 0.25
+                        u.global_position.z)) <= slot_arrive_radius + 0.25
 
 
 ## آیا بین این واحد و هدف، هم‌رزمی ایستاده؟ (قانون «آسیب دوستانه ندارد»)
@@ -1079,13 +1105,14 @@ func _separate(pos: Vector2) -> Vector2:
                 var op := Vector2(other.global_position.x, other.global_position.z)
                 var diff := out - op
                 var d := diff.length()
-                if d > 0.001 and d < SEPARATION_DIST:
-                        out += (diff / d) * (SEPARATION_DIST - d) * 0.5
+                # گام M2 — کفِ جداسازی = فاصله‌ی چینشِ دسته (از قطرِ واقعیِ کاراکتر)
+                if d > 0.001 and d < separation_dist:
+                        out += (diff / d) * (separation_dist - d) * 0.5
         # گام ۶R۱۲ — میراییِ نزدیکِ اسلاتِ خود: واحدی که به اسلاتش چسبیده
         # فشارِ جداسازی را ۵۵٪ کم می‌کند تا نوسانِ «رسیدن ← هل خوردن ← برگشتن»
         # تمام شود و آرایشِ متراکمِ اسکرین‌شات سرِ جایش بنشیند
         # (حلقه‌های ۰٫۵۵m شانه‌به‌شانه، نه روی هم)
-        if _has_slot and pos.distance_to(_slot) <= SLOT_ARRIVE_RADIUS * 2.0:
+        if _has_slot and pos.distance_to(_slot) <= slot_arrive_radius * 2.0:
                 var corr := out - pos
                 out = pos + corr * 0.45
         return out

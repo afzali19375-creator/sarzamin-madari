@@ -119,6 +119,8 @@ func _ready() -> void:
         _model.setup(_model_kind(), _body_color, 0.5)
         add_child(_model)
         _body = _model.body_root()
+        # گام M2 — سایه‌ی لکه‌ایِ نرم زیر پا (هم‌سو با خودی‌ها — بازخورد چینش §۶)
+        BlobShadow.attach(self)
 
         # پیوتِ دستِ راست برای سلاحِ پروسیجرال (نیزه‌ی پلتاست و ...)
         _hand = Node3D.new()
