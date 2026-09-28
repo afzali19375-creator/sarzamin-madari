@@ -213,7 +213,12 @@ func _run_screenshot_probe() -> void:
         _cam_arm.rotation_degrees.x = GameConstants.CAM_PITCH_DEG
         if director != null:
                 director.spawn_wave()
-        await get_tree().create_timer(42.0).timeout
+        # SHOT_BATTLE_T=ثانیه — انتظارِ نبردِ قابل تنظیم (پیش‌فرض ۴۲؛ با خانه‌ی
+        # واحد بازی زود تمام می‌شود — عددِ کمتر = دشمنِ زنده در کادر)
+        var battle_wait := 42.0
+        if OS.get_environment("SHOT_BATTLE_T") != "":
+                battle_wait = maxf(3.0, float(OS.get_environment("SHOT_BATTLE_T")))
+        await get_tree().create_timer(battle_wait).timeout
         _snap(out_dir + "/shot4_battle.png")
         # ۵) کلوزآپ مهاجم پیاده‌شده؛ اگر موج نرسیده بود، مستقیم کنار دسته اسپاون می‌کنیم
         var e := _first_landed_enemy()

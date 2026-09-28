@@ -13,11 +13,13 @@ extends CharacterModelBase
 ##   * ارتفاع نرمال: بلندیِ کادر = GameConstants.UNIT_WORLD_HEIGHT
 
 const SPRITE_DIR := "res://assets/sprites/units/"
-const ANIMS := ["idle", "walk", "attack", "hit", "block", "death"]
+const ANIMS := ["idle", "walk", "attack", "attack2", "hit", "block", "death"]
 ## fps هر انیمیشن — walk تندتر تا حسِ حرکتِ اسکلتی بدهد
-const FPS := {"idle": 2.0, "walk": 7.0, "attack": 8.0, "hit": 6.0, "block": 2.0, "death": 5.0}
-const LOOPED := {"idle": true, "walk": true, "attack": false, "hit": false,
-                "block": true, "death": false}
+## attack2 = نسخه‌ی دومِ حمله از کاربر (۵۰٪ تصادفی در play_attack)
+const FPS := {"idle": 2.0, "walk": 7.0, "attack": 8.0, "attack2": 8.0,
+                "hit": 6.0, "block": 2.0, "death": 5.0}
+const LOOPED := {"idle": true, "walk": true, "attack": false, "attack2": false,
+                "hit": false, "block": true, "death": false}
 
 ## شیدرِ بیلبوردِ Y + گرادیان/فلش/آلفا — کشِ استاتیک (یکی برای همه)
 static var _shader_cache: Shader = null
@@ -145,10 +147,12 @@ func _load_frames() -> void:
                         i += 1
                 if not frames.is_empty():
                         _anims[a] = frames
-        # جایگزین‌ها: walk→idle (لغزشِ نرم تا اسپرایتِ اختصاصی برسد)،
+        # جایگزین‌ها: walk→idle (لغزشِ نرم)، attack2→attack،
         # attack→walk اولین فریم، block→idle، death→idle
         if not _anims.has("walk") and _anims.has("idle"):
                 _anims["walk"] = _anims["idle"].duplicate()
+        if not _anims.has("attack2") and _anims.has("attack"):
+                _anims["attack2"] = _anims["attack"]
         if not _anims.has("attack") and _anims.has("walk"):
                 _anims["attack"] = [_anims["walk"][0]]
         if not _anims.has("block") and _anims.has("idle"):
@@ -167,15 +171,18 @@ func _process(delta: float) -> void:
         if absf(fy - _last_feet_y) > 0.01:
                 _last_feet_y = fy
                 _mat.set_shader_parameter("feet_y", fy)
-        # آینه‌ی جهتِ حرکت نسبت به دوربین (بدونِ jitter — فقط هنگامِ حرکت)
-        if _moving and not _dead:
+        # آینه‌ی جهت نسبت به دوربین — هر فریم (نه فقط هنگامِ حرکت) تا حمله‌ی
+        # ایستا هم رو به دشمن آینه شود (چرخشِ rotation.y را دنبال می‌کند)
+        if not _dead:
                 var cam := get_viewport().get_camera_3d()
                 if cam != null:
                         var right := cam.global_transform.basis.x
                         var fwd2 := Vector2(sin(_heading_ref()), cos(_heading_ref()))
                         var r2 := Vector2(right.x, right.z)
-                        _flip = 1.0 if fwd2.dot(r2) < 0.0 else 0.0
-                        _mat.set_shader_parameter("flip_h", _flip)
+                        var f := 1.0 if fwd2.dot(r2) < 0.0 else 0.0
+                        if f != _flip:
+                                _flip = f
+                                _mat.set_shader_parameter("flip_h", _flip)
         # پیشرویِ فریم
         if _anims.is_empty():
                 return
@@ -236,8 +243,12 @@ func set_moving(moving: bool) -> void:
                         _frame = 0.0
 
 
+## حمله‌ی متنوع: اگر attack2 موجود باشد ۵۰٪ شانس — ضدِ تکرارِ ماشینی
 func play_attack() -> void:
-        _play_once("attack")
+        if _anims.has("attack2") and randf() < 0.5:
+                _play_once("attack2")
+        else:
+                _play_once("attack")
 
 
 func play_hit() -> void:
