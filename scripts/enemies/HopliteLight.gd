@@ -22,12 +22,11 @@ func _default_color() -> Color:
 
 
 ## گام ۶R12 — مهاجمِ انسانی: وایکینگِ تبر‌دار (Quaternius Ultimate)
+## گام ۶R۲۶ — مهاجمِ رومیِ سبک؛ شمشیر داخلِ مدلِ پروسیجرال است
 func _model_kind() -> StringName:
-        return &"viking"
+        return &"legionary_light"
 
 
 func _build_gear() -> void:
-        # شمشیرِ برنزی در دست — سوئینگ با انیمیشن Sword_Attack هم‌خوان است
-        _swing_weapon = WeaponLook.sword(Color("c9963c"), 0.48)
-        _swing_weapon.rotation_degrees.z = -12.0   # تیغه کمی به بیرونِ بدن
-        _hand.add_child(_swing_weapon)
+        # ۶R۲۶ — شمشیرِ کلاس حذف شد (داخلِ CharacterModel ساخته می‌شود)
+        pass

@@ -10,7 +10,7 @@ extends UnitBase
 ## ۲.۲ متریِ چندقطعه‌ایِ پروسیجرال روی شانه‌ی راست (هویتِ نیزه‌دار — تبرِ مدل
 ## داخل اسکلت می‌ماند ولی نیزه بلندتر و خواناتر است)
 
-const SPEAR_LEN := 2.2
+const SPEAR_LEN := 1.45   # ۶R۲۶ — وفادار به GIF (حدود ۱٫۷ برابرِ قد)
 
 var _spear: Node3D
 var _spear_pivot: Node3D
@@ -18,7 +18,7 @@ var brace_active := false       # برای تست خودکار و HUD
 var _brace_k := 0.0             # 0=نیزه بالا (مسیر) → 1=افقی (آماده‌باش)
 var strikes_done := 0           # برای تست خودکار (گام ۶)
 
-const SPEAR_UP_DEG := 55.0
+const SPEAR_UP_DEG := 75.0   # ۶R۲۶ — حملِ تقریباً عمودی مثل GIF
 const SPEAR_BRACE_DEG := 6.0
 
 

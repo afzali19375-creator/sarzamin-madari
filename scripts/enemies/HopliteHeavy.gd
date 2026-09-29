@@ -26,18 +26,16 @@ func _default_color() -> Color:
         return GameConstants.COL_ENEMY_HEAVY
 
 
-## گام ۶R12 — شهسوار (Knight_Male پک Quaternius Ultimate)
+## گام ۶R12 — شهسوار
+## گام ۶R۲۶ — لژیونِ سنگینِ رومی؛ شمشیرِ کلاس حذف شد (داخلِ مدلِ پروسیجرال)
 func _model_kind() -> StringName:
         return &"knight_heavy"
 
 
 func _build_gear() -> void:
-        # گام ۶R9 — شمشیرِ برنز در دستِ راست: ضربه‌ی سنگینِ او اکنون «دیده می‌شود»
-        _swing_weapon = WeaponLook.sword(Color("c9963c"), 0.44)
-        _swing_weapon.rotation_degrees.z = -14.0
-        _hand.add_child(_swing_weapon)
-
-        # سپر بزرگ مستطیلی رو به +Z (سمت نگاه) — جلوی تنه
+        # ۶R۲۶ — شمشیر حذف شد؛ سپرِ بزرگِ مخروطِ انحراف باقی است
+        # (UNITS_2D=false → سپرِ سه‌بعدی اینجا دیده می‌شود)
+        _swing_weapon = null
         _shield = MeshInstance3D.new()
         var sm := BoxMesh.new()
         sm.size = Vector3(0.5, 0.6, 0.06)

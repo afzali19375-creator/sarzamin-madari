@@ -267,18 +267,21 @@ func _phase0_island_ready() -> void:
         _check("camera_ortho_size0_24",
                         is_equal_approx(cam.size, 24.0),
                         "size=%.1f" % cam.size)
-        _check("units_2d_flag", GameConstants.UNITS_2D == true)
-        var any_sprite := false
-        var all_frames := true
+        # گام ۶R۲۶ — مسیرِ رندر: مدلِ پروسیجرالِ سه‌بعدیِ هخامنشی/رومی
+        # (کاربر پس از دوره‌ی اسپرایتِ ۲بعدی: «کاراکترهایی که فرستادم را
+        # سه‌بعدی کن و استفاده کن»)
+        _check("units_3d_flag", GameConstants.UNITS_2D == false)
+        var any_3d := false
+        var all_built := true
         for u in _units():
                 var m: Node = u.get("_model")
-                if m is SpriteCharacterModel:
-                        any_sprite = true
-                        if (m as SpriteCharacterModel)._anims.is_empty():
-                                all_frames = false
+                if m is CharacterModel:
+                        any_3d = true
+                        if (m as CharacterModel)._mats.is_empty():
+                                all_built = false
                                 break
-        _check("units_are_2d_billboards", any_sprite)
-        _check("sprite_frames_loaded", all_frames)
+        _check("units_are_3d_procedural", any_3d)
+        _check("procedural_materials_built", all_built)
 
         var size: int = isl["size"]
         var sockets: PackedStringArray = isl["meta_sockets"]

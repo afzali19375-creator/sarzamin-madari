@@ -145,9 +145,9 @@ func _default_color() -> Color:
 
 
 ## نقشِ کاراکتر انسانیِ این مهاجم — زیرکلاس‌ها override می‌کنند
-## (۶R12: سبک=وایکینگ تبر‌دار، سنگین=شهسوار سپردار، پلتاست=رُگِ خنجر‌دار)
+## (۶R۲۶: همه‌ی مهاجمان رومی‌اند — سبک/سنگین/پرتاب‌گرِ پروسیجرال)
 func _model_kind() -> StringName:
-        return &"viking"
+        return &"legionary_light"
 
 
 func _build_gear() -> void:

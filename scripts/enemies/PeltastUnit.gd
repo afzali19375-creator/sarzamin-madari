@@ -31,17 +31,14 @@ func _default_color() -> Color:
         return GameConstants.COL_ENEMY_PELTAST
 
 
-## گام ۶R12 — پرتاب‌گرِ انسانی (Soldier پک Quaternius Ultimate)
+## گام ۶R۱۲ — پرتاب‌گرِ انسانی
 func _model_kind() -> StringName:
         return &"soldier"
 
 
 func _build_gear() -> void:
-        # نیزه‌ی پرتابِ چندقطعه‌ای روی پیوتِ دست — ژستِ پرتاب کلِ بازو را می‌چرخاند
-        _swing_weapon = WeaponLook.javelin(0.66)
-        _swing_weapon.rotation_degrees = Vector3(-30.0, 0.0, -8.0)
-        _hand.add_child(_swing_weapon)
-
+        # ۶R۲۶ — نیزه‌ی پرتابِ کلاس حذف شد (داخلِ CharacterModel است)
+        # مشعلِ گیم‌پلی باقی است (ژستِ مشعل‌زنی به آن وابسته است)
         # مشعل روشن در دست دیگر (سمت چپ مدل) — روی کاراکترِ ۰٫۸۲ متری
         _torch_in_hand = MeshInstance3D.new()
         var st := BoxMesh.new()
@@ -103,6 +100,9 @@ func _combat_tick(delta: float) -> void:
 
 ## پرتاب — گام ۶R9: کلِ بازو به جلو شلاق می‌خورد + نیزه لحظه‌ای جلو می‌رود
 func _throw_anim() -> void:
+        # ۶R۲۶ — ژستِ پرتاب از موتورِ ژستِ مدل (خطِ زمانِ throw) می‌آید
+        if _model != null and _model.has_method("play_attack"):
+                _model.play_attack()
         if _hand == null or _swing_weapon == null:
                 return
         var tw := create_tween()

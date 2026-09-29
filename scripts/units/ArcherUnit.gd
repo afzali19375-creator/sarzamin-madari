@@ -10,8 +10,6 @@ extends UnitBase
 ## بصری: کاراکتر Rogue_Hooded پک KayKit (کاتاپولت دوشیِ داخل اسکلت) + تیردانِ
 ## پشت + تیرِ شناور هنگام هدف‌گیری (گام ۶R11 — کمانِ پروسیجرال پنهان شد)
 
-var _bow: Node3D
-var _quiver: MeshInstance3D
 var _nock: MeshInstance3D       # تیرِ روی کمان هنگام هدف‌گیری
 var shots_fired := 0            # برای تست خودکار
 
@@ -25,33 +23,8 @@ func _model_kind() -> StringName:
 
 
 func _build_gear() -> void:
-        # گام ۶R11 — کاتاپولت دوشی داخل اسکلت Rogue_Hooded دیده می‌شود؛
-        # کمانِ پروسیجرال ۶R9 فقط نگه داشته می‌شود ولی پنهان است (ضدِ تکرار)
-        # گام ۶R16 — در مسیرِ ۲بعدی: کمان/تیردان/نوکِ تیر داخلِ اسپرایت است —
-        # تجهیزاتِ سه‌بعدی مخفی (مرجع‌ها برای نبردِ کماندار سالم می‌مانند)
-        _bow = WeaponLook.bow(0.3)
-        _bow.position = Vector3(-0.4, -0.07, 0.02)
-        _bow.rotation_degrees = Vector3(0.0, 90.0, 0.0)
-        _bow.visible = false
-        _hand.add_child(_bow)
-
-        # تیردان پشت (قدِ مدلِ اسکلتی KayKit ≈ ۰٫۹۵m)
-        _quiver = MeshInstance3D.new()
-        var qm := CylinderMesh.new()
-        qm.top_radius = 0.05
-        qm.bottom_radius = 0.05
-        qm.height = 0.34
-        _quiver.mesh = qm
-        _quiver.position = Vector3(0.14, 0.55, -0.16)
-        _quiver.rotation_degrees.z = 18.0
-        var qmat := StandardMaterial3D.new()
-        qmat.albedo_color = GameConstants.COL_GOLD
-        qmat.roughness = 0.6
-        _quiver.material_override = qmat
-        _quiver.visible = not GameConstants.UNITS_2D
-        add_child(_quiver)
-
-        # تیرِ روی کمان (فقط هنگام هدف‌گیری دیده می‌شود)
+        # ۶R۲۶ — کمان و تیردان داخلِ مدلِ پروسیجرالِ کماندار ساخته می‌شوند؛
+        # فقط «تیرِ نُک» (نشانگرِ کشیدنِ کمان هنگام هدف‌گیری) اینجا می‌ماند
         _nock = MeshInstance3D.new()
         var nm := BoxMesh.new()
         nm.size = Vector3(0.02, 0.02, 0.4)
