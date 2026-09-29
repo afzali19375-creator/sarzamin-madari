@@ -61,6 +61,12 @@ func _ready() -> void:
         island_btn.pressed.connect(_on_island_pressed)
         vb.add_child(island_btn)
 
+        # گام ۶R۲۵ — گزینه‌ی جدید منو (درخواست کاربر): «تمرکز ویژه روی
+        # مکانیزم‌های خشکی» — بدون خانه، بدون اشیای دریا، دشمنِ پیاده روی خشکی
+        var focus_btn := _make_button("تمرکز خشکی — Land Focus")
+        focus_btn.pressed.connect(_on_focus_pressed)
+        vb.add_child(focus_btn)
+
         var quit_btn := _make_button(tr("menu_quit"))
         quit_btn.pressed.connect(_on_quit_pressed)
         vb.add_child(quit_btn)
@@ -81,10 +87,18 @@ func _ready() -> void:
 
 
 func _on_start_pressed() -> void:
+        GameFocus.land_focus = false
         get_tree().change_scene_to_file(TEST_SCENE)
 
 
 func _on_island_pressed() -> void:
+        GameFocus.land_focus = false
+        get_tree().change_scene_to_file(ISLAND_SCENE)
+
+
+## گام ۶R۲۵ — «تمرکز خشکی»: راه‌رفتن/تیراندازی/شمشیرزنی روی چمن
+func _on_focus_pressed() -> void:
+        GameFocus.land_focus = true
         get_tree().change_scene_to_file(ISLAND_SCENE)
 
 

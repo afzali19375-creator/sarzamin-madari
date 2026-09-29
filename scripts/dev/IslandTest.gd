@@ -130,6 +130,9 @@ var victory := false
 ## گام M3 — گیتِ پیروزی: در autotest خاموش است (موج‌های اجباریِ فازها
 ## waves_spawned را از سقف می‌گذرانند و پیروزیِ کاذب می‌ساخت)؛ فاز ۲۲ صریحاً روشنش می‌کند
 var victory_enabled := not OS.get_cmdline_user_args().has("--autotest")
+
+## گام ۶R۲۵ — حالت «تمرکز خشکی» از منو: تمرکزِ ویژه بر مکانیزم‌های خشکی
+var land_focus := false
 var _game_over_panel: Control
 var _victory_panel: Control
 var _victory_detail: Label
@@ -167,6 +170,7 @@ func _ready() -> void:
         # گام ۶R۹ — تسک A: لرزش دوربین + خروج فراری‌ها از جزیره
         GameEvents.world_shake.connect(_on_world_shake)
         GameEvents.unit_fled_island.connect(_on_unit_fled_island)
+        land_focus = GameFocus.land_focus
         if OS.get_cmdline_user_args().has("--autotest"):
                 var runner := IslandAutoTest.new()
                 runner.target_scene = self
@@ -181,6 +185,15 @@ func _ready() -> void:
                 add_child(bdp)
         elif OS.get_cmdline_user_args().has("--screenshot"):
                 _run_screenshot_probe()
+        elif OS.get_cmdline_user_args().has("--tapprobe"):
+                var tp_script: GDScript = load("res://scripts/dev/TapProbe.gd")
+                var tp: Node = tp_script.new()
+                tp.set("_scene", self)
+                add_child(tp)
+        if land_focus:
+                _toast_msg("حالت تمرکز خشکی — Land Focus: راه رفتن/تیراندازی/شمشیرزنی روی چمن؛"
+                                + " کشیدن = چرخش صحنه، لوکیشن سربازها ثابت می‌ماند\n"
+                                + "Land Focus: move/shoot/fight on grass — drag rotates the scene only")
         elif OS.get_environment("GROUND_PROBE") != "":
                 # پراب شناوری: منطقِ ارتفاع در برابر مشِ رندرشده
                 load("res://scripts/dev/GroundProbe.gd").run(self)
@@ -384,7 +397,9 @@ func _regenerate(seed_value: int, announce: bool, fresh_run: bool = true) -> voi
         if props == null:
                 props = IslandProps.new()
                 add_child(props)
-        props.build(ground, nav, island, int(island["seed_used"]))
+        # گام ۶R۲۵ — دستور کاربر: «اول خانه رو توی نقشه حذف کن» + «جایزه‌ی
+        # میان آب رو نمیخوام» → بدونِ بنا و بدونِ اشیای دریا
+        props.build(ground, nav, island, int(island["seed_used"]), false)
         blocked_by_houses = props.blocked_cells.duplicate()
         # گام ۶R — تُست آتش/نابودی خانه‌ها
         for b in props.buildings:
@@ -442,6 +457,11 @@ func _regenerate(seed_value: int, announce: bool, fresh_run: bool = true) -> voi
         director.auto_waves = not OS.get_cmdline_user_args().has("--autotest")
         director.setup(ground, props, _squad_posts)
         director.clear_all()
+        # گام ۶R۲۵ — در حالت تمرکز: موج‌های پیاده با فاصله‌ی کوتاه‌تر +
+        # کوله‌های تمرینِ آماده کنار دو دسته (هدفِ تیراندازی/شمشیرزنی)
+        if land_focus:
+                director.wave_interval = GameConstants.FOCUS_WAVE_INTERVAL
+                _spawn_focus_dummies()
         # گام M3 — سطحِ ران → تعداد موج و دشواریِ این جزیره
         director.wave_limit = mini(
                         GameConstants.ISLAND_WAVE_COUNT + WarChest.islands_cleared,
@@ -611,6 +631,12 @@ func _spawn_squads() -> void:
 
 
 ## ساخت یک عضو تازه‌ی دسته — هم اسپاون اولیه، هم تکمیل پس از گاریسون (گام ۶R)
+## گام ۶R۲۵ — کوله‌های تمرینِ حالتِ تمرکز خشکی: هدفِ ثابتِ روی چمن
+func _spawn_focus_dummies() -> void:
+        for si in mini(2, _squad_posts.size()):
+                spawn_dummy_near_world(_squad_posts[si], Vector2(2.4, 0.0))
+
+
 func _make_unit(def: Dictionary, si: int, center: Vector2,
                 rng: RandomNumberGenerator) -> UnitBase:
         var uscript: GDScript = load(def["script"])
@@ -864,7 +890,7 @@ func _build_ui() -> void:
                 tr("hint_select"), tr("hint_island_move"), tr("hint_camera"),
                 tr("hint_regen"), tr("hint_slow"), tr("hint_wave")]
         # گام ۶R2 — چرخش با کشیدن موس/انگشت (اندروید)
-        hint.text += "  |  کشیدن با موس/انگشت: چرخش — Drag: rotate"
+        hint.text += "  |  کشیدن با موس/انگشت: چرخش صحنه (لوکیشن سربازها ثابت) — Drag: rotate scene"
         vb.add_child(hint)
 
         _toast = Label.new()
@@ -1008,6 +1034,8 @@ func _refresh_stats() -> void:
                         arrived += 1
         var goal: Vector2 = info["goal"]
         var mode_str := "COMMAND" if mode == Mode.COMMAND else "IDLE"
+        if land_focus:
+                mode_str += "+FOCUS"
         var sel_str := "-" if selected < 0 else str(selected + 1)
         # گام ۶R — وضعیت گاریسون دسته‌ی انتخابی
         var gar := ""
@@ -1062,9 +1090,9 @@ func _process(delta: float) -> void:
 
         # گام M3 — چکِ پیروزی: همه‌ی موج‌ها آمدند + میدان پاک + خانه‌ی زنده
         # (ارزان است — دو شمارشِ ساده روی گروه‌های کارگردان)
+        # گام ۶R۲۵ — بدونِ خانه: پیروزی = پاک‌سازیِ میدان (شرطِ «خانه‌ی زنده» حذف شد)
         if victory_enabled and not game_over and not victory \
-                        and director != null and director.field_cleared() \
-                        and _any_house_alive():
+                        and director != null and director.field_cleared():
                 _trigger_victory()
 
         # §۶ — اسلوموشن با Tween: ورود 0.15s، بازگشت 0.2s
@@ -1255,19 +1283,16 @@ func _input(event: InputEvent) -> void:
                 elif _left_down:
                         # گام ۶R2 — کشیدن با دکمه‌ی چپ (یا انگشت روی اندروید —
                         # لمس با emulate_mouse_from_touch همین‌جا می‌رسد)
-                        # گام ۶R۱۳ — کشیدن = پنِ دوربین (چپ/راست + بالا/پایین)
+                        # گام ۶R۲۵ — بازخورد کاربر: «با چرخاندن صفحه لوکیشن
+                        # کاراکترها عوض نشود» → کشیدن دوباره «چرخشِ صحنه» است؛
+                        # پن فقط با کلیدهای جهت‌نما/دکمه‌ی میانی. چرخش فقط yaw را
+                        # می‌گرداند و هیچ منطقی از سربازها چیزی را جابه‌جا نمی‌کند
                         if not _left_dragging and event.position.distance_to(
                                         _left_start) > GameConstants.CAM_DRAG_START_PX:
                                 _left_dragging = true
                         if _left_dragging:
-                                _pan_h_target = clampf(
-                                                _pan_h_target - event.relative.x * GameConstants.CAM_PAN_DRAG_SENS,
-                                                -GameConstants.CAM_PAN_SIDE_MAX,
-                                                GameConstants.CAM_PAN_SIDE_MAX)
-                                _pan_target = clampf(
-                                                _pan_target + event.relative.y * GameConstants.CAM_PAN_DRAG_SENS,
-                                                -GameConstants.CAM_PAN_BACK_MAX,
-                                                GameConstants.CAM_PAN_FWD_MAX)
+                                _yaw = wrapf(_yaw + event.relative.x
+                                                * GameConstants.CAM_DRAG_SENS, 0.0, 360.0)
         elif event is InputEventKey:
                 if event.pressed and not event.echo:
                         _keys_held[event.physical_keycode] = true

@@ -50,6 +50,11 @@ var cam_xz_provider: Callable = Callable()
 var auto_waves := true
 var wave_interval := GameConstants.WAVE_INTERVAL
 var waves_spawned := 0
+
+## گام ۶R۲۵ — «کاراکترها روی دریا نباشند» (بازخورد صریح کاربر):
+## مهاجمان دیگر با قایق نمی‌آیند و وادِ توی آب ندارند؛ مستقیم روی سلول‌های
+## خشکیِ کنار ساحل ظاهر می‌شوند. مسیرِ قایق‌محور در شاخه‌ی else نگه داشته شد.
+var land_only := true
 ## گام M3 — سقفِ موجِ این جزیره (مرحله = جزیره): بعد از این تعداد، موجِ خودکار
 ## دیگر نمی‌آید و پاک‌سازیِ میدان = پیروزی. تستِ خودکار این را کوچک می‌کند
 var wave_limit := GameConstants.ISLAND_WAVE_COUNT
@@ -149,84 +154,108 @@ func spawn_wave(opts: Dictionary = {}) -> int:
         if target_building != null:
                 raid_target = Vector2(target_building.global_position.x,
                                 target_building.global_position.z)
-        var group_id := _next_group
-        var g_dict_scaffold: Array = []
-
-        # ---- ناوگان: از دل افق دریا می‌آید و کنار ساحل پارک می‌ماند (گام ۶R2) ----
-        var nav := PathService.nav
-        var center := nav.origin + nav.size_world() * 0.5
-        var outward := (water_xz - center).normalized()
-        if outward == Vector2.ZERO:
-                outward = Vector2.RIGHT
-        var tangent := Vector2(-outward.y, outward.x)
-        var fleet_spec := _build_fleet(size, comp)
-        var n_boats := fleet_spec.size()
+        else:
+                # گام ۶R۲۵ — بدونِ بنا: هدفِ گروه = نزدیک‌ترین پستِ دسته‌ی خودی
+                raid_target = _nearest_post_xz(landing)
         var gid := _next_group
         _next_group += 1
+        var g_dict_scaffold: Array = []
         var fleet: Array = []
-        var anchor0 := water_xz + outward * 1.4
-        for bi in n_boats:
-                var spec: Dictionary = fleet_spec[bi]
-                var btype: EnemyBoat.BoatType = spec["type"]
-                var off := _anchor_offset_of(btype)
-                # قایق‌های ناوگان کنار هم پهلو می‌گیرند (فاصله‌ی FLEET_BOAT_GAP)
-                var side := (float(bi) - float(n_boats - 1) * 0.5) \
-                                * GameConstants.FLEET_BOAT_GAP
-                var anchor := water_xz + outward * off + tangent * side
-                # گام ۶R4fix — لنگر باید روی آب بماند: کمی به بیرون سُر می‌دهیم
-                var wtries := 0
-                while wtries < 8 and nav.is_walkable(nav.world_to_cell(anchor)):
-                        anchor += outward * 0.3
-                        wtries += 1
-                if bi == 0:
-                        anchor0 = anchor
-                var boat := EnemyBoat.new()
-                boat.boat_type = btype
-                boat.capacity = _capacity_of(btype)
-                boat.anchor_point = Vector3(anchor.x, 0, anchor.y)
-                boat.cargo_kind = spec["kind"]
-                boat.cargo_count = int(spec["load"])
-                # گام ۶R6 — قایقِ رونده: جهتِ بیرون جزیره + ریشه‌ی پیاده‌شدن
-                boat.outward_dir = outward
-                boat.disembark_root = raiders_root
-                # گام ۶R2 — ظهور از افق + گام ۶R3 — ظهور پلکانی ناوگان
-                var spawn_d := GameConstants.BOAT_SPAWN_DIST \
-                                + float(bi) * GameConstants.FLEET_SPAWN_STAGGER
-                # position (نه global_position) — نود هنوز در درخت نیست
-                boat.position = Vector3(
-                                anchor.x + outward.x * spawn_d,
-                                0, anchor.y + outward.y * spawn_d)
-                boats_root.add_child(boat)
-                # — گام ۶R6: سربازانِ واقعی «همین لحظه» سوار قایق می‌شوند —
-                #   فرزندِ قایق، Riding (AI خاموش)؛ دیگر اسپاونری در ساحل نیست
-                var payload: Dictionary = spec["payload"]
-                var boarded: Array = []
+        var anchor0 := landing
+
+        if land_only:
+                # گام ۶R۲۵ — فرودِ خشکیِ خالص: هیچ قایقی در کار نیست؛ مهاجمان
+                # روی سلول‌های «قابل‌عبور» (خشکیِ چمن) نزدیک ساحل می‌ایستند —
+                # هیچ کاراکتری حتی یک فریم روی آب نیست و وادِ آب منسوخ است
+                var cells := _walkable_cells_near(landing, 2.6, size)
+                if cells.size() < size:
+                        cells = _walkable_cells_near(landing, 4.5, size)
+                if cells.size() < size:
+                        cells = _walkable_cells_near(landing, 7.0, size)
                 for kind in [KIND_LIGHT, KIND_HEAVY, KIND_PELTAST]:
-                        for i in int(payload.get(kind, 0)):
+                        for i in int(comp.get(kind, 0)):
                                 var e2 := _create_enemy(kind)
-                                if e2 != null:
-                                        e2.raid_group = group_id % 4 if group_id >= 0 else 3
-                                        if group_id >= 0:
-                                                e2.raid_target = raid_target
-                                                e2.target_house = target_building
-                                        else:
-                                                e2.raid_target = Vector2(anchor.x, anchor.y)
-                                        if ground != null:
-                                                e2.ground_provider = Callable(ground, "height_at_world")
-                                        boat.board_soldier(e2)
-                                        boarded.append(e2)
-                fleet.append({"boat": boat, "payload": payload,
-                                "landed": false, "soldiers": boarded})
-                boat.landed.connect(_on_boat_landed.bind(gid))
-                boat.soldier_disembarked.connect(_on_soldier_disembarked.bind(gid))
-                # گام ۶R۷ — بستنِ فوریِ گروه هنگام ناپدیدیِ نهایی قایق
-                boat.gone.connect(_on_boat_gone.bind(gid))
-                # سربازانِ گروه = همین سوارشدگان (همان‌هایی که پیاده می‌شوند)
-                for s in boarded:
-                        g_dict_scaffold.append(s)
+                                if e2 == null:
+                                        continue
+                                e2.raid_group = gid % 4
+                                e2.raid_target = raid_target
+                                e2.target_house = target_building
+                                e2.has_raid_field = true
+                                if ground != null:
+                                        e2.ground_provider = Callable(ground, "height_at_world")
+                                var sxz: Vector2 = landing
+                                if not cells.is_empty():
+                                        sxz = cells[mini(g_dict_scaffold.size(),
+                                                        cells.size() - 1)]
+                                var y0 := (ground.height_at_world(sxz)
+                                                if ground != null else 0.0)
+                                e2.position = Vector3(sxz.x, y0, sxz.y)
+                                raiders_root.add_child(e2)
+                                g_dict_scaffold.append(e2)
+                if not g_dict_scaffold.is_empty():
+                        PathService.set_goal_for(channel, raid_target)
+        else:
+                # ---- ناوگان (مسیرِ قدیمیِ قایق‌محور — غیرفعال با land_only) ----
+                var nav := PathService.nav
+                var center := nav.origin + nav.size_world() * 0.5
+                var outward := (water_xz - center).normalized()
+                if outward == Vector2.ZERO:
+                        outward = Vector2.RIGHT
+                var tangent := Vector2(-outward.y, outward.x)
+                var fleet_spec := _build_fleet(size, comp)
+                var n_boats := fleet_spec.size()
+                anchor0 = water_xz + outward * 1.4
+                for bi in n_boats:
+                        var spec: Dictionary = fleet_spec[bi]
+                        var btype: EnemyBoat.BoatType = spec["type"]
+                        var off := _anchor_offset_of(btype)
+                        var side := (float(bi) - float(n_boats - 1) * 0.5) \
+                                        * GameConstants.FLEET_BOAT_GAP
+                        var anchor := water_xz + outward * off + tangent * side
+                        var wtries := 0
+                        while wtries < 8 and nav.is_walkable(nav.world_to_cell(anchor)):
+                                anchor += outward * 0.3
+                                wtries += 1
+                        if bi == 0:
+                                anchor0 = anchor
+                        var boat := EnemyBoat.new()
+                        boat.boat_type = btype
+                        boat.capacity = _capacity_of(btype)
+                        boat.anchor_point = Vector3(anchor.x, 0, anchor.y)
+                        boat.cargo_kind = spec["kind"]
+                        boat.cargo_count = int(spec["load"])
+                        boat.outward_dir = outward
+                        boat.disembark_root = raiders_root
+                        var spawn_d := GameConstants.BOAT_SPAWN_DIST \
+                                        + float(bi) * GameConstants.FLEET_SPAWN_STAGGER
+                        boat.position = Vector3(
+                                        anchor.x + outward.x * spawn_d,
+                                        0, anchor.y + outward.y * spawn_d)
+                        boats_root.add_child(boat)
+                        var payload: Dictionary = spec["payload"]
+                        var boarded: Array = []
+                        for kind in [KIND_LIGHT, KIND_HEAVY, KIND_PELTAST]:
+                                for i in int(payload.get(kind, 0)):
+                                        var e3 := _create_enemy(kind)
+                                        if e3 != null:
+                                                e3.raid_group = gid % 4
+                                                e3.raid_target = raid_target
+                                                e3.target_house = target_building
+                                                if ground != null:
+                                                        e3.ground_provider = Callable(ground, "height_at_world")
+                                                boat.board_soldier(e3)
+                                                boarded.append(e3)
+                        fleet.append({"boat": boat, "payload": payload,
+                                        "landed": false, "soldiers": boarded})
+                        boat.landed.connect(_on_boat_landed.bind(gid))
+                        boat.soldier_disembarked.connect(_on_soldier_disembarked.bind(gid))
+                        boat.gone.connect(_on_boat_gone.bind(gid))
+                        for s in boarded:
+                                g_dict_scaffold.append(s)
 
         # گام ۶R3 — ثبت جهت فرود برای تنوع زاویه‌ای موج‌های بعدی
-        _remember_shore_angle(center, water_xz)
+        _remember_shore_angle(PathService.nav.origin
+                        + PathService.nav.size_world() * 0.5, water_xz)
 
         _groups[gid] = {
                 "fleet": fleet,
@@ -238,6 +267,7 @@ func spawn_wave(opts: Dictionary = {}) -> int:
                 "target_building": target_building,
                 "comp_wanted": comp,
                 "cleared": false,
+                "retarget_t": 0.0,
         }
         waves_spawned += 1
         var total: int = int(comp.get(KIND_LIGHT, 0)) + int(comp.get(KIND_HEAVY, 0)) \
@@ -674,6 +704,36 @@ func _nearest_alive_building(from: Vector2) -> BuildingBase:
         return best
 
 
+## گام ۶R۲۵ — نزدیک‌ترین پستِ دسته‌ی خودی (هدفِ خشکیِ مهاجمان وقتی بنایی نیست)
+func _nearest_post_xz(from: Vector2) -> Vector2:
+        var best := from
+        var best_d := 1e9
+        for p in posts:
+                var d: float = p.distance_to(from)
+                if d < best_d:
+                        best_d = d
+                        best = p
+        return best
+
+
+## گام ۶R۲۵ — نزدیک‌ترین سربازِ زنده‌ی خودی (تعقیبِ نرمِ دسته‌ها روی خشکی)
+func _nearest_friendly_xz(from: Vector2) -> Vector2:
+        var best := Vector2.INF
+        var best_d := 1e9
+        for n in get_tree().get_nodes_in_group("units"):
+                var u := n as Node3D
+                if u == null or not u.is_inside_tree():
+                        continue
+                if u.has_method("is_dead") and u.is_dead():
+                        continue
+                var up := Vector2(u.global_position.x, u.global_position.z)
+                var d := up.distance_to(from)
+                if d < best_d:
+                        best_d = d
+                        best = up
+        return best
+
+
 func _nearest_walkable_cell(from: Vector2) -> Vector2i:
         var nav := PathService.nav
         var base := nav.world_to_cell(from)
@@ -781,6 +841,32 @@ func _retarget_if_burned(gid: int, g: Dictionary) -> void:
                 return
         var tb = g.get("target_building")
         if tb != null and is_instance_valid(tb) and not tb.burned:
+                return
+        # گام ۶R۲۵ — بدونِ بنا (land_only): مهاجم هر ۳ ثانیه نزدیک‌ترین
+        # سربازِ زنده‌ی خودی را هدف می‌گیرد — «مکانیزم جنگِ خشکی»: مارسِ
+        # روی چمن تا بردِ درگیری و نبردِ تن‌به‌تن/تیراندازی، بدونِ آب
+        if land_only:
+                g["retarget_t"] = float(g.get("retarget_t", 0.0)) + 0.3
+                if float(g.get("retarget_t", 0.0)) < 3.0:
+                        return
+                g["retarget_t"] = 0.0
+                var centroid2 := Vector2.ZERO
+                var n2 := 0
+                for e in g["raiders"]:
+                        if is_instance_valid(e) and not e.is_dead():
+                                centroid2 += Vector2(e.global_position.x, e.global_position.z)
+                                n2 += 1
+                if n2 == 0:
+                        return
+                var hunt := _nearest_friendly_xz(centroid2 / float(n2))
+                if hunt == Vector2.INF:
+                        return
+                g["raid_target"] = hunt
+                PathService.set_goal_for(g["channel"], hunt)
+                for e4 in g["raiders"]:
+                        if is_instance_valid(e4) and not e4.is_dead():
+                                e4.raid_target = hunt
+                                e4.target_house = null
                 return
         var centroid := Vector2.ZERO
         var n := 0

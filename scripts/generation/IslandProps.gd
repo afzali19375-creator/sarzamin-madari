@@ -27,13 +27,19 @@ var buildings: Array[BuildingBase] = []
 
 var _rng := RandomNumberGenerator.new()
 
+## گام ۶R۲۵ — شمارنده‌ی اشیای دریا (تستِ «هیچ چیزی توی آب نیست») — همیشه صفر
+var sea_objects := 0
+
 
 ## گام ۶R6 — چوب‌های شناور در آب کم‌عمق (حسِ زندگیِ محیط)
 var _driftwood: Array[Node3D] = []
 var _drift_t := 0.0
 
 ## ساخت روستا + پوشش؛ سلول‌های خانه‌ها را در nav مسدود می‌کند
-func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: int) -> void:
+## گام ۶R۲۵ — پارامترِ ساختِ بنا: پیش‌فرضِ «بدونِ خانه» (دستور صریح کاربر:
+## «اول خانه رو توی نقشه حذف کن») — سایتِ خانه انتخاب/بلاک/ساخته نمی‌شود
+func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: int,
+                with_buildings := false) -> void:
         for c in get_children():
                 c.free()
         house_positions.clear()
@@ -41,9 +47,12 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
         blocked_cells.clear()
         buildings.clear()
         _driftwood.clear()
+        sea_objects = 0
         _rng.seed = hash("props:%d" % seed_value)
 
-        var sites := _pick_house_sites(ground, nav)
+        var sites: Array[Vector2i] = []
+        if with_buildings:
+                sites = _pick_house_sites(ground, nav)
         for i in sites.size():
                 var cell00 := sites[i]
                 house_sites.append(cell00)
@@ -57,8 +66,8 @@ func build(ground: IslandGround, nav: NavGrid, island: Dictionary, seed_value: i
                 house_positions.append(pos)
                 _build_house(pos, i == 0)
         _build_vegetation(ground, nav, island, sites)
-        _build_islets(ground, nav, island)
-        _build_driftwood(ground, nav)
+        # گام ۶R۲۵ — ساختِ جزیره‌ک‌های دریایی و چوب‌های شناور «کاملاً حذف شد»:
+        # دریا خالی است؛ هیچ «جایزه/ساختار» میان آب نیست (توابع برای مرجع مانده‌اند)
 
 
 ## نزدیک‌ترین بنای زنده (نسوخته) — برای هدف مشعل دشمن و اشغال خودی
@@ -421,6 +430,7 @@ func _build_islets(ground: IslandGround, nav: NavGrid, island: Dictionary) -> vo
                 if not far:
                         continue
                 placed.append(p)
+                sea_objects += 1
                 _add_islet(p, ground)
 
 
@@ -478,6 +488,7 @@ func _build_driftwood(ground: IslandGround, nav: NavGrid) -> void:
         for k in mini(6, shallow.size()):
                 var c2 := shallow[k]
                 var p := nav.cell_center(c2)
+                sea_objects += 1
                 var log := Node3D.new()
                 log.position = Vector3(p.x + _rng.randf_range(-0.2, 0.2),
                                 IslandGround.SEA_Y + 0.02,

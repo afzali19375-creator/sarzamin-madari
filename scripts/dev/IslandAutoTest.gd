@@ -121,6 +121,12 @@ var _sep_min := 1e9                 # کمترین فاصله‌ی جفتی قا
 var _dis_latched := {}              # id مهاجم‌های «خشکی‌دیده» — چک پیاده‌شدن (۶R3)
 var _dis_near := 0                  # تعداد پیاده‌شده‌های نزدیک قایق
 var _div_angles: Array[float] = []  # زاویه‌ی فرود موج‌های تنوع (۶R3)
+# --- گام ۶R۲۵: خشکیِ محض + پایداریِ چرخش ---
+var _drag_pan_v0 := 0.0                     # پنِ عمودیِ قبل از کشیدن
+var _drag_units_before: Array[Vector3] = [] # موقعیتِ دقیقِ سربازها قبل از کشیدن
+var _land_nav: NavGrid = null               # ناوبریِ نمونه‌برداریِ خشکی
+var _land_violations := 0                   # تخلفِ «مهاجم روی آب»
+var _issue_goal0 := Vector2.ZERO            # هدفِ پیش از فرمانِ فاز ۱۸
 
 
 func _ready() -> void:
@@ -220,9 +226,9 @@ func _process(delta: float) -> void:
                 16:
                         _phase16_flags_and_camera()
                 17:
-                        _phase17_torch_burns_house()
+                        _phase17_no_buildings_land_war()
                 18:
-                        _phase18_garrison_replenish()
+                        _phase18_move_without_houses()
                 19:
                         _phase19_fleet_touch_gameover()
                 20:
@@ -314,11 +320,17 @@ func _phase0_island_ready() -> void:
         _check("multi_channel_goals_registered", (info["channels"] as Array).size() >= 3,
                         "channels=%s" % str(info["channels"]))
 
-        # گام ۶R16 — «در مرحله‌ی اول یکی خانه هم کافیه» (کاربر) = HOUSE_SITES
-        _check("houses_built_expected",
-                        target_scene.props.house_positions.size() == IslandProps.HOUSE_SITES,
-                        "%d want=%d" % [target_scene.props.house_positions.size(),
-                        IslandProps.HOUSE_SITES])
+        # گام ۶R۲۵ — «اول خانه رو توی نقشه حذف کن» + «جایزه‌ی میان آب رو نمیخوام»
+        _check("buildings_removed_from_map",
+                        target_scene.props.house_positions.is_empty()
+                        and target_scene.props.buildings.is_empty(),
+                        "%d buildings" % target_scene.props.buildings.size())
+        _check("no_house_cells_to_block",
+                        target_scene.blocked_by_houses.is_empty(),
+                        "%d cells" % target_scene.blocked_by_houses.size())
+        _check("sea_has_no_objects",
+                        target_scene.props.sea_objects == 0,
+                        "%d sea objects" % target_scene.props.sea_objects)
         var nav: NavGrid = PathService.nav
         var houses_blocked := true
         for c in target_scene.blocked_by_houses:
@@ -690,6 +702,10 @@ func _screen_of(world: Vector3) -> Vector2:
 func _phase3_wait_posts_then_select() -> void:
         match _sub:
                 0:
+                        # گام ۶R۲۵ — بدونِ خانه، ۵۰ سربازِ وسط جزیره‌ی کوچک تقریباً
+                        # همه‌ی سلول‌های فرمانی را در صفحه می‌پوشانند؛ زومِ بیشتر =
+                        # پیکسلِ بیشتر بر متر → فیلترِ ۷۰pxِ «کلیکِ تمیز» کار می‌کند
+                        target_scene._target_size = 9.0
                         # سه دسته باید اول روی پست‌هایشان بنشینند (میدان چندکاناله)
                         var arrived_n := _arrived_in(_units())
                         if _all_arrived() or (_t - _sub_t) > 60.0:
@@ -1488,29 +1504,36 @@ func _phase12_invasion_landing() -> void:
                         _check("waves_spawned_counted",
                                         target_scene.director.waves_spawned == 1,
                                         "%d" % target_scene.director.waves_spawned)
-                        _check("boat_sailing", target_scene.director.boat_state(_group0) == 0,
-                                        "state=%d" % target_scene.director.boat_state(_group0))
+                        _check("land_spawn_no_boats",
+                                        target_scene.director.boat_state(_group0) == -1
+                                        and get_tree().get_nodes_in_group("enemy_boats").is_empty(),
+                                        "boats=%d" % get_tree().get_nodes_in_group("enemy_boats").size())
+                        _check("raiders_six_spawned",
+                                        target_scene.director.raiders_of(_group0).size() == 6,
+                                        "%d" % target_scene.director.raiders_of(_group0).size())
+                        var land_ok12 := true
+                        var nav12: NavGrid = PathService.nav
+                        for e12 in target_scene.director.raiders_of(_group0):
+                                if not is_instance_valid(e12):
+                                        continue
+                                var c12 := nav12.world_to_cell(_xz(e12))
+                                if not nav12.is_walkable(c12) \
+                                                or String(target_scene.ground.module_name_at(c12)) \
+                                                .begins_with("water"):
+                                        land_ok12 = false
+                        _check("raiders_spawn_on_land", land_ok12)
                         _sub = 1
                         _sub_t = _t
                 1:
-                        # قایق باید پهلو بگیرد و ۶ مهاجم پیاده شود (۳۹s مهلت)
-                        # گام ۶R3 — معیار = «بارِ پیاده‌شده» نه زنده‌ها؛ اگر مسیرِ
-                        # خانه از کنار پستِ دسته‌ای رد شود، نبرد ممکن است پیش از
-                        # شمارش تمام کند و این نباید «پیاده‌شدن» را نادیده بگیرد
-                        var n: int = target_scene.director.group_landed_cargo(_group0)
-                        if n >= 6 or (_t - _sub_t) > 39.0:
-                                _check("boat_landed_six_raiders", n == 6,
-                                                "%d raiders (t=%.1f)" % [n, _t - _sub_t])
-                                # گام ۶R6 — قایق به ساحل رسیده (LANDING/DISEMBARKING/DEPARTING)
-                                _check("boat_reached_shore",
-                                                target_scene.director.boat_state(_group0) >= 1,
-                                                "state=%d" % target_scene.director.boat_state(_group0))
+                        # گام ۶R۲۵ — مهاجمان همین حالا روی خشکی‌اند؛ سازگاریِ
+                        # فرود/کانال/هدف در نیم‌ثانیه‌ی اول سنجیده می‌شود
+                        if _t - _sub_t >= 0.5:
                                 var ch := int((PathService.debug_info()["channels"] as Array).size())
                                 _check("enemy_channel_registered", ch >= 4,
                                                 "channels=%d" % ch)
                                 _landing = target_scene.director.group_landing(_group0)
                                 _check("landing_on_shore", _landing != Vector2.ZERO)
-                                # گام ۶R — فرود باید واقعاً کنار آب باشد (باگ قایق وسط جزیره)
+                                # فرود باید واقعاً کنار آب باشد (سلولِ ساحلیِ خشکی)
                                 var navl: NavGrid = PathService.nav
                                 var lc := navl.world_to_cell(_landing)
                                 var touches_water := false
@@ -1519,16 +1542,12 @@ func _phase12_invasion_landing() -> void:
                                                         .begins_with("water"):
                                                 touches_water = true
                                 _check("landing_cell_touches_water", touches_water, str(lc))
-                                var anchor: Vector2 = target_scene.director.group_anchor(_group0)
-                                var anchor_water := String(target_scene.ground.module_name_at(
-                                                navl.world_to_cell(anchor))).begins_with("water")
-                                _check("boat_anchor_on_water", anchor_water, str(anchor))
                                 var rt: Vector2 = target_scene.director.group_raid_target(_group0)
-                                var is_house := false
-                                for hp3 in target_scene.props.house_positions:
-                                        if Vector2(hp3.x, hp3.z).distance_to(rt) < 2.0:
-                                                is_house = true
-                                _check("raid_target_is_house", is_house, str(rt))
+                                var is_post := false
+                                for post in target_scene._squad_posts:
+                                        if post.distance_to(rt) < 0.75:
+                                                is_post = true
+                                _check("raid_target_is_post", is_post, str(rt))
                                 _sub = 2
                                 _sub_t = _t
                 2:
@@ -2012,18 +2031,17 @@ func _phase15_permanence_and_clear() -> void:
                                 _check("wave_cleared_signal", _wave_cleared_fired)
                                 _check("all_raiders_dead",
                                                 target_scene.director.alive_raiders_total() == 0)
-                                # گام ۶R۹ — قایق بعد از مرگ مهاجمانش «لنگر می‌ماند»:
-                                # پارک دائمی در ساحل (PARKED) — نه دورشدن، نه ناپدیدی
-                                var parked_info := _parked_boats_info()
-                                _check("boat_parked_after_death",
-                                                _parked_boats_count() >= 1, parked_info)
+                                # گام ۶R۲۵ — هیچ قایقی هرگز در صحنه نبوده و نیست
+                                _check("no_boats_in_scene",
+                                                get_tree().get_nodes_in_group("enemy_boats").is_empty(),
+                                                "boats=%d" % _parked_boats_count())
                                 _sub = 3
                                 _sub_t = _t
                 3:
                         if _t - _sub_t >= 2.0:
-                                # گام ۶R۹ — قایقِ پارک‌شده بعد از ۲ ثانیه هم همان‌جاست
-                                _check("boat_still_parked_later",
-                                                _parked_boats_count() >= 1,
+                                # گام ۶R۲۵ — دریا بعد از ۲ ثانیه هم خالی است
+                                _check("sea_still_empty_later",
+                                                get_tree().get_nodes_in_group("enemy_boats").is_empty(),
                                                 _parked_boats_info())
                                 # سلامت نهایی: زنده‌ها روی سلول قابل‌عبور + زمان نرمال
                                 var all_ok := true
@@ -2218,19 +2236,43 @@ func _phase16_flags_and_camera() -> void:
                                                 "t=%.2f v=%.2f min=-%.2f" % [
                                                 target_scene._pan_target,
                                                 target_scene._pan_v, pb])
-                                # کشیدنِ عمودیِ موس/لمس هم نما را جابه‌جا می‌کند
-                                _push_drag_pan()
+                                # گام ۶R۲۵ — کشیدنِ چپ/لمس = «چرخشِ صحنه»؛ لوکیشنِ
+                                # سربازها باید مو‌به‌مو ثابت بماند (خواسته‌ی کاربر)
+                                _drag_yaw0 = target_scene._yaw
+                                _drag_pan_h0 = target_scene._pan_h_target
+                                _drag_pan_v0 = target_scene._pan_target
+                                _drag_units_before.clear()
+                                for ud in _units():
+                                        if is_instance_valid(ud):
+                                                _drag_units_before.append(ud.global_position)
+                                _push_left_drag()
+                                # بررسیِ «هم‌زمان»: push_input سنکرون است؛ بینِ
+                                # اسنپ‌شات و پس از کشیدن حتی یک فریم هم نمی‌گذرد —
+                                # پس هر جابه‌جایی‌ای یعنی خودِ چرخش لوکیشن را عوض کرده
+                                var dyaw16 := absf(wrapf(deg_to_rad(target_scene._yaw
+                                                                - _drag_yaw0), -PI, PI))
+                                _check("left_drag_rotates_scene", rad_to_deg(dyaw16) > 5.0,
+                                                "%.1f deg" % rad_to_deg(dyaw16))
+                                var moved16 := 0
+                                var idx16 := 0
+                                for ud2 in _units():
+                                        if is_instance_valid(ud2) \
+                                                        and idx16 < _drag_units_before.size() \
+                                                        and ud2.global_position.distance_to(
+                                                                _drag_units_before[idx16]) > 0.0:
+                                                moved16 += 1
+                                        idx16 += 1
+                                _check("left_drag_keeps_unit_locations", moved16 == 0,
+                                                "%d moved" % moved16)
+                                _check("left_drag_no_pan",
+                                                absf(target_scene._pan_h_target - _drag_pan_h0) < 1e-6
+                                                and absf(target_scene._pan_target - _drag_pan_v0) < 1e-6,
+                                                "h=%.3f v=%.3f" % [target_scene._pan_h_target,
+                                                target_scene._pan_target])
                                 _sub = 8
                                 _sub_t = _t
                 8:
-                        if _t - _sub_t >= 0.5:
-                                # گام ۶R۱۴ — درگِ به بالا = «دنیا زیر انگشت»: محتوا
-                                # با انگشت می‌رود → پنِ منفی (کشش به سمت پایینِ صحنه)
-                                var pb2: float = GameConstants.CAM_PAN_BACK_MAX
-                                _check("camera_pans_with_vertical_drag",
-                                                target_scene._pan_target <= -0.5 * pb2 \
-                                                and target_scene._pan_target >= -pb2 - 1e-4,
-                                                "t=%.2f" % target_scene._pan_target)
+                        if _t - _sub_t >= 0.2:
                                 # ریستِ پن برای ادامه‌ی بازی (بازه‌ی آزادی کوچک است)
                                 target_scene._pan_target = 0.0
                                 # گام ۶R۱۳ — پنِ افقی: خودِ دوربین چپ/راست هم می‌رود
@@ -2327,156 +2369,45 @@ func _push_key_release(keycode: Key) -> void:
         target_scene.get_viewport().push_input(ev, true)
 
 
-# ---------------- فاز ۱۷: مشعل خانه را آتش می‌زند (گام ۶R) ----------------
+# ---------------- فاز ۱۷: بدونِ بنا — جنگِ خشکی بدونِ مشعل (گام ۶R۲۵) ----------------
 
-func _phase17_torch_burns_house() -> void:
+func _phase17_no_buildings_land_war() -> void:
         match _sub:
                 0:
-                        _connect_houses()
                         target_scene._clear_dummies()
-                        # خانه‌ای که از همه‌ی سربازهای زنده دورتر است (کماندار مزاحم نشود)
-                        var best_b: BuildingBase = null
-                        var best_d := -1.0
-                        for b in target_scene.props.buildings:
-                                if not is_instance_valid(b) or b.burned:
-                                        continue
-                                var bxz := Vector2(b.global_position.x, b.global_position.z)
-                                var min_u := 1e9
-                                for u in _units():
-                                        if is_instance_valid(u) and not u.is_dead():
-                                                min_u = minf(min_u, _xz(u).distance_to(bxz))
-                                if min_u > best_d:
-                                        best_d = min_u
-                                        best_b = b
-                        _check("torch_target_house_found", best_b != null)
-                        if best_b == null:
+                        # هیچ بنایی روی نقشه نیست (دستور صریح کاربر: خانه حذف شود)
+                        _check("buildings_removed",
+                                        target_scene.props.buildings.is_empty()
+                                        and target_scene.props.house_positions.is_empty(),
+                                        "%d buildings" % target_scene.props.buildings.size())
+                        # مهاجمِ آزمون کنار پستِ دسته ۰ — روی خشکی، بدونِ هدفِ مشعل
+                        var nav17: NavGrid = PathService.nav
+                        var spot17: Vector2 = target_scene._nearest_walkable_point(
+                                        nav17, target_scene._squad_posts[0]
+                                        + Vector2(3.0, 2.0), 3.0)
+                        _check("test_enemy_spot_found", spot17 != Vector2.INF, str(spot17))
+                        if spot17 == Vector2.INF:
                                 _phase = 18
                                 return
-                        _torch_house = best_b
-                        var hxz := Vector2(best_b.global_position.x,
-                                        best_b.global_position.z)
-                        # گام M2 — با ۵۰ مدافع، مهاجم پیش از رسیدن به خانه قربانیِ
-                        # نبرد می‌شود؛ همه‌ی دسته‌ها به دورترین نقطه‌ی جزیره از خانه
-                        # فرستاده می‌شوند تا «مکانیزمِ مشعل» ایزولاده بماند
-                        var nav0: NavGrid = PathService.nav
-                        var far := hxz
-                        var far_d := -1.0
-                        for cy in nav0.height:
-                                for cx in nav0.width:
-                                        var cc := Vector2i(cx, cy)
-                                        if not nav0.is_walkable(cc):
-                                                continue
-                                        var wc: Vector2 = nav0.cell_center(cc)
-                                        var dd := wc.distance_to(hxz)
-                                        if dd > far_d:
-                                                far_d = dd
-                                                far = wc
-                        for si9 in target_scene.squads.size():
-                                target_scene._issue_move_to(far, si9, true)
-                        _sub = 10
-                        _sub_t = _t
-                10:
-                        # انتظار برای دورشدنِ مدافعان از مسیرِ مهاجم
-                        if _t - _sub_t >= 7.5:
-                                _sub = 11
-                                _sub_t = _t
-                11:
-                        if _torch_house == null or not is_instance_valid(_torch_house):
-                                _phase = 18
-                                return
-                        var hxz2: Vector2 = Vector2(_torch_house.global_position.x,
-                                        _torch_house.global_position.z)
-                        # نقطه‌ی پرتاب: سمت دورِ خانه از نزدیک‌ترین سرباز
-                        var near_u := _nearest_unit_xz(hxz2)
-                        var dir := hxz2 - near_u
-                        dir = dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
-                        var nav: NavGrid = PathService.nav
-                        # گام ۶R۱۲ — نقطه‌ی پرتاب باید «خطِ باز تا خانه» داشته باشد:
-                        # مهاجمِ بدونِ کانالِ میدان فقط مستقیم می‌رود؛ خلیجِ مقعرِ
-                        # ساحل می‌توانست آن را تا ابد در ~۳ متری نوسان بدهد.
-                        # ۱۶ جهت (از سمتِ دورِ سربازها) × ۲ شعاع — اولین خشکیِ
-                        # با خطِ باز تا حاشیه‌ی ۲٫۴ متریِ خانه
-                        var pp: Vector2 = Vector2.INF
-                        var base_ang := dir.angle()
-                        for rr: float in [3.0, 4.5]:
-                                for k in 16:
-                                        var ang2 := base_ang + TAU * float(k) / 16.0
-                                        var cand := hxz2 + Vector2(cos(ang2), sin(ang2)) * rr
-                                        var cw: Vector2 = target_scene \
-                                                        ._nearest_walkable_point(nav, cand, 1.2)
-                                        if cw == Vector2.INF:
-                                                continue
-                                        if not _open_line_to_house(nav, cw, hxz2, 2.4):
-                                                continue
-                                        pp = cw
-                                        break
-                                if pp != Vector2.INF:
-                                        break
-                        if pp == Vector2.INF:
-                                # پشتیبانِ نهایی: نزدیک‌ترینِ خودِ خانه (سلولِ خانه
-                                # بسته است؛ همسایه‌اش خشکی است)
-                                pp = target_scene._nearest_walkable_point(nav, hxz2, 6.0)
-                        _check("torch_peltast_spot_found", pp != Vector2.INF, str(pp))
-                        if pp == Vector2.INF:
-                                _phase = 18
-                                return
-                        _torch_peltast = target_scene.director.spawn_enemy(
-                                        "peltast", pp, -1) as PeltastUnit
-                        _check("torch_peltast_spawned", _torch_peltast != null)
-                        if _torch_peltast == null:
-                                _phase = 18
-                                return
-                        # گام ۶R۱۲ — این فاز «مکانیزمِ مشعل» را می‌آزماید نه دوئل
-                        # با کماندار؛ در جزیره‌ی کوچک کماندارِ مدافع، مهاجمِ
-                        # کوشایی را پیش از سه پرتاب قطع می‌کرد (hp=99 ضدگلوله‌ی تست)
-                        _torch_peltast.hp = 99
-                        _torch_peltast.raid_target = hxz2
-                        _torch_peltast.target_house = _torch_house
-                        # گام ۶R۱۴ — ایزولاسیونِ دوم: این فاز «پرتابِ مشعل → آتش →
-                        # سوختن» را می‌آزماید نه «۳ پرتاب در پنجره‌ی زمانی» — با
-                        # چیدمانِ جدیدِ جزیره (فلود-فیل) باندِ ایستِ مهاجم لرزان
-                        # می‌شود و شمارِ پرتاب در ۴۰ث به ۱-۲ می‌رسید؛ hp=1 یعنی
-                        # همان ۱ پرتابِ واقعی کافی است — مستقل از چیدمان
-                        _torch_house.hp = 1
+                        var e17: EnemyBase = target_scene.director.spawn_enemy(
+                                        "peltast", spot17, -1) as PeltastUnit
+                        _check("test_enemy_spawned_on_land", e17 != null
+                                        and nav17.is_walkable(
+                                        nav17.world_to_cell(_xz(e17))))
+                        _check("test_enemy_no_torch_target",
+                                        e17 == null or e17.target_house == null)
+                        if e17 != null:
+                                e17.take_hit(99)   # پاکسازیِ صحنه
                         _sub = 1
                         _sub_t = _t
                 1:
-                        # نمونه‌برداری زنده — شمارنده با مرگ از دست نمی‌رود
-                        if is_instance_valid(_torch_peltast):
-                                _max_torches = maxi(_max_torches,
-                                                _torch_peltast.torches_thrown)
-                                # گام ۶R2 — مهاجم باید «نزدیک» خانه بایستد نه دور
-                                if _torch_house != null and is_instance_valid(_torch_house):
-                                        _min_house_dist = minf(_min_house_dist,
-                                                        Vector2(_torch_peltast.global_position.x,
-                                                        _torch_peltast.global_position.z)
-                                                        .distance_to(Vector2(
-                                                        _torch_house.global_position.x,
-                                                        _torch_house.global_position.z)))
-                        var burning: bool = _house_ignited_fired \
-                                        or (_torch_house != null and is_instance_valid(_torch_house) \
-                                        and _torch_house.burning)
-                        if burning or (_t - _sub_t) > 40.0:
-                                _check("torch_thrown_at_house", _max_torches >= 1,
-                                                "%d torches (t=%.1f)" % [_max_torches, _t - _sub_t])
-                                _check("house_ignited_by_torches", burning,
-                                                "torch_hp_left=%s" % str(
-                                                _torch_house.hp if is_instance_valid(_torch_house) else -1))
-                                # گام ۶R2 — بازخورد کاربر: «خیلی دور می‌ایستند؛ نزدیک‌تر بیایند»
-                                _check("torch_thrown_from_close_range",
-                                                _min_house_dist <= 3.4,
-                                                "min=%.1f m" % _min_house_dist)
-                                _sub = 2
-                                _sub_t = _t
-                2:
-                        var burned: bool = _house_burned_fired \
-                                        or (_torch_house != null and is_instance_valid(_torch_house) \
-                                        and _torch_house.burned)
-                        if burned or (_t - _sub_t) > 20.0:
-                                _check("house_burned_down", burned,
-                                                "t=%.1f after ignite" % [_t - _sub_t])
-                                if is_instance_valid(_torch_peltast):
-                                        _torch_peltast.take_hit(99)   # پاکسازی صحنه
+                        if _t - _sub_t >= 0.7:
+                                _check("no_house_ignited_ever",
+                                                not _house_ignited_fired
+                                                and not _house_burned_fired)
+                                _check("sea_props_still_zero",
+                                                target_scene.props.sea_objects == 0,
+                                                "%d" % target_scene.props.sea_objects)
                                 _phase = 18
                                 _sub = 0
                                 _sub_t = _t
@@ -2494,151 +2425,61 @@ func _nearest_unit_xz(to: Vector2) -> Vector2:
         return best
 
 
-# ---------------- فاز ۱۸: گاریسون و تکمیل دسته (گام ۶R) ----------------
+# ---------------- فاز ۱۸: بدونِ خانه — فرمانِ حرکتِ عادی (گام ۶R۲۵) ----------------
 
-func _phase18_garrison_replenish() -> void:
+func _phase18_move_without_houses() -> void:
         match _sub:
                 0:
-                        _connect_houses()
-                        # زمانِ تست: ۲۰ ثانیه‌ی کاربر برای سرعت تست به ۳ ثانیه کوتاه می‌شود
-                        target_scene.garrison_duration = 3.0
-                        target_scene._clear_dummies()
-                        # دسته با بیشترین عضو زنده + نزدیک‌ترین خانه‌ی زنده به آن
-                        var host_si := -1
-                        var best_n := 0
-                        for si in target_scene.squads.size():
-                                var n: int = target_scene._alive_members(si).size()
-                                if n > best_n:
-                                        best_n = n
-                                        host_si = si
-                        _check("garrison_host_squad_found", host_si >= 0 and best_n >= 1,
-                                        "squad=%d alive=%d" % [host_si, best_n])
-                        if host_si < 0 or best_n < 1:
-                                target_scene.garrison_duration = GameConstants.LOOT_DURATION_SECONDS
+                        # نزدیک‌ترین خانه به هیچ دسته‌ای وجود ندارد
+                        var center18: Vector2 = target_scene.squad_center(0)
+                        var hxz18: Vector2 = target_scene.props.nearest_alive_house_xz(
+                                        center18)
+                        _check("no_house_near_squad", hxz18 == Vector2.INF, str(hxz18))
+                        # فرمانِ حرکت روی سلولِ دور — بدونِ هیچ گاریسونی
+                        var dest18 := _pick_cell_far_from(center18, 4.0)
+                        _check("move_destination_found", dest18 != Vector2.ZERO, str(dest18))
+                        if dest18 == Vector2.ZERO:
                                 _phase = 19
                                 return
-                        _garrison_si = host_si
-                        var center: Vector2 = target_scene.squad_center(host_si)
-                        var hxz: Vector2 = target_scene.props.nearest_alive_house_xz(center)
-                        # گام ۶R16 — با «یک خانه»: اگر تا این مرحله سوخته باشد (وضعیتِ
-                        # مشروعِ بازیِ دیر)، فازِ گاریسون نرم رد می‌شود نه FAIL
-                        var any_house_alive := false
-                        for b0 in target_scene.props.buildings:
-                                if is_instance_valid(b0) and not b0.burned:
-                                        any_house_alive = true
-                                        break
-                        _check("garrison_house_found",
-                                        hxz != Vector2.INF or not any_house_alive,
-                                        "hxz=%s alive=%s" % [str(hxz), str(any_house_alive)])
-                        if hxz == Vector2.INF:
-                                target_scene.garrison_duration = GameConstants.LOOT_DURATION_SECONDS
-                                _phase = 19
-                                return
-                        for b in target_scene.props.buildings:
-                                if is_instance_valid(b) and \
-                                                Vector2(b.global_position.x, b.global_position.z) \
-                                                .distance_to(hxz) < 0.5:
-                                        _garrison_house = b
-                        _check("garrison_building_ref_found", _garrison_house != null)
-                        target_scene._issue_move_to(hxz, host_si, true)
+                        _issue_goal0 = PathService.goal_for(0)
+                        target_scene._issue_move_to(dest18, 0, true)
                         _sub = 1
                         _sub_t = _t
                 1:
-                        # در حال رفتن به خانه → یکی را حذف می‌کنیم تا «تکمیل» مشهود شود
-                        var g: Dictionary = target_scene.garrison_state(_garrison_si)
-                        if not g.is_empty() and g["phase"] == "walk":
-                                var alive: Array = target_scene._alive_members(_garrison_si)
-                                if alive.size() >= 2:
-                                        alive[alive.size() - 1].take_hit(99)
-                                _garrison_alive_before \
-                                                = target_scene._alive_members(_garrison_si).size()
+                        if _t - _sub_t >= 0.6:
+                                _check("move_command_works_without_houses",
+                                                PathService.goal_for(0) != _issue_goal0,
+                                                "goal=%s" % str(PathService.goal_for(0)))
+                                _check("garrison_never_starts",
+                                                target_scene.garrison_state(0).is_empty())
                                 _sub = 2
                                 _sub_t = _t
-                        elif (_t - _sub_t) > 25.0:
-                                _check("garrison_started", false,
-                                                "no garrison state in 25s")
-                                target_scene.garrison_duration \
-                                                = GameConstants.LOOT_DURATION_SECONDS
-                                _sub = 0
-                                _sub_t = _t
-                                _phase = 19
                 2:
-                        # همه‌ی اعضای زنده داخل خانه پنهان شده‌اند؟
-                        var g2: Dictionary = target_scene.garrison_state(_garrison_si)
-                        if not g2.is_empty() and g2["phase"] == "inside":
-                                var hidden := true
-                                for u in target_scene._alive_members(_garrison_si):
-                                        if u.visible or u.is_in_group("units"):
-                                                hidden = false
-                                _check("squad_hidden_inside_house", hidden)
-                                _sub = 3
-                                _sub_t = _t
-                        elif (_t - _sub_t) > 25.0:
-                                _check("squad_hidden_inside_house", false, "timeout")
-                                _sub = 3
-                                _sub_t = _t
-                        # DBG18 — وضعیت زنده‌ی اعضا هر ۲ ثانیه
-                        if int((_t - _sub_t) * 0.5) != int(maxf(_t - _sub_t - 0.016, 0.0) * 0.5):
-                                var g18: Dictionary = target_scene.garrison_state(_garrison_si)
-                                var ph18: String = str(g18.get("phase", "NONE"))
-                                for u18 in target_scene._alive_members(_garrison_si):
-                                        var nav18: NavGrid = PathService.nav
-                                        var c18 := nav18.world_to_cell(Vector2(
-                                                        u18.global_position.x,
-                                                        u18.global_position.z))
-                                        var s18: Vector2 = u18.slot_pos()
-                                        print("[AUTOTEST] DBG18 t=%.1f phase=%s id=%d arr=%s slot=%s s=(%.1f,%.1f) pos=(%.1f,%.1f) cell=%s walk=%s flow=%s brain=%s fidget=%d vis=%s units=%s"
-                                                        % [_t - _sub_t, ph18,
-                                                        u18.get_instance_id(),
-                                                        u18.is_arrived(),
-                                                        str(u18.has_slot()),
-                                                        s18.x, s18.y,
-                                                        u18.global_position.x,
-                                                        u18.global_position.z,
-                                                        str(c18),
-                                                        nav18.is_walkable(c18),
-                                                        str(PathService.sample_direction(
-                                                                Vector2(u18.global_position.x,
-                                                                u18.global_position.z),
-                                                                u18.squad_id)),
-                                                        u18.brain_state(),
-                                                        u18.fidget_state_now(),
-                                                        u18.visible,
-                                                        u18.is_in_group("units")])
-                3:
-                        # پایان شمارش → بیرون آمدن + تکمیل تا ظرفیت اصلی دسته
-                        var g3: Dictionary = target_scene.garrison_state(_garrison_si)
-                        if g3.is_empty():
-                                var want := int(target_scene.SQUAD_DEFS[_garrison_si]["count"])
-                                var alive2: Array = target_scene._alive_members(_garrison_si)
-                                var all_out := true
-                                for u in alive2:
-                                        if not u.visible or u.garrisoned:
-                                                all_out = false
-                                _check("squad_replenished_to_full",
-                                                alive2.size() == want and all_out,
-                                                "%d/%d out=%s" % [alive2.size(), want, all_out])
-                                target_scene.garrison_duration \
-                                                = GameConstants.LOOT_DURATION_SECONDS
+                        # دسته ۰ به مقصدِ تازه می‌رسد (تا ۲۰ ثانیه)
+                        var arrived18 := 0
+                        for u18 in target_scene.squads[0]:
+                                if is_instance_valid(u18) \
+                                                and (u18 as UnitBase).is_arrived():
+                                        arrived18 += 1
+                        if arrived18 >= maxi(1, target_scene.squads[0].size() - 1) \
+                                        or (_t - _sub_t) > 20.0:
+                                _check("squad0_reaches_new_dest",
+                                                arrived18 >= maxi(1,
+                                                target_scene.squads[0].size() - 1),
+                                                "%d/%d (t=%.1f)" % [arrived18,
+                                                target_scene.squads[0].size(),
+                                                _t - _sub_t])
+                                _phase = 19
                                 _sub = 0
                                 _sub_t = _t
-                                _phase = 19
-                        elif (_t - _sub_t) > 12.0:
-                                _check("squad_replenished_to_full", false, "timeout inside")
-                                target_scene.garrison_duration \
-                                                = GameConstants.LOOT_DURATION_SECONDS
-                                _sub = 0
-                                _sub_t = _t
-                                _phase = 19
 
 
-# ---------------- فاز ۱۹: ناوگان چندقایقی + لمس + باخت (گام ۶R2) ----------------
+# ---------------- فاز ۱۹: موج‌های پیاده + چرخشِ پایدار (گام ۶R۲۵) ----------------
 
 func _phase19_fleet_touch_gameover() -> void:
         match _sub:
                 0:
-                        # — گام ۶R4: ۵ دسته + شمشیرزن قوی‌تر + قایقِ کند + بلوک
-                        #   مستطیلی با پرتو نور + دشواری صعودی —
+                        # — گام ۶R۴: ۵ دسته + دشواری صعودی — بدونِ قایق (۶R۲۵) —
                         _check("squads_expanded_to_five", target_scene.squads.size() == 5,
                                         "%d" % target_scene.squads.size())
                         var dposts := {}
@@ -2648,11 +2489,9 @@ func _phase19_fleet_touch_gameover() -> void:
                                         "%d posts" % dposts.size())
                         _check("immortal_hp_buffed", GameConstants.PLAYER_HP_IMMORTAL == 6,
                                         "%d" % GameConstants.PLAYER_HP_IMMORTAL)
-                        _check("boats_slowed_for_planning",
-                                        GameConstants.BOAT_CRUISE_SPEED <= 3.0 \
-                                        and GameConstants.BOAT_SPEED <= 1.6,
-                                        "cruise=%.1f dock=%.1f" % [GameConstants.BOAT_CRUISE_SPEED,
-                                        GameConstants.BOAT_SPEED])
+                        _check("land_only_mode_active",
+                                        target_scene.director.land_only,
+                                        "land_only=%s" % str(target_scene.director.land_only))
                         var a0: Dictionary = target_scene.director.ascend_spec(0)
                         _check("ascend_first_wave_small_pure",
                                         int(a0["size"]) == 4 and int(a0["comp"]["heavy"]) == 0
@@ -2664,14 +2503,12 @@ func _phase19_fleet_touch_gameover() -> void:
                                         "solo→2")
                         var ccg: int = target_scene.cmd_grid.cell_count
                         _check("command_cells_exist", ccg > 0, "%d" % ccg)
-                        # — گام ۶R6: بلوک‌های ورونویِ نامنظم — پوششِ کاملِ بدون شکاف،
-                        #   خانه در یک بلوک، سربازِ آیدل داخل بلوکِ خودش —
+                        # — گام ۶R6: بلوک‌های ورونویِ نامنظم — پوششِ کاملِ بدون شکاف —
                         _check("command_blocks_built",
                                         target_scene.cmd_grid.beam_instance_count() == ccg,
                                         "blocks=%d count=%d" % [
                                         target_scene.cmd_grid.beam_instance_count(), ccg])
-                        # گام ۶R۱۵ — پدها «بخشی از زمین»‌اند (مثل مرجع): همیشه
-                        # نمایان — در idle، در حالتِ فرمان و بعد از لغوِ انتخاب
+                        # گام ۶R۱۵ — پدها «بخشی از زمین»‌اند (مثل مرجع): همیشه نمایان
                         target_scene._deselect()
                         _check("pads_visible_in_idle",
                                         target_scene.cmd_grid.tiles_visible())
@@ -2686,8 +2523,6 @@ func _phase19_fleet_touch_gameover() -> void:
                                         break
                         if sel_si >= 0:
                                 target_scene._select_squad(sel_si)
-                        # اگر هیچ دسته‌ی قابل‌انتخابی نمانده یا بازی تمام شده
-                        # (خانه‌ی یگانه سوخته — وضعیتِ مشروع با ۱ خانه)، نرم رد می‌شود
                         _check("pads_visible_in_command_mode",
                                         sel_si < 0 or target_scene.game_over
                                         or (target_scene.cmd_grid.tiles_visible()
@@ -2699,8 +2534,6 @@ func _phase19_fleet_touch_gameover() -> void:
                         target_scene._deselect()
                         _check("pads_still_visible_after_deselect",
                                         target_scene.cmd_grid.tiles_visible())
-                        # گام ۶R۱۲ — پدهای بیضیِ مجزا (زبانِ اسکرین‌شات): پوششِ کاملِ
-                        # زمین دیگر هدفِ طراحی نیست؛ چکِ تازه = پوششِ معقولِ خشکی
                         var navw: NavGrid = PathService.nav
                         var covered := 0
                         var walk_n := 0
@@ -2716,7 +2549,6 @@ func _phase19_fleet_touch_gameover() -> void:
                         _check("pads_cover_reasonable_share",
                                         walk_n == 0 or covered * 100 >= walk_n * 40,
                                         "%d/%d" % [covered, walk_n])
-                        # پد برای پستِ هر دسته (جای آرایش) — حداقل ۴ از ۵
                         var posts_ok := 0
                         for post in target_scene._squad_posts:
                                 if bool(target_scene.cmd_grid.block_at_world(post).get("ok", false)):
@@ -2724,25 +2556,10 @@ func _phase19_fleet_touch_gameover() -> void:
                         _check("pads_on_squad_posts",
                                         posts_ok >= target_scene._squad_posts.size() - 1,
                                         "%d/%d" % [posts_ok, target_scene._squad_posts.size()])
-                        # خانه دقیقاً وسطِ بلوکِ خودش + بلوکش «اشغالِ دائمی» است
-                        var house_on_block := true
-                        var house_dbg := ""
-                        for hp3 in target_scene.props.house_positions:
-                                var hxz3 := Vector2(hp3.x, hp3.z)
-                                var hi3: Dictionary = target_scene.cmd_grid \
-                                                .block_at_world(hxz3)
-                                if not bool(hi3.get("ok", false)):
-                                        house_on_block = false
-                                        house_dbg = "no block @ %s" % hxz3
-                                        break
-                                if target_scene.cmd_grid.owner_of(int(hi3["index"])) != -1:
-                                        house_on_block = false
-                                        house_dbg = "not occupied @ %s" % hxz3
-                                        break
-                        _check("houses_own_one_block", house_on_block, house_dbg)
-                        # گام ۶R۷ — خواسته‌ی کاربر (تصویر مرجع): «همه در یک بلوک
-                        # جمع شوند» — سربازانِ آیدلِ هر دسته در خوشه‌ی متراکم دورِ
-                        # فرمانده‌اند؛ بیشترین فاصله‌ی زوجی ≤ قطرِ یک بلوک (~۲٫۲m)
+                        # گام ۶R۲۵ — خانه‌ای نیست تا بلوکی را «اشغالِ دائمی» کند
+                        _check("no_house_blocks",
+                                        target_scene.props.house_positions.is_empty())
+                        # گام ۶R۷/M2 — خوشه‌ی متراکمِ آیدل در بلوکِ خودش
                         var packed := 0
                         var idle_n := 0
                         var idle_dbg := ""
@@ -2768,9 +2585,6 @@ func _phase19_fleet_touch_gameover() -> void:
                                         packed += mem7.size()
                                 else:
                                         idle_dbg += " s%d=%.1f" % [si7, mp7]
-                        # گام ۶R۱۲/M2 — آستانه ۲٫۲→۳٫۶: با بلوکِ ۱۰ نفره + بازچینیِ
-                        # پس از تلفاتِ نبردِ ساحل، یک سربازِ موقتاً جابه‌جا تا ~۳٫۵m
-                        # طبیعی است؛ بلوکِ آرامِ سالم max-pair ~۱٫۲m دارد
                         _check("idle_squads_packed_dense",
                                         idle_n == 0 or packed * 10 >= idle_n * 8,
                                         "%d/%d%s" % [packed, idle_n, idle_dbg])
@@ -2780,9 +2594,7 @@ func _phase19_fleet_touch_gameover() -> void:
                         target_scene.cmd_grid.set_command_mode(false)
                         _check("command_mode_flag_off",
                                         not target_scene.cmd_grid.is_command_mode())
-                        # گام ۶R10 — زبان انتخاب Bad North (اسکرین‌شات‌های کاربر):
-                        # انتخاب = فیروزه‌ایِ یکدست (بدنه + پرچم + حلقه)؛
-                        # لغو = بازگشت دقیق به رنگ منطقیِ قبل
+                        # زبانِ انتخابِ Bad North (۶R10/۱۵)
                         var sel_u10: UnitBase = null
                         for u20 in target_scene.squads[0]:
                                 if is_instance_valid(u20) and not u20.is_dead() \
@@ -2791,8 +2603,6 @@ func _phase19_fleet_touch_gameover() -> void:
                                         break
                         if sel_u10 != null:
                                 sel_u10.set_selected_ring(true)
-                                # گام ۶R۱۵ — انتخاب = گرادیانِ کاملِ رنگِ پرچمِ خودِ
-                                # دسته (amt=۱ + اشباع)؛ لغو = رنگِ طبیعی (amt=۰)
                                 var on_ok10: bool = sel_u10.is_ring_visible() \
                                                 and sel_u10.body_shader_color() \
                                                 == sel_u10.selection_color() \
@@ -2802,227 +2612,98 @@ func _phase19_fleet_touch_gameover() -> void:
                                                 and sel_u10.model_tint_amount() <= 0.01
                                 _check("selection_tints_bad_north",
                                                 on_ok10 and off_ok10)
-                        # — دسته‌ی ۳ نفره: بارِ پیش‌فرض = سبک×۲ + پرتاب‌گر×۱ →
-                        #   دو قایق پاروییِ همگن (هر قایق یک نوع — بازخورد کاربر)
+                        # — گام ۶R۲۵: موج‌های پیاده — ترکیب‌ها همان، بدونِ قایق —
                         _fleet_g3 = target_scene.director.spawn_wave(
                                         {"size": 3, "force": true})
-                        _check("rowboat_wave_spawned", _fleet_g3 >= 0)
+                        _check("land_wave3_spawned", _fleet_g3 >= 0)
                         if _fleet_g3 >= 0:
-                                var b3: Array = target_scene.director.group_boats(_fleet_g3)
-                                _check("rowboat_fleet_two_boats", b3.size() == 2,
-                                                "%d boats" % b3.size())
-                                var all_row := b3.size() > 0
-                                var no_sail := true
-                                var riders_ok := true
-                                var single_kind := true
-                                for e3 in target_scene.director.fleet_entries(_fleet_g3):
-                                        var bt: EnemyBoat = e3["boat"]
-                                        if bt.type_name() != "rowboat":
-                                                all_row = false
-                                        if bt.has_sail():
-                                                no_sail = false
-                                        var pl: Dictionary = e3["payload"]
-                                        if pl.size() != 1:
-                                                single_kind = false
-                                        var tot := 0
-                                        for k in pl:
-                                                tot += int(pl[k])
-                                        if bt.rider_count() != tot:
-                                                riders_ok = false
-                                _check("rowboat_fleet_all_rowboats", all_row)
-                                _check("rowboats_have_no_sail", no_sail)
-                                _check("rowboat_cargo_single_kind", single_kind)
-                                _check("rowboat_riders_on_deck", riders_ok)
-                        # — دسته‌ی ۸ نفره: سبک×۴ + سنگین×۱ + پرتاب‌گر×۳ →
-                        #   گالی(سبک) + دو قایق پارویی — هیچ قایقی مخلوط نیست
+                                _check("land_wave3_count",
+                                                target_scene.director.raiders_of(_fleet_g3).size() == 3,
+                                                "%d" % target_scene.director.raiders_of(_fleet_g3).size())
                         _fleet_g8 = target_scene.director.spawn_wave(
-                                        {"size": 8, "force": true,
-                                        "near": _far_shore_hint()})
-                        _check("mixed8_wave_spawned", _fleet_g8 >= 0)
+                                        {"size": 8, "force": true, "near": _far_shore_hint()})
+                        _check("land_wave8_spawned", _fleet_g8 >= 0)
                         if _fleet_g8 >= 0:
-                                var b8: Array = target_scene.director.group_boats(_fleet_g8)
-                                _check("mixed8_fleet_three_boats", b8.size() == 3,
-                                                "%d boats" % b8.size())
-                                var has_galley := false
-                                var no_sail8 := true
-                                var single8 := true
-                                var riders8 := 0
-                                var min_anchor_d := 1e9
-                                for i in b8.size():
-                                        var bt8: EnemyBoat = b8[i]
-                                        if bt8.type_name() == "galley":
-                                                has_galley = true
-                                        if bt8.has_sail():
-                                                no_sail8 = false
-                                        riders8 += bt8.rider_count()
-                                        for j in b8.size():
-                                                if j <= i:
-                                                        continue
-                                                var bj: EnemyBoat = b8[j]
-                                                var dd := Vector2(bt8.global_position.x,
-                                                                bt8.global_position.z).distance_to(
-                                                                Vector2(bj.global_position.x,
-                                                                bj.global_position.z))
-                                                min_anchor_d = minf(min_anchor_d, dd)
-                                for e8 in target_scene.director.fleet_entries(_fleet_g8):
-                                        if (e8["payload"] as Dictionary).size() != 1:
-                                                single8 = false
-                                _check("mixed8_has_galley", has_galley)
-                                _check("mixed8_all_no_sail", no_sail8)
-                                _check("mixed8_cargo_single_kind", single8)
-                                _check("mixed8_riders_on_deck_total", riders8 == 8,
-                                                "%d" % riders8)
-                                _check("fleet_anchors_spaced", min_anchor_d >= 2.4,
-                                                "%.2f m" % min_anchor_d)
-                        # — گروهِ کاملاً سنگین ×۸ → یک کشتی جنگیِ بی‌بادبان
+                                var r8: Array = target_scene.director.raiders_of(_fleet_g8)
+                                _check("land_wave8_count", r8.size() == 8, "%d" % r8.size())
+                                var on_land8 := true
+                                var nav8: NavGrid = PathService.nav
+                                for e8b in r8:
+                                        if is_instance_valid(e8b) and not nav8.is_walkable(
+                                                        nav8.world_to_cell(_xz(e8b))):
+                                                on_land8 = false
+                                _check("land_wave8_all_on_land", on_land8)
                         _fleet_gw = target_scene.director.spawn_wave(
                                         {"size": 8, "force": true,
                                         "comp": {"light": 0, "heavy": 8, "peltast": 0},
                                         "near": _far_shore_hint()})
-                        _check("warship_wave_spawned", _fleet_gw >= 0)
+                        _check("land_heavy8_spawned", _fleet_gw >= 0)
                         if _fleet_gw >= 0:
-                                var bw: Array = target_scene.director.group_boats(_fleet_gw)
-                                _check("warship_single_boat", bw.size() == 1,
-                                                "%d boats" % bw.size())
-                                if bw.size() == 1:
-                                        var w0: EnemyBoat = bw[0]
-                                        _check("warship_is_warship",
-                                                        w0.type_name() == "warship",
-                                                        w0.type_name())
-                                        _check("warship_has_no_sail",
-                                                        not w0.has_sail())
-                                        _check("warship_riders_on_deck",
-                                                        w0.rider_count() == 8,
-                                                        "%d" % w0.rider_count())
-                                        _check("warship_cargo_heavy_only",
-                                                        w0.cargo_kind == "heavy",
-                                                        w0.cargo_kind)
+                                var rw: Array = target_scene.director.raiders_of(_fleet_gw)
+                                _check("land_heavy8_count", rw.size() == 8, "%d" % rw.size())
+                                var all_heavy := rw.size() > 0
+                                for e9 in rw:
+                                        if not (e9 is HopliteHeavy):
+                                                all_heavy = false
+                                _check("land_heavy8_all_heavy", all_heavy)
                         _sub = 1
                         _sub_t = _t
                 1:
-                        # پیاده‌شدن هر سه ناوگان (مهلت ۴۶s — گام ۶R4 قایق‌ها کندترند)
-                        # بر اساس «بارِ پیاده‌شده» نه زنده‌ها (نبردِ هم‌زمان نباید
-                        # شمارش را کم کند — ۶R3)
-                        var lc3: int = target_scene.director.group_landed_cargo(_fleet_g3)
-                        var lc8: int = target_scene.director.group_landed_cargo(_fleet_g8)
-                        var lcw: int = target_scene.director.group_landed_cargo(_fleet_gw)
-                        # r24 — دیوار ۴۶→۷۰s: قایق‌های کند (BOAT_SPEED 1.4) روی
-                        # بعضی seedهای زمینِ تک‌سطحی دیرتر پهلو می‌گیرند؛ قصدِ
-                        # چک «سرانجام پیاده می‌شوند» است نه «دقیقاً زیر ۴۶s»
-                        if (lc3 >= 3 and lc8 >= 8 and lcw >= 8) or (_t - _sub_t) > 70.0:
-                                _check("all_fleets_landed",
-                                                lc3 >= 3 and lc8 >= 8 and lcw >= 8,
-                                                "g3=%d g8=%d gw=%d" % [lc3, lc8, lcw])
-                                _sub = 2
-                                _sub_t = _t
-                2:
-                        # گام ۶R3 — پیاده‌شدن واقعی، مستقل از زمانِ دیوار:
-                        # مهاجمی که وادِ خودش را تمام کرده (disembark_target بی‌نهایت
-                        # شد + _wade_t > 0) و روی خشکی ایستاده = «پیاده شده».
-                        # (زمانِ دیوار درست نبود: sub 2 وقتی شروع می‌شود که هر سه
-                        # ناوگان پیاده باشند — مهاجمانِ ناوگانِ زودتر تا آن موقع
-                        # به خانه رسیده بودند)
-                        var navg: NavGrid = PathService.nav
-                        var bw2: Array = target_scene.director.group_boats(_fleet_gw)
-                        for e2 in target_scene.director.raiders_of(_fleet_gw):
-                                if not is_instance_valid(e2) or e2.is_dead():
+                        # گام ۶R۲۵ — هیچ مهاجمی «سوارِ قایق» یا «وادکننده» نیست
+                        var wading := 0
+                        var riding := 0
+                        for ew in get_tree().get_nodes_in_group("hostiles"):
+                                var en2 := ew as EnemyBase
+                                if en2 == null or not is_instance_valid(en2) \
+                                                or en2.is_dead():
                                         continue
-                                if _dis_latched.has(e2.get_instance_id()):
-                                        continue
-                                if e2.disembark_target != Vector2.INF \
-                                                or e2._wade_t <= 0.0 \
-                                                or e2.last_disembark_target == Vector2.INF:
-                                        continue
-                                # «پیاده‌شدن کنار همان قایق» = مقصدِ اختصاصیِ هر مهاجم
-                                # خودِ ساختار داده‌ها ≤ ۴.۵m از «لنگرِ» قایقِ خودش است
-                                # (لنگر ثابت است — گام ۶R6: قایق بعد از تخلیه دور می‌شود
-                                # و مقایسه با موقعیتِ «فعلی» آن غلط می‌شد)
-                                var bd2 := 1e9
-                                for bt2 in bw2:
-                                        bd2 = minf(bd2, e2.last_disembark_target.distance_to(
-                                                        Vector2(bt2.anchor_point.x,
-                                                        bt2.anchor_point.z)))
-                                if bd2 <= 4.5:
-                                        _dis_latched[e2.get_instance_id()] = true
-                                        _dis_near += 1
-                        var live := 0
-                        var latched := 0
-                        var dbg_d := ""
-                        for e2 in target_scene.director.raiders_of(_fleet_gw):
-                                if not is_instance_valid(e2) or e2.is_dead():
-                                        continue
-                                live += 1
-                                if _dis_latched.has(e2.get_instance_id()):
-                                        latched += 1
-                                else:
-                                        var ep2: Vector2 = Vector2(
-                                                        e2.global_position.x,
-                                                        e2.global_position.z)
-                                        dbg_d += " [dt=%s wade=%.1f last=%s pos=(%.1f,%.1f)]" % [
-                                                        "INF" if e2.disembark_target
-                                                        == Vector2.INF else "set",
-                                                        e2._wade_t,
-                                                        "INF" if e2.last_disembark_target
-                                                        == Vector2.INF else "set",
-                                                        ep2.x, ep2.y]
-                        if (live > 0 and latched == live) or (_t - _sub_t) > 20.0:
-                                _check("raiders_disembarked_on_land", latched == live,
-                                                "%d/%d%s" % [latched, live, dbg_d])
-                                _check("raiders_disembark_near_boat",
-                                                _dis_near >= mini(live, 6),
-                                                "%d/%d" % [_dis_near, live])
-                                _dis_latched.clear()
-                                _dis_near = 0
-                                target_scene.director.kill_all_raiders()
-                                _sub = 3
-                                _sub_t = _t
+                                if en2.riding:
+                                        riding += 1
+                                if en2.disembark_target != Vector2.INF or en2._wading:
+                                        wading += 1
+                        _check("no_riding_no_wading_anywhere", riding == 0 and wading == 0,
+                                        "riding=%d wading=%d" % [riding, wading])
+                        _check("no_boats_ever_spawned",
+                                        get_tree().get_nodes_in_group("enemy_boats").is_empty())
+                        target_scene.director.kill_all_raiders()
+                        _sub = 3
+                        _sub_t = _t
                 3:
-                        # گام ۶R9 — قایق‌ها بعد از تخلیه «لنگر می‌مانند» (پارک دائمی —
-                        # بازخورد کاربر: «هر چند سربازهایش کشته بشن لب ساحل بمونن»).
-                        # فقط ۲.۵ ثانیه سکون برای بستنِ گروه‌ها
+                        # سکونِ ۲٫۵ ثانیه → گروه‌ها بسته می‌شوند؛ بعد چرخشِ پایدار
                         if _t - _sub_t >= 2.5:
-                                var parked := 0
-                                var sailing := 0
-                                var dbg_boats := ""
-                                for bt4 in get_tree().get_nodes_in_group("enemy_boats"):
-                                        var bb4 := bt4 as EnemyBoat
-                                        if bb4 == null or not is_instance_valid(bb4):
-                                                continue
-                                        var d4: float = Vector2(bb4.global_position.x,
-                                                        bb4.global_position.z).distance_to(
-                                                        Vector2(bb4.anchor_point.x,
-                                                        bb4.anchor_point.z))
-                                        dbg_boats += " [st=%d d=%.1f]" % [
-                                                        int(bb4.state), d4]
-                                        if bb4.state == EnemyBoat.BoatState.PARKED:
-                                                # فاصله از لنگر مهم نیست — جداسازیِ قایق‌ها
-                                                # حینِ پهلوگیری جابه‌جاییِ ۲ متریِ قانونی می‌دهد
-                                                parked += 1
-                                        else:
-                                                sailing += 1
-                                _check("boats_parked_after_drop",
-                                                parked >= 3 and sailing == 0,
-                                                "parked=%d moving=%d (t=%.1f)%s" % [
-                                                parked, sailing, _t - _sub_t,
-                                                dbg_boats])
                                 _check("fleet_groups_cleaned",
                                                 target_scene.director.groups_count() == 0,
                                                 "%d groups" % target_scene.director.groups_count())
-                                # — گام ۶R۱۳: کشیدنِ افقی = پنِ دوربین (نه چرخش) —
-                                # (روی اندروید، لمس با emulate_mouse_from_touch
-                                # به همین دنباله‌ی رویداد تبدیل می‌شود)
+                                # کشیدنِ چپ = چرخشِ صحنه؛ لوکیشنِ سربازها ثابت (۶R۲۵)
                                 _drag_yaw0 = target_scene._yaw
                                 _drag_pan_h0 = target_scene._pan_h_target
+                                _drag_pan_v0 = target_scene._pan_target
+                                _drag_units_before.clear()
+                                for ud3 in _units():
+                                        if is_instance_valid(ud3):
+                                                _drag_units_before.append(ud3.global_position)
                                 _push_left_drag()
+                                # بررسیِ هم‌زمان (push_input سنکرون — بدونِ گذرِ فریم)
+                                var dyaw19 := absf(wrapf(deg_to_rad(target_scene._yaw
+                                                                - _drag_yaw0), -PI, PI))
+                                var dpanh19 := absf(target_scene._pan_h_target - _drag_pan_h0)
+                                var moved19 := 0
+                                var idx19 := 0
+                                for ud4 in _units():
+                                        if is_instance_valid(ud4) \
+                                                        and idx19 < _drag_units_before.size() \
+                                                        and ud4.global_position.distance_to(
+                                                                _drag_units_before[idx19]) > 0.0:
+                                                moved19 += 1
+                                        idx19 += 1
+                                _check("drag_rotates_scene_stable_units",
+                                                rad_to_deg(dyaw19) > 5.0 and moved19 == 0
+                                                and dpanh19 < 1e-6,
+                                                "yaw=%.1f moved=%d dh=%.3f" % [rad_to_deg(dyaw19),
+                                                moved19, dpanh19])
                                 _sub = 4
                                 _sub_t = _t
                 4:
-                        var dyaw := absf(wrapf(deg_to_rad(target_scene._yaw
-                                                        - _drag_yaw0), -PI, PI))
-                        var dpanh := absf(target_scene._pan_h_target - _drag_pan_h0)
-                        _check("camera_pans_with_left_drag",
-                                        dpanh > 0.3 and rad_to_deg(dyaw) < 1.0,
-                                        "dh=%.2f yaw=%.1f deg" % [dpanh, rad_to_deg(dyaw)])
                         target_scene._pan_h_target = 0.0
                         target_scene._pan_h = 0.0
                         if target_scene._cam_pan != null:
@@ -3042,28 +2723,23 @@ func _phase19_fleet_touch_gameover() -> void:
                                 var axz: Vector2 = target_scene.director.group_anchor(gd)
                                 var dv := axz - center
                                 _div_angles.append(rad_to_deg(atan2(dv.y, dv.x)))
+                        _land_nav = PathService.nav
+                        _land_violations = 0
                         _sub = 5
                         _sub_t = _t
                 5:
-                        # نمونه‌برداری فاصله‌ی قایق‌ها حین شنا (۲.۵s) — گام ۶R3
+                        # نمونه‌برداری ۲٫۵s: مهاجمانِ پیاده همه و همیشه روی خشکی
                         for gd in [_fleet_d1, _fleet_d2, _fleet_d3]:
                                 if gd < 0:
                                         continue
-                                var bb: Array = target_scene.director.group_boats(gd)
-                                for i in bb.size():
-                                        for j in bb.size():
-                                                if j <= i:
-                                                        continue
-                                                var bi: EnemyBoat = bb[i]
-                                                var bj: EnemyBoat = bb[j]
-                                                var dd2 := Vector2(bi.global_position.x,
-                                                                bi.global_position.z).distance_to(
-                                                                Vector2(bj.global_position.x,
-                                                                bj.global_position.z))
-                                                _sep_min = minf(_sep_min, dd2)
+                                for e5 in target_scene.director.raiders_of(gd):
+                                        if is_instance_valid(e5) and not e5.is_dead():
+                                                var c5 := _land_nav.world_to_cell(_xz(e5))
+                                                if not _land_nav.is_walkable(c5):
+                                                        _land_violations += 1
                         if _t - _sub_t >= 2.5:
-                                _check("boats_never_overlap_while_sailing",
-                                                _sep_min >= 1.2, "%.2f m" % _sep_min)
+                                _check("land_waves_stay_on_land", _land_violations == 0,
+                                                "%d violations" % _land_violations)
                                 # تنوع جهت: هر فرود ≥ ۴۰° از قبلی‌ها دور؛ پهنای کل ≥ ۱۰۰°
                                 var ok_pairwise := _div_angles.size() == 3
                                 var min_diff := 360.0
@@ -3084,23 +2760,19 @@ func _phase19_fleet_touch_gameover() -> void:
                                 _check("landings_spread_wide", max_diff >= 100.0,
                                                 "%.0f" % max_diff)
                                 target_scene.director.kill_all_raiders()
-                                # — باخت: همه‌ی خانه‌ها آتش می‌گیرند → بعد از فروریختن، باخت
-                                for b in target_scene.props.buildings:
-                                        if is_instance_valid(b) and not b.burned:
-                                                b.ignite()
+                                # گام ۶R۲۵ — خانه‌ای برای سوزاندن نیست؛ «باختِ سوختن»
+                                # دیگر در بازی وجود ندارد
                                 _sub = 7
                                 _sub_t = _t
                 7:
-                        if target_scene.game_over or (_t - _sub_t) > 25.0:
-                                _check("game_over_when_all_houses_burned",
-                                                target_scene.game_over,
-                                                "t=%.1f" % (_t - _sub_t))
-                                _check("game_over_panel_visible",
-                                                target_scene._game_over_panel != null
-                                                and target_scene._game_over_panel.visible)
-                                _check("auto_waves_stopped_on_game_over",
-                                                not target_scene.director.auto_waves)
-                                # پاکسازی + جزیره‌ی تازه → باخت ریست می‌شود
+                        if _t - _sub_t >= 1.5:
+                                _check("no_houses_no_game_over",
+                                                target_scene.props.buildings.is_empty()
+                                                and not target_scene.game_over)
+                                _check("game_over_panel_hidden",
+                                                target_scene._game_over_panel == null
+                                                or not target_scene._game_over_panel.visible)
+                                # پاکسازی + جزیره‌ی تازه
                                 target_scene.director.clear_all()
                                 target_scene.regenerate(777777)
                                 _sub = 8
@@ -3109,6 +2781,9 @@ func _phase19_fleet_touch_gameover() -> void:
                         if _t - _sub_t >= 1.0:
                                 _check("regen_resets_game_over",
                                                 not target_scene.game_over)
+                                _check("regen_clears_groups",
+                                                target_scene.director.groups_count() == 0,
+                                                "%d" % target_scene.director.groups_count())
                                 _phase = 20
                                 _sub = 0
                                 _sub_t = _t
@@ -3295,10 +2970,11 @@ func _phase20_battle_scene() -> void:
                                 _check("p20_ghost_blood_stains",
                                                 get_tree().get_nodes_in_group("blood_stain").size() >= 2,
                                                 "%d stains" % get_tree().get_nodes_in_group("blood_stain").size())
-                                # قایق‌ها پارک مانده‌اند حتی با مرگ همه‌ی سربازان
-                                var parked := _parked_boats_count()
-                                _check("p20_boats_parked_despite_deaths", parked >= 1,
-                                                "%d parked" % parked)
+                                # گام ۶R۲۵ — قایقی هرگز نبود؛ دشمنِ پیاده روی خشکی مرد
+                                _check("p20_no_boats_in_scene",
+                                                _parked_boats_count() == 0
+                                                and get_tree().get_nodes_in_group("enemy_boats").is_empty(),
+                                                "boats=%d" % _parked_boats_count())
                                 # گام M3 — فاز ۲۲: چرخه‌ی برد/باخت + خزانه
                                 _phase = 22
                                 _sub = 0
